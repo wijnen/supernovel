@@ -350,8 +350,14 @@ class Admin_Connection: # {{{
 		if self.user is None:
 			return
 		debug(3, 'disconnecting admin {}'.format(self.user['name']))
-		users.pop((self.user['name'].lower(), 'admin'))
-		admins.pop(self.user['name'].lower())
+		try:
+			users.pop((self.user['name'].lower(), 'admin'))
+		except:
+			pass
+		try:
+			admins.pop(self.user['name'].lower())
+		except:
+			pass
 	# }}}
 	def list_groups(self): # {{{
 		'''Show selection of groups to choose.'''
@@ -633,7 +639,10 @@ class Connection: # {{{
 			return
 		debug(3, 'disconnecting {}:{}'.format(self.user['name'], self.user['group']))
 		save_user(self.user)
-		users.pop((self.user['name'].lower(), self.user['group'].lower()))
+		try:
+			users.pop((self.user['name'].lower(), self.user['group'].lower()))
+		except:
+			pass
 		refresh_admins()
 	# }}}
 # }}}
