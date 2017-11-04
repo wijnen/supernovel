@@ -1,0 +1,5 @@
+group: a collection of students; "class" would be more appropriate, but is a reserved word.
+section: a collection of videos and questions, linked together.
+question: one question in a section. Videos are also considered questions in most cases.
+student: a user of the program.
+admin: the manager of the system. Has access to all student information.

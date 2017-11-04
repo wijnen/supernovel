@@ -1,0 +1,12 @@
+#login, #video, #question {
+	position: absolute;
+	left: 0px;
+	top: 0px;
+	right: 0px;
+	padding: 1em 1em;
+	margin: 1em 1em;
+}
+
+button {
+	margin: 2em;
+}

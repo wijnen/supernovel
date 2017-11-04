@@ -1,0 +1,30 @@
+#commentaar
+label naam
+goto label
+$ python-code
+video filename
+'''Page text
+which must be multiple lines
+long.'''
+'single line string'
+"Or like this"
+"""Multiple strings after each other are treated as a longer string
+This also works if there are other commands in between.
+All strings are used when a video or question is encountered, or the input ends."""
+number variable		-> float
+short variable		-> str
+long variable		-> str
+choice variable/option1/option2/option3		-> int		# / may be any non-identifier character.
+unit variable		-> (float, str)
+while expr:
+	code
+	'''Strings in an indented block
+	must also be indented.'''
+	continue
+	break
+if expr:
+	code
+elif expr:
+	code
+else:
+	code

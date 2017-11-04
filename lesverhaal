@@ -1,0 +1,648 @@
+#!/usr/bin/python3
+
+# Imports and config. {{{
+import sys
+import os
+import re
+import crypt
+import fhs
+import websocketd
+from markdown import markdown
+from websocketd import log
+config = fhs.init({'data': '.', 'port': '8000', 'admin-port': '8001', 'loglimit': 4, 'content': 'content', 'lazysave': False})
+# }}}
+
+''' Log priorities: {{{
+		0: Critical (system panic)
+		1: Important (system oops)
+		2: Normal (communication errors)
+		3: Minor (connections made or lost)
+		4: Debug
+}}} '''
+
+def debug(priority, message):
+	if priority <= config['loglimit']:
+		log(message)
+
+# User management. {{{
+users = {}	# including admins.
+admins = {}
+
+def mangle(src): # {{{
+	if isinstance(src, int):
+		return 'i{}'.format(src)
+	if isinstance(src, float):
+		return 'f{}'.format(src)
+	if isinstance(src, tuple):
+		return 'u{}/{}'.format(src[0], src[1].replace('\\', '\\\\').replace(',', '\;').replace('\n', '\\n'))
+	try:
+		return 's' + src.replace('\\', '\\\\').replace(',', '\;').replace('\n', '\\n')
+	except:
+		log('Error: unable to mangle {}'.format(repr(src)))
+		return 's' + repr(src).replace('\\', '\\\\').replace(',', '\;').replace('\n', '\\n')
+# }}}
+
+def unmangle(src): # {{{
+	if src[0] == 'i':
+		return int(src[1:])
+	if src[0] == 'f':
+		return float(src[1:])
+	if src[0] == 'u':
+		if src == 'u()':
+			return (None, None)
+		r = re.match(r'u(.*?)/(.*)$', src)
+		if not r:
+			log('Error unmangling unit: {}'.format(src))
+			return (None, None)
+		return (float(r.group(1)), r.group(2).replace('\\n', '\n').replace('\;', ',').replace('\\\\', '\\'))
+	if src[0] == 's':
+		return src[1:].replace('\\n', '\n').replace('\;', ',').replace('\\\\', '\\')
+	log('Error unmangling: invalid first character of {}'.format(repr(src)))
+	return None
+# }}}
+
+def load_user(name, group): # {{{
+	if (name.lower(), group.lower()) in users:
+		return users[(name.lower(), group.lower())], None
+	if not os.path.exists(os.path.join(config['data'], 'users', group.lower())):
+		debug(2, 'load_user called for nonexistent group {}:{}'.format(name, group))
+		return None, None
+	if not os.path.exists(os.path.join(config['data'], 'users', group.lower(), name.lower())):
+		debug(2, 'load_user called for nonexistent user {}:{}'.format(name, group))
+		return None, None
+	ret = {'name': name, 'group': group.lower(), 'connection': None, 'password': None, 'nosave': False}
+	answers = {}
+	for ln in open(os.path.join(config['data'], 'users', group.lower(), name.lower())):
+		if ln.strip() == '':
+			continue
+		key, value = ln.split('=', 1)
+		if key.startswith('answer:'):
+			a, s, q = key.split(':', 2)
+			q = tuple(int(x) for x in q.split(','))
+			if s not in answers:
+				answers[s] = {}
+			answers[s][q] = [unmangle(a) for a in value.split(',')]
+			continue
+		ret[key] = value.rstrip('\n')
+	# Make sure name and group match file location.
+	if ret['name'].casefold() != name.casefold():
+		ret['name'] = name
+	if ret['group'].casefold() != group.casefold():
+		ret['group'] = group
+	return ret, answers
+# }}}
+
+def list_users(group): # {{{
+	path = os.path.join(config['data'], 'users', group.lower())
+	if not os.path.exists(path):
+		debug(2, 'list_users called for nonexistent group {}'.format(group))
+		return []
+	return [p for p in os.listdir(path) if p == p.lower() and not os.path.isdir(os.path.join(path, p))]
+# }}}
+
+def save_user(user): # {{{
+	'''Save user information to disk. user['connection'] is valid while this is called, but the connection may be closed.'''
+	with open(os.path.join(config['data'], 'users', user['group'].lower(), user['name'].lower()), 'w') as f:
+		for key in user:
+			if key == 'connection':
+				continue
+			f.write('{}={}\n'.format(key, user[key]))
+		# Record answers.
+		if not user['nosave']:
+			for s in user['connection'].answers:
+				section = user['connection'].answers[s]
+				for q in section:
+					question = section[q]
+					debug(4, repr((question, q)))
+					f.write('answer:{}:{}={}\n'.format(s, ','.join(str(i) for i in q), ','.join(mangle(a) for a in question)))
+# }}}
+
+def save_users(): # {{{
+	for user in users:
+		save_user(user)
+# }}}
+
+def refresh_admins(): # {{{
+	for a in admins:
+		admins[a].refresh()
+# }}}
+# }}}
+
+# Content management. {{{
+def content_list(group): # {{{
+	content_dir = os.path.join(config['data'], 'users', group.lower(), 'Content')
+	'''Get a list of available sections.'''
+	ret = [os.path.splitext(c)[0] for c in os.listdir(content_dir) if c.endswith('.script') and not os.path.isdir(os.path.join(content_dir, c))]
+	ret.sort()
+	return ret
+# }}}
+
+def get_content(group, section): # {{{
+	'''Get the program for a section.'''
+	content_dir = os.path.join(config['data'], 'users', group.lower(), 'Content')
+	with open(os.path.join(content_dir, section + '.script')) as f:
+		parts = []
+		stack = [parts]
+		istack = [None]
+		index = {}
+		labels = []
+		last_label = ''
+		in_string = False
+		for nr, ln in enumerate(f):
+			ln = ln.rstrip()
+			if in_string:
+				if ln[:istack[-1]].strip() != '':
+					log('{}: indentation error in string'.format(nr))
+				ln = ln[istack[-1]:]
+				if ln.endswith(in_string):
+					ln = ln[:-len(in_string)].rstrip()
+					in_string = False
+					if ln != '':
+						stack[-1][-1][2].append(ln)
+					continue
+				stack[-1][-1][2].append(ln)
+				continue
+			ln = ln.rstrip()
+			ilevel = len(ln) - len(ln.strip())
+			ln = ln.strip()
+			if ln.startswith('#') or ln == '':
+				continue
+			if istack[-1] is None:
+				istack[-1] = ilevel
+			while ilevel < istack[-1]:
+				istack.pop()
+				stack.pop()
+			if ilevel != istack[-1]:
+				log('{}: unexpected indentation'.format(nr))
+			if len(istack) >= 2 and istack[-2] is None:
+				istack[-2] = istack[-1]
+			if ln.strip().startswith("'''") or ln.strip().startswith('"""'):
+				in_string = ln[:3]
+				ln = ln[3:]
+				if ln.endswith(in_string):
+					ln = ln[:-len(in_string)].rstrip()
+					in_string = False
+					stack[-1].append(['text', None, ln])
+					continue
+				stack[-1].append(['text', None, []])
+				if ln != '':
+					stack[-1][-1][2].append(ln)
+				continue
+			r = re.match(r'(["\'])(.*)\1\s*$', ln)
+			if r:
+				stack[-1].append(['text', None, [r.group(2)]])
+				continue
+			r = re.match(r'style\s+(.+?)\s+(.+?)\s*$', ln)
+			if r:
+				stack[-1].append(['style', None, r.group(1), r.group(2)])
+				continue
+			r = re.match(r'label\s+(.+?)\s*$', ln)
+			if r:
+				# Labels are only allowed at top level.
+				if len(stack) != 1:
+					log('{}: labels are only allowed at top level'.format(nr))
+					continue
+				name = r.group(1)
+				if name.startswith('.'):
+					name = last_label + name
+				else:
+					last_label = name
+				index[name] = len(stack[-1])
+				stack[-1].append(['label', None, name]) # Label name is not used, but good for debugging.
+				continue
+			r = re.match(r'goto\s+(.+?)\s*$', ln)
+			if r:
+				name = r.group(1)
+				if name.startswith('.'):
+					name = last_label + name
+				stack[-1].append(['goto', None, 0]) # Label is filled in at end.
+				labels.append((name, stack[-1][-1]))
+				continue
+			r = re.match(r'if\s+(.+):$', ln)
+			if r:
+				stack[-1].append(['if', None, r.group(1), [], None])
+				stack.append(stack[-1][-1][3])
+				istack.append(None)
+				continue
+			r = re.match(r'elif\s+(.+):$', ln)
+			if r:
+				if stack[-1][-1][0] != 'if':
+					log('{}: elif without if'.format(nr))
+					continue
+				if stack[-1][-1][4] is not None:
+					log('{}: elif after else'.format(nr))
+					continue
+				stack[-1][-1][4] = []
+				stack.append(stack[-1][-1][4])
+				istack.append(None)
+				stack[-1].append(['if', None, r.group(1), [], None])
+				stack.append(stack[-1][-1][3])
+				istack.append(None)
+				continue
+			r = re.match(r'else\s*:$', ln)
+			if r:
+				if stack[-1][-1][0] != 'if':
+					log('{}: else without if'.format(nr))
+					continue
+				if stack[-1][-1][4] is not None:
+					log('{}: else after else'.format(nr))
+					continue
+				stack[-1][-1][4] = []
+				stack.append(stack[-1][-1][4])
+				istack.append(None)
+				continue
+			r = re.match(r'while\s+(.+):$', ln)
+			if r:
+				stack[-1].append(['while', None, r.group(1), []])
+				stack.append(stack[-1][-1][3])
+				istack.append(None)
+				continue
+			if ln in ('continue', 'break'):
+				stack[-1].append([ln, None])
+				continue
+			if ln.startswith('$'):
+				if len(stack[-1]) > 0 and stack[-1][-1][0] == 'python':
+					if ln[1:1 + indent].strip() != '':
+						log('{}: python indentation must be at least the initial indentation'.format(nr))
+						continue
+				else:
+					indent = len(ln) - len(ln[1:].strip()) - 1
+					stack[-1].append(['python', None, []])
+				stack[-1][-1][2].append(ln[1 + indent:])
+				continue
+			r = re.match(r'video\s+(.+)$', ln)
+			if r:
+				stack[-1].append(['video', None, r.group(1)])
+				continue
+			r = re.match(r'number\s+([a-zA-Z_][a-zA-Z0-9_]*)$', ln)
+			if r:
+				stack[-1].append(['number', None, r.group(1)])
+				continue
+			r = re.match(r'unit\s+([a-zA-Z_][a-zA-Z0-9_]*)$', ln)
+			if r:
+				stack[-1].append(['unit', None, r.group(1)])
+				continue
+			r = re.match(r'short\s+([a-zA-Z_][a-zA-Z0-9_]*)$', ln)
+			if r:
+				stack[-1].append(['short', None, r.group(1)])
+				continue
+			r = re.match(r'long\s+([a-zA-Z_][a-zA-Z0-9_]*)$', ln)
+			if r:
+				stack[-1].append(['long', None, r.group(1)])
+				continue
+			r = re.match(r'choice\s+([a-zA-Z_][a-zA-Z0-9_]*)(.)(.+)$', ln)
+			if r:
+				stack[-1].append(['choice', None, r.group(1)] + r.group(3).split(r.group(2)))
+				continue
+			debug(1, 'invalid line: ' + ln)
+		for label, src in labels:
+			src[2] = index[label]
+	# Create all paths.
+	def make_paths(path, items):
+		for i, item in enumerate(items):
+			item[1] = path + (i,)
+			if item[0] == 'while':
+				make_paths(path + (i,), item[3])
+			elif item[0] == 'if':
+				make_paths(path + (i, 0), item[3])
+				if item[4] is not None:
+					make_paths(path + (i, 1), item[4])
+	make_paths((), parts)
+	return parts, index
+# }}}
+# }}}
+
+class Admin_Connection: # {{{
+	def __init__(self, remote): # {{{
+		self.remote = remote
+		remote.closed = self._closed
+		self.remote.login.event()
+		self.user = None
+		self.refresh = lambda: self.remote.login.event()
+	# }}}
+	def login(self, name, password): # {{{
+		user, answers = load_user(name, 'admin')
+		if user is None:
+			debug(2, 'Invalid admin {}'.format(name))
+			return False
+		crypted = crypt.crypt(password, salt = user['password'])
+		if crypted != user['password']:
+			debug(2, 'Invalid password for {}'.format(name))
+			return False
+		if user['connection'] is not None:
+			debug(3, 'Replacing connection for ' + name)
+			try:
+				user['connection'].remote.replaced.event()
+			except:
+				pass
+			user['connection'].remote.close()
+		else:
+			users[(name.lower(), 'admin')] = user
+		user['connection'] = self
+		self.user = user
+		debug(3, 'Admin {} logged in'.format(name))
+		admins[name.lower()] = self
+		self.list_groups()
+		return True
+	# }}}
+	def _closed(self): # {{{
+		self.remote.close()
+		if self.user is None:
+			return
+		debug(3, 'disconnecting admin {}'.format(self.user['name']))
+		users.pop((self.user['name'].lower(), 'admin'))
+		admins.pop(self.user['name'].lower())
+	# }}}
+	def list_groups(self): # {{{
+		'''Show selection of groups to choose.'''
+		self.refresh = lambda: self.list_groups()
+		groups = []
+		for g in os.listdir(os.path.join(config['data'], 'users')):
+			if g == 'admin':
+				continue
+			groups.append([g])
+			for s in content_list(g):
+				groups[-1].append((s, sum(users[u]['group'].lower() == g and users[u]['connection'].section == s for u in users)))
+		groups.sort()
+		self.remote.group_list.event(groups)
+	# }}}
+	def show_section(self, group, section): # {{{
+		'''Show questions for one section.'''
+		self.refresh = lambda: self.show_section(group, section)
+		parts, index = get_content(group, section)
+		questions = []
+		def add_block(block):
+			for p in block:
+				if p[0] == 'while':
+					add_block(p[3])
+				elif p[0] == 'if':
+					add_block(p[3])
+					if p[4] is not None:
+						add_block(p[4])
+				elif p[0] == 'video':
+					questions.append((p[1], os.path.splitext(p[2])[0]))
+				elif p[0] in ('unit', 'number', 'short', 'long', 'choice'):
+					questions.append((p[1], p[2]))
+		add_block(parts)
+		questions.append(((len(parts),), ''))
+		students = []
+		def make_field(student, question):
+			s = student['connection']
+			active = s.section == section and len(s.run_stack[-1][0]) > s.run_stack[-1][1] and s.run_stack[-1][0][s.run_stack[-1][1]][1] == question[0]
+			return (active, s.answers[section][question[0]] if section in s.answers and question[0] in s.answers[section] else None)
+		def make_other_field(student, question, answers):
+			return (False, answers[section][question[0]] if section in answers and question[0] in answers[section] else None)
+		for s in users:
+			if users[s]['group'].lower() != group.lower():
+				continue
+			students.append((users[s]['name'], users[s]['connection'].section == section) + tuple(make_field(users[s], q) for q in questions))
+		students.sort(key = lambda s: (not s[1], s[0]))
+		# Add non-connected students to the list.
+		others = []
+		for u in list_users(group):
+			if (u, group) in users:
+				continue
+			student, answers = load_user(u, group)
+			if student is None:
+				log('student found but unloadable: {}:{}'.format(u, group))
+				continue
+			others.append((student['name'], None) + tuple(make_other_field(student, q, answers) for q in questions))
+		others.sort()
+		students.extend(others)
+		self.remote.students_list.event(group, questions, students)
+	# }}}
+	def show_student(self, group, section, student): # {{{
+		'''Show single student with detailed results for one section.'''
+		self.refresh = lambda: self.show_student(group, section, student)
+		# TODO.
+	# }}}
+# }}}
+
+class Connection: # {{{
+	def __init__(self, remote): # {{{
+		self.remote = remote
+		self.text_buffer = []
+		self.full_section = []
+		self.run_stack = []
+		remote.closed = self._closed
+		self.section = None	# Current section.
+		self.answers = {}	# Answers that have been given to all the questions so far.
+		self.remote.login.event()
+	# }}}
+	def _add_text(self, text): # {{{
+		self.text_buffer.append(text.replace('FILE://', config['content'] + '/' + self.user['group'].lower() + '/' + self.section + '/'))
+	# }}}
+	def login(self, name, group, password): # {{{
+		user, answers = load_user(name, group)
+		if user is None:
+			debug(2, 'Invalid user {}:{}'.format(name, group))
+			return False
+		crypted = crypt.crypt(password, salt = user['password'])
+		if user['password'] is not None and crypted != user['password']:
+			debug(2, 'Invalid password for {}:{}'.format(name, group))
+			return False
+		user = self._login(name, group)
+		# In case the password is new, it needs to be stored.
+		user['password'] = crypted
+		# Now that self.user is available, create the variables object.
+		def goto(label):
+			while len(self.run_stack) > 1:
+				self.run_stack.pop()
+			self.run_stack[-1][1] = self.index(label)
+		self.variables = {
+				'style': lambda key, value: self.remote.style.event(key, value),
+				'goto': goto,
+				'text': self._add_text,
+				'test': lambda value, target, error = 1e-6: abs(value - target) < target * error,
+				'user': self.user
+				}
+		return True
+	# }}}
+	def _login(self, name, group): # {{{
+		user, answers = load_user(name, group)
+		if user is None:
+			log('failed login for {}:{}'.format(name, group))
+			return None
+		if user['connection'] is not None:
+			debug(3, 'Replacing connection for ' + name)
+			try:
+				user['connection'].remote.replaced.event()
+			except:
+				pass
+			self.answers = user['connection'].answers
+			user['connection'].remote.close()
+		else:
+			self.answers = answers
+			users[(name.lower(), group.lower())] = user
+		user['connection'] = self
+		self.user = user
+		debug(3, 'User {}:{} logged in'.format(name, group))
+		self.remote.contents.event(content_list(group))
+		self.remote.main.event()
+		refresh_admins()
+		return user
+	# }}}
+	def start(self, section): # {{{
+		self.section = section
+		self.full_section, self.index = get_content(self.user['group'], self.section)
+		self.run_stack = [[self.full_section, 0]]
+		self._run()
+	# }}}
+	def _run(self): # {{{
+		while len(self.run_stack) > 0:
+			# Pop off stack levels until there's an instruction.
+			while len(self.run_stack[-1][0]) <= self.run_stack[-1][1]:
+				self.run_stack.pop()
+				if len(self.run_stack) == 0:
+					if len(self.text_buffer) > 0:
+						debug(4, 'final text')
+						self.remote.question.event('text', markdown('\n'.join(self.text_buffer)))
+						self.text_buffer = []
+						self.run_stack = [[self.full_section, len(self.full_section)]]
+						return
+					self.section = None
+					self.remote.main.event()
+					return
+			# Run instructions.
+			if self._run_item(self.run_stack[-1][0][self.run_stack[-1][1]]):
+				break
+		refresh_admins()
+	# }}}
+	def _run_item(self, code): # {{{
+		debug(4, 'running item ' + repr(code))
+		if code[0] == 'label':
+			pass
+		elif code[0] == 'text':
+			for txt in code[2]:
+				self._add_text(txt)
+		elif code[0] == 'style':
+			self.remote.style.event(code[2], code[3]);
+		elif code[0] == 'if':
+			self.run_stack[-1][1] += 1
+			if eval(code[2], self.variables):
+				self.run_stack.append([code[3], 0])
+			elif code[4] is not None:
+				self.run_stack.append([code[4], 0])
+			return False
+		elif code[0] == 'while':
+			# Don't increment instruction pointer, so the loop restarts.
+			if eval(code[2]):
+				self.run_stack.append([code[3], 0])
+			else:
+				self.run_stack[-1][1] += 1
+			return False
+		elif code[0] == 'continue':
+			while self.run_stack[-1][1] >= len(self.run_stack[-1][0]) or self.run_stack[-1][0][self.run_stack[-1][1]][0] != 'while':
+				self.run_stack.pop()
+			return False
+		elif code[0] == 'break':
+			while self.run_stack[-1][1] >= len(self.run_stack[-1][0]) or self.run_stack[-1][0][self.run_stack[-1][1]][0] != 'while':
+				self.run_stack.pop()
+			self.run_stack[-1][1] += 1
+			return False
+		elif code[0] == 'goto':
+			# Break to top level and jump to requested label.
+			while len(self.run_stack) > 1:
+				self.run_stack.pop()
+			self.run_stack[-1][1] = code[2]
+			return False
+		elif code[0] == 'python':
+			self.code_buffer = []
+			exec('\n'.join(code[2]), self.variables)
+			self.run_stack[-1][1] += 1	# Do this before running the code, so goto works.
+			for code in self.code_buffer:
+				if self._run_item(code):
+					return True
+			return False
+		elif code[0] == 'video':
+			if len(self.text_buffer) > 0:
+				self.remote.question.event('text', markdown('\n'.join(self.text_buffer)))
+				self.text_buffer = []
+			else:
+				self.remote.video.event(config['content'] + '/' + self.user['group'].lower() + '/' + self.section + '/' + code[2])
+			return True
+		else:
+			# Question.
+			q = 'short' if code[0] == 'unit' else code[0]
+			self.remote.question.event(q, markdown('\n'.join(self.text_buffer)), code[3:])
+			self.text_buffer = []
+			return True
+		self.run_stack[-1][1] += 1
+		return False
+	# }}}
+	def answer(self, answer): # {{{
+		debug(4, '{}:{} answers {}'.format(self.user['name'], self.user['group'], answer))
+		if self.run_stack[-1][1] >= len(self.run_stack[-1][0]):
+			self._run()
+			return
+		current = self.run_stack[-1][0][self.run_stack[-1][1]]
+		if current[0] not in ('number', 'short', 'long', 'choice', 'unit'):
+			log('answer given for non-question: {}'.format(current))
+			return
+		store = not current[2].startswith('_')
+		if current[0] == 'choice':
+			answer = current.index(answer) - 3
+			if len(current) == 3:
+				store = False
+		elif current[0] == 'unit':
+			r = re.match('\s*([+-]?[0-9]*([.,]\d*)?(e[+-]?\d+)?)\s*(\S*)\s*$', answer)
+			if not r:
+				debug(4, 'no match for unit answer')
+				answer = (None, None)
+			try:
+				value = float(r.group(1).replace(',' ,'.'))
+				#TODO: parse prefixes.
+				answer = (value, r.group(4))
+			except:
+				answer = (None, None)
+			debug(4, 'unit-split answer: {}'.format(answer))
+		self.variables[current[2]] = answer
+		if store:
+			if self.section not in self.answers:
+				self.answers[self.section] = {}
+			path = self.run_stack[-1][0][self.run_stack[-1][1]][1]
+			if path not in self.answers[self.section]:
+				self.answers[self.section][path] = []
+			self.answers[self.section][path].append(answer)
+			if not config['lazysave']:
+				save_user(self.user)
+		self.run_stack[-1][1] += 1
+		self._run()
+	# }}}
+	def video_done(self): # {{{
+		if self.run_stack[-1][1] >= len(self.run_stack[-1][0]):
+			self._run()
+			return
+		current = self.run_stack[-1][0][self.run_stack[-1][1]]
+		if current[0] == 'video':
+			self.run_stack[-1][1] += 1
+			self._run()
+	# }}}
+	def text_done(self): # {{{
+		if self.run_stack[-1][1] >= len(self.run_stack[-1][0]):
+			self._run()
+			return
+		current = self.run_stack[-1][0][self.run_stack[-1][1]]
+		if current[0] == 'text':
+			self.run_stack[-1][1] += 1
+		self._run()
+	# }}}
+	def _closed(self): # {{{
+		self.remote.close()
+		if not hasattr(self, 'user'):
+			return
+		debug(3, 'disconnecting {}:{}'.format(self.user['name'], self.user['group']))
+		save_user(self.user)
+		users.pop((self.user['name'].lower(), self.user['group'].lower()))
+		refresh_admins()
+	# }}}
+# }}}
+
+# Main program {{{
+server = websocketd.RPChttpd(config['port'], Connection, httpdirs = ['html'], tls = False)
+adminserver = websocketd.RPChttpd(config['admin-port'], Admin_Connection, httpdirs = ['admin_html'], tls = False)
+print('servers are running')
+websocketd.fgloop()
+# }}}
+
+# vim: set foldmethod=marker :
