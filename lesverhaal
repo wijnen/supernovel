@@ -29,36 +29,74 @@ users = {}	# including admins.
 admins = {}
 
 def mangle(src): # {{{
+	def escape(x):
+		return x.replace('\\', '\\\\').replace(',', '\;').replace('\n', '\\n')
 	if isinstance(src, int):
 		return 'i{}'.format(src)
 	if isinstance(src, float):
 		return 'f{}'.format(src)
 	if isinstance(src, tuple):
-		return 'u{}/{}'.format(src[0], src[1].replace('\\', '\\\\').replace(',', '\;').replace('\n', '\\n'))
+		if isinstance(src[0], tuple):
+			if src[0][0] is None:
+				return 'U/{}/{}'.format(escape(src[0][1]), escape(src[1]))
+			return 'U{}/{}/{}'.format(src[0][0], escape(src[0][1]), escape(src[1]))
+		if src[0] is None:
+			return 'F{}'.format(escape(src[1]))
+		if isinstance(src[0], int):
+			return 'I{}/{}'.format(src[0], escape(src[1]))
+		elif isinstance(src[0], float):
+			return 'F{}/{}'.format(src[0], escape(src[1]))
+		else:
+			return 'S{}/{}'.format(src[0], escape(src[1]))
 	try:
-		return 's' + src.replace('\\', '\\\\').replace(',', '\;').replace('\n', '\\n')
+		return 's' + escape(src)
 	except:
 		log('Error: unable to mangle {}'.format(repr(src)))
-		return 's' + repr(src).replace('\\', '\\\\').replace(',', '\;').replace('\n', '\\n')
+		return 's' + escape(repr(src))
 # }}}
 
 def unmangle(src): # {{{
-	if src[0] == 'i':
-		return int(src[1:])
-	if src[0] == 'f':
-		return float(src[1:])
-	if src[0] == 'u':
-		if src == 'u()':
-			return (None, None)
-		r = re.match(r'u(.*?)/(.*)$', src)
-		if not r:
-			log('Error unmangling unit: {}'.format(src))
-			return (None, None)
-		return (float(r.group(1)), r.group(2).replace('\\n', '\n').replace('\;', ',').replace('\\\\', '\\'))
-	if src[0] == 's':
-		return src[1:].replace('\\n', '\n').replace('\;', ',').replace('\\\\', '\\')
+	def unescape(x):
+		return x.replace('\\n', '\n').replace('\;', ',').replace('\\\\', '\\')
+	try:
+		if src[0] == 'i':
+			return int(src[1:])
+		if src[0] == 'f':
+			return float(src[1:])
+		if src[0] == 's':
+			return unescape(src[1:])
+		if src[0] == 'I':
+			r = re.match(r'I(.*?)/(.*)$', src)
+			if not r:
+				log('Error unmangling long int: {}'.format(src))
+				return (None, unescape(src))
+			return (int(r.group(1)), unescape(r.group(2)))
+		if src[0] == 'F':
+			r = re.match(r'F(.*?)/(.*)$', src)
+			if not r:
+				log('Error unmangling long float: {}'.format(src))
+				return (None, unescape(src))
+			if r.group(1) == '':
+				return (None, unescape(r.group(2)))
+			return (float(r.group(1)), unescape(r.group(2)))
+		if src[0] == 'S':
+			r = re.match(r'S(.*?)/(.*)$', src)
+			if not r:
+				log('Error unmangling long string: {}'.format(src))
+				return (None, unescape(src))
+			return (unescape(r.group(1)), unescape(r.group(2)))
+		if src[0] == 'U':
+			r = re.match(r'U(.*?)/(.*?)/(.*)$', src)
+			if not r:
+				log('Error unmangling long unit: {}'.format(src))
+				return ((None, ''), unescape(src))
+			if r.group(1) == '':
+				return ((None, unescape(r.group(2))), unescape(r.group(3)))
+			return ((float(r.group(1)), unescape(r.group(2))), unescape(r.group(3)))
+	except:
+		pass
 	log('Error unmangling: invalid first character of {}'.format(repr(src)))
-	return None
+	return src
 # }}}
 
 def load_user(name, group): # {{{
@@ -76,6 +114,9 @@ def load_user(name, group): # {{{
 		if ln.strip() == '':
 			continue
 		key, value = ln.split('=', 1)
+		if key == 'nosave':
+			ret[key] = value == 'True'
+			continue
 		if key.startswith('answer:'):
 			a, s, q = key.split(':', 2)
 			q = tuple(int(x) for x in q.split(','))
@@ -113,7 +154,6 @@ def save_user(user): # {{{
 				section = user['connection'].answers[s]
 				for q in section:
 					question = section[q]
-					debug(4, repr((question, q)))
 					f.write('answer:{}:{}={}\n'.format(s, ','.join(str(i) for i in q), ','.join(mangle(a) for a in question)))
 # }}}
 
@@ -274,25 +314,13 @@ def get_content(group, section): # {{{
 			if r:
 				stack[-1].append(['video', None, r.group(1)])
 				continue
-			r = re.match(r'number\s+([a-zA-Z_][a-zA-Z0-9_]*)$', ln)
+			r = re.match(r'(number|unit|short|long|longnumber|longunit|longshort)\s+([a-zA-Z_][a-zA-Z0-9_]*)$', ln)
 			if r:
-				stack[-1].append(['number', None, r.group(1)])
+				stack[-1].append([r.group(1), None, r.group(2)])
 				continue
-			r = re.match(r'unit\s+([a-zA-Z_][a-zA-Z0-9_]*)$', ln)
+			r = re.match(r'((long)?choice)\s+([a-zA-Z_][a-zA-Z0-9_]*)(.)(.+)$', ln)
 			if r:
-				stack[-1].append(['unit', None, r.group(1)])
-				continue
-			r = re.match(r'short\s+([a-zA-Z_][a-zA-Z0-9_]*)$', ln)
-			if r:
-				stack[-1].append(['short', None, r.group(1)])
-				continue
-			r = re.match(r'long\s+([a-zA-Z_][a-zA-Z0-9_]*)$', ln)
-			if r:
-				stack[-1].append(['long', None, r.group(1)])
-				continue
-			r = re.match(r'choice\s+([a-zA-Z_][a-zA-Z0-9_]*)(.)(.+)$', ln)
-			if r:
-				stack[-1].append(['choice', None, r.group(1)] + r.group(3).split(r.group(2)))
+				stack[-1].append([r.group(1), None, r.group(3)] + r.group(5).split(r.group(4)))
 				continue
 			debug(1, 'invalid line: ' + ln)
 		for label, src in labels:
@@ -582,26 +610,54 @@ class Connection: # {{{
 			self._run()
 			return
 		current = self.run_stack[-1][0][self.run_stack[-1][1]]
-		if current[0] not in ('number', 'short', 'long', 'choice', 'unit'):
+		if current[0] not in ('number', 'short', 'long', 'choice', 'unit', 'longnumber', 'longshort', 'longunit', 'longchoice'):
 			log('answer given for non-question: {}'.format(current))
 			return
 		store = not current[2].startswith('_')
-		if current[0] == 'choice':
-			answer = current.index(answer) - 3
-			if len(current) == 3:
-				store = False
-		elif current[0] == 'unit':
-			r = re.match('\s*([+-]?[0-9]*([.,]\d*)?(e[+-]?\d+)?)\s*(\S*)\s*$', answer)
+		def parse_unit(src):
+			r = re.match('\s*([+-]?[0-9]*([.,]\d*)?(e[+-]?\d+)?)\s*(\S*)\s*$', src)
 			if not r:
 				debug(4, 'no match for unit answer')
-				answer = (None, None)
+				answer = (None, str(src).strip())
 			try:
 				value = float(r.group(1).replace(',' ,'.'))
-				#TODO: parse prefixes.
 				answer = (value, r.group(4))
 			except:
-				answer = (None, None)
+				answer = (None, str(src).strip())
 			debug(4, 'unit-split answer: {}'.format(answer))
+			return answer
+		if current[0] == 'choice':
+			try:
+				answer = current.index(answer) - 3
+			except:
+				# Leave answer string as is (but force str); this only happens when users are messing with the js.
+				debug(2, 'unparsable choice answer: {}'.format(answer))
+				answer = str(answer).strip()
+			if len(current) == 3:
+				store = False
+		elif current[0] == 'longchoice':
+			try:
+				answer = (current.index(answer[0]) - 3, str(answer[1]).strip())
+			except:
+				# Leave answer string as is (but force str); this only happens when users are messing with the js.
+				debug(2, 'unparsable longchoice answer: {}'.format(answer))
+				answer = (None, str(answer).strip())
+		elif current[0] == 'unit':
+			answer = parse_unit(answer)
+		elif current[0] == 'longunit':
+			try:
+				answer = (parse_unit(answer[0]), answer[1])
+			except:
+				# Leave answer string as is (but force str); this only happens when users are messing with the js.
+				debug(2, 'unparsable longunit answer: {}'.format(answer))
+				answer = ((None, ''), str(answer).strip())
+		elif current[0].startswith('long') and current[0] != 'long':
+			try:
+				answer = (str(answer[0]).strip(), str(answer[1]).strip())
+			except:
+				# Leave answer string as is (but force str); this only happens when users are messing with the js.
+				debug(2, 'unparsable long* answer: {}'.format(answer))
+				answer = ('', str(answer).strip())
 		self.variables[current[2]] = answer
 		if store:
 			if self.section not in self.answers:

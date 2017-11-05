@@ -44,6 +44,44 @@ var Connection = {
 		var get_value;
 		var button_text = 'Antwoord';
 		switch (type) {
+			case 'longnumber':
+				var l = question.AddElement('textarea');
+				var e = question.AddElement('input');
+				e.type = 'number';
+				if (options.length > 0)
+					e.step = options[0];
+				get_value = function() {
+					var ret = Number(e.value);
+					if (isNaN(ret))
+						return [[null, null], null];
+					return [ret, l.value];
+				};
+				break;
+			case 'longchoice':
+				var l = question.AddElement('textarea');
+				var div = question.AddElement('div');
+				for (var o = 0; o < options.length; ++o) {
+					var button = div.AddElement('button').AddText(options[o]);
+					button.type = 'button';
+					button.value = options[o];
+					button.AddEvent('click', function() {
+						server.answer([this.value, l.value]);
+					});
+				}
+				return;
+			case 'longshort':
+			case 'longunit':
+				var l = question.AddElement('textarea');
+				var e = question.AddElement('input');
+				e.type = 'text';
+				get_value = function() {
+					var ret = e.value;
+					if (ret == '')
+						return [null, null];
+					e.value = '';
+					return [ret, l.value];
+				};
+				break;
 			case 'number':
 				var e = question.AddElement('input');
 				e.type = 'number';
@@ -67,7 +105,8 @@ var Connection = {
 					});
 				}
 				return;
-			case 'short': // <input>
+			case 'short':
+			case 'unit':
 				var e = question.AddElement('input');
 				e.type = 'text';
 				get_value = function() {
