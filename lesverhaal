@@ -260,8 +260,8 @@ def get_content(group, section): # {{{
 				continue
 			r = re.match(r'if\s+(.+):$', ln)
 			if r:
-				stack[-1].append(['if', None, r.group(1), [], None])
-				stack.append(stack[-1][-1][3])
+				stack[-1].append(['if', None, [r.group(1), []], None])
+				stack.append(stack[-1][-1][-2][1])
 				istack.append(None)
 				continue
 			r = re.match(r'elif\s+(.+):$', ln)
@@ -269,14 +269,11 @@ def get_content(group, section): # {{{
 				if stack[-1][-1][0] != 'if':
 					log('{}: elif without if'.format(nr))
 					continue
-				if stack[-1][-1][4] is not None:
+				if stack[-1][-1][-1] is not None:
 					log('{}: elif after else'.format(nr))
 					continue
-				stack[-1][-1][4] = []
-				stack.append(stack[-1][-1][4])
-				istack.append(None)
-				stack[-1].append(['if', None, r.group(1), [], None])
-				stack.append(stack[-1][-1][3])
+				stack[-1][-1].insert(-1, [r.group(1), []])
+				stack.append(stack[-1][-1][-2][1])
 				istack.append(None)
 				continue
 			r = re.match(r'else\s*:$', ln)
@@ -284,11 +281,11 @@ def get_content(group, section): # {{{
 				if stack[-1][-1][0] != 'if':
 					log('{}: else without if'.format(nr))
 					continue
-				if stack[-1][-1][4] is not None:
+				if stack[-1][-1][-1] is not None:
 					log('{}: else after else'.format(nr))
 					continue
-				stack[-1][-1][4] = []
-				stack.append(stack[-1][-1][4])
+				stack[-1][-1][-1] = []
+				stack.append(stack[-1][-1][-1])
 				istack.append(None)
 				continue
 			r = re.match(r'while\s+(.+):$', ln)
@@ -332,9 +329,10 @@ def get_content(group, section): # {{{
 			if item[0] == 'while':
 				make_paths(path + (i,), item[3])
 			elif item[0] == 'if':
-				make_paths(path + (i, 0), item[3])
-				if item[4] is not None:
-					make_paths(path + (i, 1), item[4])
+				for n, target in enumerate(item[2:-1]):
+					make_paths(path + (i, n), target[1])
+				if item[-1] is not None:
+					make_paths(path + (i, len(item) - 2), item[-1])
 	make_paths((), parts)
 	return parts, index
 # }}}
@@ -553,10 +551,13 @@ class Connection: # {{{
 			self.remote.style.event(code[2], code[3]);
 		elif code[0] == 'if':
 			self.run_stack[-1][1] += 1
-			if eval(code[2], self.variables):
-				self.run_stack.append([code[3], 0])
-			elif code[4] is not None:
-				self.run_stack.append([code[4], 0])
+			for expr, target in code[2:-1]:
+				if eval(expr, self.variables):
+					self.run_stack.append([target, 0])
+					break
+			else:
+				if code[-1] is not None:
+					self.run_stack.append([code[-1], 0])
 			return False
 		elif code[0] == 'while':
 			# Don't increment instruction pointer, so the loop restarts.
