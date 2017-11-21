@@ -204,7 +204,11 @@ def parse_transition(transition, at): # {{{
 def get_content(group, section): # {{{
 	'''Get the program for a section.'''
 	content_dir = os.path.join(config['data'], 'users', group.lower(), 'Content')
-	with open(os.path.join(content_dir, section + '.script')) as f:
+	filename = os.path.join(content_dir, section + '.script')
+	if not os.path.exists(filename):
+		log('Error: file {} does not exist'.format(filename))
+		return [], {}
+	with open(filename) as f:
 		parts = []
 		stack = [parts]
 		istack = [None]
@@ -620,6 +624,7 @@ class Connection: # {{{
 		remote.closed = self._closed
 		self.section = None	# Current section.
 		self.answers = {}	# Answers that have been given to all the questions so far.
+		self.variables = {}
 		q = remote.data['query']
 		keys = ('name', 'group', 'secret')
 		if config['secret'] != '' and all(x in q for x in keys) and q['secret'][0] == config['secret']:
