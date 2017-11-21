@@ -16,6 +16,11 @@ short variable		-> str
 long variable		-> str
 choice variable/option1/option2/option3		-> int		# / may be any non-identifier character.
 unit variable		-> (float, str)
+longnumber variable	-> (float, str)
+longshort variable	-> (str, str)
+longchoice variable/option1/option2	-> (int, str)
+longunit variable	-> ((float, str), str)
+
 while expr:
 	code
 	'''Strings in an indented block
@@ -28,3 +33,19 @@ elif expr:
 	code
 else:
 	code
+
+style css_key value	# Style is applied to div that contains text.
+
+character e Emi
+e mod(s): text
+e mod(s):
+	text
+prefix e <span style="color: #f00">
+suffix e </span>
+scene image
+show e mod(s) image
+hide e
+with transition:
+	show ...
+	etc
+

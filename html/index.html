@@ -11,7 +11,7 @@
 	<body>
 		<div id='login'>
 			<form onsubmit='return log_in()'>
-				Naam: <input type='text' id='name'/><br/>
+				Naam: <input type='text' id='loginname'/><br/>
 				Klas: <input type='text' id='class'/><br/>
 				Wachtwoord: <input type='password' id='password'/><br/>
 				<input type='submit' value='Log in'/>
@@ -25,5 +25,10 @@
 			<button onclick='video_done()'>Ga verder</button>
 		</div>
 		<div id='question'></div>
+		<div id='speechbox'>
+			<span id='speaker'></span><br/>
+			<img id='photo'/>
+			<div id='speech'></div>
+		</div>
 	</body>
 </html>
