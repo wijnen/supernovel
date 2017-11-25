@@ -5,6 +5,7 @@ import sys
 import os
 import re
 import crypt
+import traceback
 import fhs
 import websocketd
 from markdown import markdown
@@ -32,7 +33,7 @@ def mangle(src): # {{{
 	def escape(x):
 		return x.replace('\\', '\\\\').replace(';', '\,').replace(':', '\.').replace('\n', '\\n')
 	styles = ':'.join('/'.join(s) for s in src[1:])
-	answer = src[0].strip()
+	answer = src[0]
 	# TODO: add styles to output.
 	if isinstance(answer, int):
 		return 'i{}'.format(answer)
@@ -278,7 +279,7 @@ def get_content(group, section): # {{{
 			if len(stack) == 0 or len(stack[-1]) == 0 or stack[-1][-1][0] != 'story':
 				stack[-1].append(['story', None, []])
 			if item is not None:
-				if isinstance(item, str) and isinstance(stack[-1][-1][2][-1], str):
+				if isinstance(item, str) and len(stack[-1][-1][2]) > 0 and isinstance(stack[-1][-1][2][-1], str):
 					stack[-1][-1][2][-1] += '\n' + item
 				else:
 					stack[-1][-1][2].append(item)
@@ -659,14 +660,23 @@ class Connection: # {{{
 	def _parse_text(self, text): # {{{
 		def subst(obj):
 			try:
-				return eval(obj.group(0))
+				ret = eval(obj.group(1), self.variables)
+				log('subst: ' + repr(ret))
+				return str(ret)
 			except:
 				log('error evaluating expression substitution {}'.format(obj.group(0)))
+				traceback.print_exc()
 				return '[fout]'
-		return re.sub('\${.*?}', subst, text).replace('FILE://', config['content'] + '/' + self.user['group'].lower() + '/' + self.section + '/')
+		return re.sub('\${(.*?)}', subst, text).replace('FILE://', config['content'] + '/' + self.user['group'].lower() + '/' + self.section + '/')
 	# }}}
 	def _add_text(self, text): # {{{
 		'''Prepare text for displaying.'''
+		if not isinstance(text, str):
+			if text[0] == 'text':
+				self.text_buffer.append((text[0], text[1], self._parse_text(text[2]), text[3]))
+			else:
+				self.text_buffer.append(text)
+			return
 		if len(self.text_buffer) > 0 and isinstance(self.text_buffer[-1], str):
 			self.text_buffer[-1] += '\n' + self._parse_text(text)
 		else:
@@ -792,10 +802,7 @@ class Connection: # {{{
 			pass
 		elif code[0] == 'story':
 			for item in code[2]:
-				if len(self.text_buffer) > 0 and isinstance(self.text_buffer, str) and isinstance(item, str):
-					self.text_buffer[-1] += '\n' + item
-				else:
-					self.text_buffer.append(item)
+				self._add_text(item)
 		elif code[0] == 'answer':
 			self._answer(code[2], code[3])
 		elif code[0] == 'if':
