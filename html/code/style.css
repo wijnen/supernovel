@@ -55,3 +55,8 @@ button {
 	position: fixed;
 	bottom: 9em;
 }
+
+#question {
+	background-color: rgba(255, 255, 255, .5);
+	height: 90vh;
+}

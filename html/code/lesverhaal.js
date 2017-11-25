@@ -1,4 +1,4 @@
-var login, videodiv, video, contents, question, speechbox, speaker, photo, speech;
+var login, videodiv, video, contents, question, spritebox, speechbox, speaker, photo, speech;
 var server_obj, server;
 var kinetic_script = null;
 var kinetic_pos = 0;
@@ -17,6 +17,7 @@ var Connection = {
 		contents.style.display = 'none';
 		question.style.display = 'none';
 		speechbox.style.display = 'none';
+		spritebox.style.display = 'none';
 		video.pause();
 	},
 	contents: function(data) {
@@ -35,6 +36,7 @@ var Connection = {
 		contents.style.display = 'block';
 		question.style.display = 'none';
 		speechbox.style.display = 'none';
+		spritebox.style.display = 'none';
 		video.pause();
 		for (var s in question.style)
 			delete question.style[s];
@@ -43,18 +45,23 @@ var Connection = {
 		question.style[key] = value;
 	},
 	story: function(type, story, options) {
-		question.style.display = 'block';
+		question.style.display = 'none';
 		videodiv.style.display = 'none';
 		contents.style.display = 'none';
 		speechbox.style.display = 'block';
+		spritebox.style.display = 'block';
 		question.innerHTML = '';
 		video.pause();
 		kinetic_end = function() {
+			question.style.display = 'block';
+			speaker.style.display = 'none';
+			speech.innerHTML = '';
 			var get_value;
 			var button_text = 'Antwoord';
 			switch (type) {
 				case 'longnumber':
 					var l = question.AddElement('textarea');
+					question.AddElement('br');
 					var e = question.AddElement('input');
 					e.type = 'number';
 					if (options.length > 0)
@@ -81,6 +88,7 @@ var Connection = {
 				case 'longshort':
 				case 'longunit':
 					var l = question.AddElement('textarea');
+					question.AddElement('br');
 					var e = question.AddElement('input');
 					e.type = 'text';
 					get_value = function() {
@@ -163,6 +171,7 @@ var Connection = {
 		contents.style.display = 'none';
 		question.style.display = 'none';
 		speechbox.style.display = 'none';
+		spritebox.style.display = 'none';
 		speed(); // Set playback speed.
 		video.play();
 	},
@@ -198,7 +207,7 @@ function next_kinetic() {
 					sprites.push(s);
 				for (var i = 0; i < sprites.length; ++i)
 					kill_sprite(sprites[i]);
-				question.style.backgroundImage = cmd[1];
+				document.getElementsByTagName('body')[0].style.backgroundImage = cmd[1];
 				break;
 			case 'style':
 				if (cmd[2] == 'transition') {
@@ -248,7 +257,7 @@ function prev_kinetic() {
 }
 
 function new_sprite(tag) {
-	kinetic_sprites[tag] = question.AddElement('img', 'sprite ' + 'base-' + tag);
+	kinetic_sprites[tag] = spritebox.AddElement('img', 'sprite ' + 'base-' + tag);
 	kinetic_sprites[tag].AddEvent('load', function() {
 		classes[tag][0].style.marginLeft = '-' + (kinetic_sprites[tag].width / 2) + 'px';
 	});
@@ -265,7 +274,7 @@ function new_sprite(tag) {
 }
 
 function kill_sprite(tag) {
-	question.removeChild(kinetic_sprites[tag]);
+	spritebox.removeChild(kinetic_sprites[tag]);
 	delete kinetic_sprites[tag];
 }
 
@@ -286,6 +295,7 @@ function init() {
 	contents = document.getElementById('contents');
 	question = document.getElementById('question');
 	speechbox = document.getElementById('speechbox');
+	spritebox = document.getElementById('spritebox');
 	speaker = document.getElementById('speaker');
 	photo = document.getElementById('photo');
 	speech = document.getElementById('speech');
@@ -300,6 +310,7 @@ function init() {
 	contents.style.display = 'none';
 	question.style.display = 'none';
 	speechbox.style.display = 'none';
+	spritebox.style.display = 'none';
 	speaker.style.display = 'none';
 
 	window.AddEvent('keypress', function(event) {

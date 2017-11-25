@@ -30,26 +30,29 @@ admins = {}
 
 def mangle(src): # {{{
 	def escape(x):
-		return x.replace('\\', '\\\\').replace(';', '\,').replace('\n', '\\n')
-	if isinstance(src, int):
-		return 'i{}'.format(src)
-	if isinstance(src, float):
-		return 'f{}'.format(src)
-	if isinstance(src, tuple):
-		if isinstance(src[0], tuple):
-			if src[0][0] is None:
-				return 'U/{}/{}'.format(escape(src[0][1]), escape(src[1]))
-			return 'U{}/{}/{}'.format(src[0][0], escape(src[0][1]), escape(src[1]))
-		if src[0] is None:
-			return 'F{}'.format(escape(src[1]))
-		if isinstance(src[0], int):
-			return 'I{}/{}'.format(src[0], escape(src[1]))
-		elif isinstance(src[0], float):
-			return 'F{}/{}'.format(src[0], escape(src[1]))
+		return x.replace('\\', '\\\\').replace(';', '\,').replace(':', '\.').replace('\n', '\\n')
+	styles = ':'.join('/'.join(s) for s in src[1:])
+	answer = src[0].strip()
+	# TODO: add styles to output.
+	if isinstance(answer, int):
+		return 'i{}'.format(answer)
+	if isinstance(answer, float):
+		return 'f{}'.format(answer)
+	if isinstance(answer, tuple):
+		if isinstance(answer[0], tuple):
+			if answer[0][0] is None:
+				return 'U/{}/{}'.format(escape(answer[0][1]), escape(answer[1]))
+			return 'U{}/{}/{}'.format(answer[0][0], escape(answer[0][1]), escape(answer[1]))
+		if answer[0] is None:
+			return 'F/{}'.format(escape(answer[1]))
+		if isinstance(answer[0], int):
+			return 'I{}/{}'.format(answer[0], escape(answer[1]))
+		elif isinstance(answer[0], float):
+			return 'F{}/{}'.format(answer[0], escape(answer[1]))
 		else:
-			return 'S{}/{}'.format(src[0], escape(src[1]))
+			return 'S{}/{}'.format(answer[0], escape(answer[1]))
 	try:
-		return 's' + escape(src)
+		return 's' + escape(answer)
 	except:
 		log('Error: unable to mangle {}'.format(repr(src)))
 		return 's' + escape(repr(src))
@@ -57,46 +60,49 @@ def mangle(src): # {{{
 
 def unmangle(src): # {{{
 	def unescape(x):
-		return x.replace('\\n', '\n').replace('\,', ';').replace('\\\\', '\\')
+		return x.replace('\\n', '\n').replace('\\.', ':').replace('\\,', ';').replace('\\/', '\\').strip()
 	try:
-		if src[0] == 'i':
-			return int(src[1:])
-		if src[0] == 'f':
-			return float(src[1:])
-		if src[0] == 's':
-			return unescape(src[1:])
-		if src[0] == 'I':
-			r = re.match(r'I(.*?)/(.*)$', src)
+		parts = src.split(':')
+		answer = parts[0]
+		styles = [tuple(p.split('/', 1)) for p in parts[1:]]
+		if answer[0] == 'i':
+			return int(answer[1:]), styles
+		if answer[0] == 'f':
+			return float(answer[1:]), styles
+		if answer[0] == 's':
+			return unescape(answer[1:]), styles
+		if answer[0] == 'I':
+			r = re.match(r'I(.*?)/(.*)$', answer)
 			if not r:
-				log('Error unmangling long int: {}'.format(src))
-				return (None, unescape(src))
-			return (int(r.group(1)), unescape(r.group(2)))
-		if src[0] == 'F':
-			r = re.match(r'F(.*?)/(.*)$', src)
+				log('Error unmangling long int: {}'.format(answer))
+				return (None, unescape(answer)), styles
+			return (int(r.group(1)), unescape(r.group(2))), styles
+		if answer[0] == 'F':
+			r = re.match(r'F(.*?)/(.*)$', answer)
 			if not r:
-				log('Error unmangling long float: {}'.format(src))
-				return (None, unescape(src))
+				log('Error unmangling long float: {}'.format(answer))
+				return (None, unescape(answer)), styles
 			if r.group(1) == '':
-				return (None, unescape(r.group(2)))
-			return (float(r.group(1)), unescape(r.group(2)))
-		if src[0] == 'S':
-			r = re.match(r'S(.*?)/(.*)$', src)
+				return (None, unescape(r.group(2))), styles
+			return (float(r.group(1)), unescape(r.group(2))), styles
+		if answer[0] == 'S':
+			r = re.match(r'S(.*?)/(.*)$', answer)
 			if not r:
-				log('Error unmangling long string: {}'.format(src))
-				return (None, unescape(src))
-			return (unescape(r.group(1)), unescape(r.group(2)))
-		if src[0] == 'U':
-			r = re.match(r'U(.*?)/(.*?)/(.*)$', src)
+				log('Error unmangling long string: {}'.format(answer))
+				return (None, unescape(answer)), styles
+			return (unescape(r.group(1)), unescape(r.group(2))), styles
+		if answer[0] == 'U':
+			r = re.match(r'U(.*?)/(.*?)/(.*)$', answer)
 			if not r:
-				log('Error unmangling long unit: {}'.format(src))
-				return ((None, ''), unescape(src))
+				log('Error unmangling long unit: {}'.format(answer))
+				return ((None, ''), unescape(answer)), styles
 			if r.group(1) == '':
-				return ((None, unescape(r.group(2))), unescape(r.group(3)))
-			return ((float(r.group(1)), unescape(r.group(2))), unescape(r.group(3)))
+				return ((None, unescape(r.group(2))), unescape(r.group(3))), styles
+			return ((float(r.group(1)), unescape(r.group(2))), unescape(r.group(3))), styles
 	except:
 		pass
 	log('Error unmangling: invalid first character of {}'.format(repr(src)))
-	return src
+	return src, ()
 # }}}
 
 def load_user(name, group): # {{{
@@ -201,6 +207,53 @@ def parse_transition(transition, at): # {{{
 		return ('left', 0, '', at)
 # }}}
 
+def showhide(show, tag, mod, at, transition, characters, in_with, with_hide):
+	'''Create event list for showing or hiding a character.'''
+	ret = []
+	if not at:
+		at = 'center'
+	names = {'left': '30%', 'right': '70%', 'center': '50%'}
+	if at in names:
+		at = names[at]
+	if tag not in characters:
+		log('{}: error: unknown character tag {}'.format(nr, tag))
+		return []
+	name, imgs, ext = characters[tag]
+	if transition:
+		transition = parse_transition(transition, at)
+	if in_with:
+		if not transition:
+			transition = in_with
+		if transition[3] is None:
+			transition = transition[:3] + (at,)
+		transition = (transition[0], in_with[1]) + transition[2:]
+	elif not transition:
+		transition = parse_transition(None, at)
+	if show:
+		# When showing, define the image first.
+		url = imgs + (mod if mod else 'default') + ext
+		ret.append(['image', tag, url])
+	if transition[2]:
+		# There is a from position specified.  Place the image there without a transition.
+		ret.append(['style', tag, 'transition', ''])
+		ret.append(['style', tag, transition[0], transition[2]])
+	if transition[1]:
+		# Timing is specified.  Apply it.
+		ret.append(['style', tag, 'transition', transition[0] + ' ' + str(transition[1]) + 's'])
+	if show or transition[1]:
+		# This is not an instantaneous hide.  Set the position.
+		ret.append(['style', tag, transition[0], transition[3]])
+	if transition[1] and not in_with:
+		# Timing is specified.  Wait for it.
+		ret.append(['wait', transition[1]])
+	if not show:
+		# When hiding, (un)define the image last.
+		if in_with:
+			with_hide.append(tag)
+		else:
+			ret.append(['image', tag, ''])
+	return ret
+
 def get_content(group, section): # {{{
 	'''Get the program for a section.'''
 	content_dir = os.path.join(config['data'], 'users', group.lower(), 'Content')
@@ -218,39 +271,42 @@ def get_content(group, section): # {{{
 		last_label = ''
 		in_string = False
 		in_comment = False
-		in_text = False
+		in_speech = False
 		in_with = False
 		with_hide = []
 		def add_story_item(item = None):
 			if len(stack) == 0 or len(stack[-1]) == 0 or stack[-1][-1][0] != 'story':
 				stack[-1].append(['story', None, []])
 			if item is not None:
-				stack[-1][-1][2].append(item)
+				if isinstance(item, str) and isinstance(stack[-1][-1][2][-1], str):
+					stack[-1][-1][2][-1] += '\n' + item
+				else:
+					stack[-1][-1][2].append(item)
 		for nr, ln in enumerate(f):
 			ln = ln.rstrip()
 			if in_string:
-				if ln[:istack[-1]].strip() != '':
+				if ln.strip() != '' and ln[:istack[-1]].strip() != '':
 					log('{}: indentation error in block string'.format(nr))
 				ln = ln[istack[-1]:]
 				if ln.endswith(in_string):
 					ln = ln[:-len(in_string)].rstrip()
 					in_string = False
 					if ln != '':
-						stack[-1][-1][2].append(ln)
+						add_story_item(ln)
 					continue
-				stack[-1][-1][2].append(ln)
+				add_story_item(ln)
 				continue
 			if in_comment:
-				if ln[:istack[-1]].strip() != '':
+				if ln.strip() != '' and ln[:istack[-1]].strip() != '':
 					log('{}: indentation error in block comment'.format(nr))
 				if ln.endswith('###'):
 					in_comment = False
 				continue
-			if in_text:
-				if ln[:istack[-1]].strip() == '':
+			if in_speech:
+				if ln.strip() == '' or ln[:istack[-1]].strip() == '':
 					stack[-1][-1][2] += '\n' + ln[istack[-1]:]
 					continue
-				in_text = False
+				in_speech = False
 				istack.pop()
 			ilevel = len(ln) - len(ln.strip())
 			ln = ln.strip()
@@ -289,19 +345,19 @@ def get_content(group, section): # {{{
 				if ln.endswith(in_string):
 					ln = ln[:-len(in_string)].rstrip()
 					in_string = False
-					stack[-1].append(['story', None, ln])
+					add_story_item(ln)
 					continue
-				stack[-1].append(['story', None, []])
+				add_story_item()
 				if ln != '':
-					stack[-1][-1][2].append(ln)
+					add_story_item(ln)
 				continue
 			r = re.match(r'(["\'])(.*)\1\s*$', ln)
 			if r:
-				stack[-1].append(['story', None, [r.group(2)]])
+				add_story_item(r.group(2))
 				continue
-			r = re.match(r'style\s+(.+?)\s+(.+?)\s*$', ln)
+			r = re.match(r'answer\s+(.+?)\s+(.+?)\s*$', ln)
 			if r:
-				stack[-1].append(['style', None, r.group(1), r.group(2)])
+				stack[-1].append(['answer', None, r.group(1), r.group(2)])
 				continue
 			r = re.match(r'label\s+(.+?)\s*$', ln)
 			if r:
@@ -364,9 +420,14 @@ def get_content(group, section): # {{{
 			if ln in ('continue', 'break'):
 				stack[-1].append([ln, None])
 				continue
-			r = re.match(r'character\s+(\S+)(\s+(.*?))?$', ln)
+			r = re.match(r'character\s+(\S+)(\s+(\S+)(\s+(.*?))?)?\s*$', ln)
 			if r:
-				characters[r.group(1)] = r.group(2)
+				tag = r.group(1)
+				url = r.group(3)
+				name = r.group(5)
+				imgdir, ext = os.path.splitext(url)
+				fulldir = config['content'] + '/' + group.lower() + '/' + section + '/' + imgdir + '/'
+				characters[tag] = (name, fulldir, ext)
 				continue
 			r = re.match(r'scene(\s+(.*?))?$', ln)
 			if r:
@@ -379,49 +440,8 @@ def get_content(group, section): # {{{
 				mod = r.group(4)
 				at = r.group(6)
 				transition = r.group(8)
-				if not at:
-					at = 'center'
-				names = {'left': '30%', 'right': '70%', 'center': '50%'}
-				if at in names:
-					at = names[at]
-				if tag not in characters:
-					log('{}: error: unknown character tag {}'.format(nr, tag))
-					continue
-				name = characters[tag]
 				add_story_item()
-				if transition:
-					transition = parse_transition(transition, at)
-				if in_with:
-					if not transition:
-						transition = in_with
-					if transition[3] is None:
-						transition = transition[:3] + (at,)
-					transition = (transition[0], in_with[1]) + transition[2:]
-				elif not transition:
-					transition = parse_transition(None, at)
-				if show:
-					# When showing, define the image first.
-					url = config['content'] + '/' + group.lower() + '/' + section + '/' + (tag + '/' + mod if mod else tag)
-					stack[-1][-1][2].append(['image', tag, url])
-				if transition[2]:
-					# There is a from position specified.  Place the image there without a transition.
-					stack[-1][-1][2].append(['style', tag, 'transition', ''])
-					stack[-1][-1][2].append(['style', tag, transition[0], transition[2]])
-				if transition[1]:
-					# Timing is specified.  Apply it.
-					stack[-1][-1][2].append(['style', tag, 'transition', transition[0] + ' ' + str(transition[1]) + 's'])
-				if show or transition[1]:
-					# This is not an instantaneous hide.  Set the position.
-					stack[-1][-1][2].append(['style', tag, transition[0], transition[3]])
-				if transition[1] and not in_with:
-					# Timing is specified.  Wait for it.
-					stack[-1][-1][2].append(['wait', transition[1]])
-				if not show:
-					# When hiding, (un)define the image last.
-					if in_with:
-						with_hide.append(tag)
-					else:
-						stack[-1][-1][2].append(['image', tag, ''])
+				stack[-1][-1][2].extend(showhide(show, tag, mod, at, transition, characters, in_with, with_hide))
 				continue
 			r = re.match(r'with\s+(\S+)\s*:$', ln)
 			if r:
@@ -434,7 +454,7 @@ def get_content(group, section): # {{{
 			if r:
 				add_story_item(['text', r.group(2), r.group(3), None])
 				if r.group(3) == '':
-					in_text = True
+					in_speech = True
 					istack.append(None)
 				continue
 			if ln.startswith('$'):
@@ -461,9 +481,10 @@ def get_content(group, section): # {{{
 				continue
 			r = re.match(r'(.*?)\s*:\s*(.*?)\s*$', ln)
 			if r and r.group(1) in characters:
-				add_story_item(['text', characters[r.group(1)], r.group(2), None])
+				c = characters[r.group(1)]
+				add_story_item(['text', c[0], r.group(2), c[1] + 'side' + c[2] if c[2] else None])
 				if not r.group(2):
-					in_text = True
+					in_speech = True
 					istack.append(None)
 				continue
 			debug(1, 'invalid line: ' + ln)
@@ -506,6 +527,8 @@ class Admin_Connection: # {{{
 			debug(2, 'Invalid admin {}'.format(name))
 			return False
 		crypted = crypt.crypt(password, salt = user['password'])
+		log('pwd: {}'.format(repr(user['password'])))
+		log('new: {}'.format(repr(crypted)))
 		if crypted != user['password']:
 			debug(2, 'Invalid password for {}'.format(name))
 			return False
@@ -634,7 +657,13 @@ class Connection: # {{{
 			self.remote.login.event()
 	# }}}
 	def _parse_text(self, text): # {{{
-		return text.replace('FILE://', config['content'] + '/' + self.user['group'].lower() + '/' + self.section + '/')
+		def subst(obj):
+			try:
+				return eval(obj.group(0))
+			except:
+				log('error evaluating expression substitution {}'.format(obj.group(0)))
+				return '[fout]'
+		return re.sub('\${.*?}', subst, text).replace('FILE://', config['content'] + '/' + self.user['group'].lower() + '/' + self.section + '/')
 	# }}}
 	def _add_text(self, text): # {{{
 		'''Prepare text for displaying.'''
@@ -681,6 +710,14 @@ class Connection: # {{{
 		refresh_admins()
 		return user
 	# }}}
+	def _answer(self, key, value = None): # {{{
+		'''Set style for last answer.
+		With only one argument, the style of the background is set.'''
+		if value is None:
+			value = key
+			key = 'background'
+		# TODO
+	# }}}
 	def start(self, section): # {{{
 		self.section = section
 		self.full_section, self.index, characters = get_content(self.user['group'], self.section)
@@ -691,25 +728,43 @@ class Connection: # {{{
 				self.run_stack.pop()
 			self.run_stack[-1][1] = self.index(label)
 		self.variables = {
-				'style': lambda key, value: self.remote.style.event(key, value),
+				'answer': self._answer,
 				'goto': goto,
 				'text': self._add_text,
 				'test': lambda value, target, error = 1e-6: abs(value - target) < target * error,
 				'create': self._add_character,
+				'character': lambda tag, name, url: self._add_character(tag, name, config['content'] + '/' + self.user['group'].lower() + '/' + section + '/' + os.path.splitext(url)[0] + '/', os.path.splitext(url)[1]),
 				'say': self._say,
+				'show': self._show,
+				'hide': self._hide,
+				'question': self._question,
 				'user': self.user,
 				'self': self,
 				}
 		for c in characters:
-			self._add_character(c, characters[c])
+			self._add_character(c, *characters[c])
 		self._run()
 	# }}}
-	def _add_character(self, code, name): # {{{
-		self.characters[code] = [name, None]
-		self.variables[code] = lambda text: self._say(self.characters[code][0], text, image = self.characters[code][1])
+	def _question(self, qtype, params = ()): # {{{
+		if qtype == 'unit':
+			qtype = 'short'
+		self._handle_story(qtype, self.text_buffer, params)
+		self.text_buffer = []
+		self.breaking = True
+		return True
+	# }}}
+	def _add_character(self, code, name, imgs, ext): # {{{
+		self.characters[code] = [name, imgs, ext]
+		self.variables[code] = lambda text: self._say(self.characters[code][0], text, image = self.characters[code][1] + 'side' + self.characters[code][2] if self.characters[code][2] else None)
 	# }}}
 	def _say(self, name, text, image = None): # {{{
 		self.text_buffer.append(('text', name, self._parse_text(text), image))
+	# }}}
+	def _show(self, tag, mod = None, at = 'center', transition = None): # {{{
+		self._run_item(['story', None, showhide(True, tag, mod, at, transition, self.characters, None, None)])
+	# }}}
+	def _hide(self, tag, at = 'center', transition = None): # {{{
+		self._run_item(['story', None, showhide(False, tag, None, at, transition, self.characters, None, None)])
 	# }}}
 	def _run(self): # {{{
 		while len(self.run_stack) > 0:
@@ -736,9 +791,13 @@ class Connection: # {{{
 		if code[0] == 'label':
 			pass
 		elif code[0] == 'story':
-			self.text_buffer.extend(code[2])
-		elif code[0] == 'style':
-			self.remote.style.event(code[2], code[3]);
+			for item in code[2]:
+				if len(self.text_buffer) > 0 and isinstance(self.text_buffer, str) and isinstance(item, str):
+					self.text_buffer[-1] += '\n' + item
+				else:
+					self.text_buffer.append(item)
+		elif code[0] == 'answer':
+			self._answer(code[2], code[3])
 		elif code[0] == 'if':
 			self.run_stack[-1][1] += 1
 			for expr, target in code[2:-1]:
@@ -772,13 +831,10 @@ class Connection: # {{{
 			self.run_stack[-1][1] = code[2]
 			return False
 		elif code[0] == 'python':
-			self.code_buffer = []
-			exec('\n'.join(code[2]), self.variables)
+			self.breaking = False
 			self.run_stack[-1][1] += 1	# Do this before running the code, so goto works.
-			for code in self.code_buffer:
-				if self._run_item(code):
-					return True
-			return False
+			exec('\n'.join(code[2]), self.variables)
+			return self.breaking
 		elif code[0] == 'video':
 			if len(self.text_buffer) > 0:
 				self._handle_story('text', self.text_buffer)
@@ -788,10 +844,7 @@ class Connection: # {{{
 			return True
 		else:
 			# Question.
-			q = 'short' if code[0] == 'unit' else code[0]
-			self._handle_story(q, self.text_buffer, code[3:])
-			self.text_buffer = []
-			return True
+			return self._question(code[0], code[3:])
 		self.run_stack[-1][1] += 1
 		return False
 	# }}}
@@ -804,10 +857,7 @@ class Connection: # {{{
 				return (item[0], item[1], markdown(item[2]), item[3])
 			# ('style', tag, key, value)
 			if item[0] == 'style':
-				log('style item: ' + repr(item))
 				return (item[0], item[1], item[2], self._parse_text(item[3]))
-			# ('create', tag)
-			# ('delete', tag)
 			# ('scene', url)
 			# ('image', tag, url)
 			# ('wait', seconds)
@@ -875,7 +925,7 @@ class Connection: # {{{
 			path = self.run_stack[-1][0][self.run_stack[-1][1]][1]
 			if path not in self.answers[self.section]:
 				self.answers[self.section][path] = []
-			self.answers[self.section][path].append(answer)
+			self.answers[self.section][path].append((answer, []))
 			if not config['lazysave']:
 				save_user(self.user)
 		self.run_stack[-1][1] += 1
