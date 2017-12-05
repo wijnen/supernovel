@@ -1,10 +1,9 @@
-@keyframes move {
-	from {
-		left: -10%;
-	}
-	to {
-		left: 50%;
-	}
+body {
+	background-origin: content-box;
+	background-attachment: fixed;
+	background-position: center center;
+	background-repeat: no-repeat;
+	background-size: cover;
 }
 
 #login, #video, #question {
@@ -29,6 +28,7 @@ button {
 	height: 8em;
 	border: 2px black solid;
 	border-radius: 1em;
+	background-color: rgba(255, 255, 255, 0.9);
 }
 
 #speaker {

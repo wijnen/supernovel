@@ -5,6 +5,7 @@ var kinetic_pos = 0;
 var kinetic_sprites = {};
 var kinetic_end = null;
 var classes = {};
+var preparing_animation;
 
 var Connection = {
 	replaced: function() {
@@ -53,7 +54,9 @@ var Connection = {
 		question.innerHTML = '';
 		video.pause();
 		kinetic_end = function() {
+			speechbox.style.display = 'none';
 			question.style.display = 'block';
+			// Clear speech so the old text cannot reappear by accident.
 			speaker.style.display = 'none';
 			speech.innerHTML = '';
 			var get_value;
@@ -162,7 +165,8 @@ var Connection = {
 		};
 		kinetic_script = story;
 		kinetic_pos = 0;
-		next_kinetic();
+		preparing_animation = false;
+		next_kinetic(true);
 	},
 	video: function(file) {
 		video.src = file;
@@ -180,11 +184,15 @@ var Connection = {
 // Script is a list of instructions:
 // ['text', speaker, text, image]: speech. with empty speaker, hide speaker box; empty image, hide photo; empty all, hide all.
 // ['scene', url]: set new background and remove all sprites. With no url, clear all.
-// ['style', speaker, css_tag, value]: set sprite style.
+// ['style', tag, css_tag, value]: set sprite style.
 // ['image', tag, url]: set sprite image.
+// ['pre-wait']: wait for next animation frame, to make sure all prepared style attributes are applied.
 // ['wait', seconds]: wait specified time before next step.
 
-function next_kinetic() {
+function next_kinetic(force) {
+	if (!force && in_kinetic)
+		return;
+	in_kinetic = true;
 	while (kinetic_script !== null && kinetic_pos < kinetic_script.length) {
 		var cmd = kinetic_script[kinetic_pos++];
 		//console.info('kinetic', cmd);
@@ -200,6 +208,7 @@ function next_kinetic() {
 				speech.innerHTML = cmd[2];
 				photo.style.display = (cmd[3] ? 'block' : 'none');
 				photo.src = cmd[3] ? cmd[3] : '';
+				in_kinetic = false;
 				return;
 			case 'scene':
 				var sprites = [];
@@ -207,14 +216,16 @@ function next_kinetic() {
 					sprites.push(s);
 				for (var i = 0; i < sprites.length; ++i)
 					kill_sprite(sprites[i]);
-				document.getElementsByTagName('body')[0].style.backgroundImage = cmd[1];
+				console.info(cmd[1]);
+				document.getElementsByTagName('body')[0].style.backgroundImage = 'url(' + cmd[1] + ')';
 				break;
 			case 'style':
+				console.info('style', cmd[1], cmd[2], cmd[3]);
 				if (cmd[2] == 'transition') {
 					kinetic_sprites[cmd[1]].style.transition = cmd[3];
 					break;
 				}
-				classes[cmd[1]][0].style[cmd[2]] = classes[cmd[1]][1].style[cmd[2]];
+				classes[cmd[1]][0].style[cmd[2]] = (preparing_animation ? classes[cmd[1]][1].style[cmd[2]] : cmd[3]);
 				classes[cmd[1]][1].style[cmd[2]] = cmd[3];
 				kinetic_sprites[cmd[1]].RemoveClass('moved-' + cmd[1]);
 				break;
@@ -228,21 +239,32 @@ function next_kinetic() {
 				else
 					kill_sprite(cmd[1]);
 				break;
+			case 'pre-wait':
+				console.info('pre-wait');
+				preparing_animate = true;
+				// Wait two animation frames, just to be sure.
+				requestAnimationFrame(function() {
+					requestAnimationFrame(function() {
+						next_kinetic(true);
+					});
+				});
+				return;
 			case 'wait':
+				console.info('wait');
+				for (var s in kinetic_sprites) {
+					kinetic_sprites[s].AddClass('moved-' + s);
+				}
+				preparing_animation = false;
 				setTimeout(function() {
-					for (var s in kinetic_sprites) {
-						kinetic_sprites[s].AddClass('moved-' + s);
-					}
-					setTimeout(function() {
-						finish_moves();
-						next_kinetic();
-					}, cmd[1] * 1000);
-				}, 0);
+					finish_moves();
+					next_kinetic(true);
+				}, cmd[1] * 1000);
 				return;
 			default:
 				console.error('invalid kinetic command', cmd);
 		}
 	}
+	in_kinetic = false;
 	if (kinetic_script !== null && kinetic_pos >= kinetic_script.length) {
 		kinetic_script = null;
 		if (kinetic_end) {
@@ -286,6 +308,7 @@ function finish_moves() {
 		classes[s][0].style.marginLeft = '-' + (kinetic_sprites[s].width / 2) + 'px';
 		kinetic_sprites[s].RemoveClass('moved-' + s);
 	}
+	in_kinetic = false;
 }
 
 function init() {
@@ -321,7 +344,7 @@ function init() {
 			return;
 		event.preventDefault();
 		if (event.charCode == 32)
-			next_kinetic();
+			next_kinetic(false);
 		else
 			prev_kinetic();
 	});
@@ -331,13 +354,17 @@ function init() {
 		if (kinetic_script === null)
 			return;
 		event.preventDefault();
-		next_kinetic();
+		next_kinetic(false);
 	});
 }
 window.AddEvent('load', init);
 
 function connection_lost() {
-	alert('De verbinding met de server is verbroken.');
+	try {
+		alert('De verbinding met de server is verbroken.');
+	}
+	catch(err) {
+	}
 }
 
 function log_in() {

@@ -6,24 +6,28 @@ import os
 import re
 import crypt
 import traceback
+import time
 import fhs
 import websocketd
 from markdown import markdown
 from websocketd import log
-config = fhs.init({'data': '.', 'port': '8000', 'admin-port': '8001', 'loglimit': 4, 'content': 'content', 'lazysave': False, 'secret': ''})
-# }}}
-
-''' Log priorities: {{{
-		0: Critical (system panic)
-		1: Important (system oops)
-		2: Normal (communication errors)
-		3: Minor (connections made or lost)
-		4: Debug
-}}} '''
-
+config = fhs.init({'data': '.', 'port': '8000', 'admin-port': '8001', 'loglimit': 2, 'content': 'content', 'lazysave': False, 'secret': '', 'logfile': ''})
+logfile = open(config['logfile'], 'a') if config['logfile'] else None
 def debug(priority, message):
 	if priority <= config['loglimit']:
 		log(message)
+	if logfile:
+		logfile.write('{}: ({}) {}\n'.format(time.strftime('%c', time.gmtime()), priority, message))
+		logfile.flush()
+import content
+# }}}
+
+''' Log priorities: {{{
+		0: Critical (system code errors)
+		1: Important (user code errors)
+		2: Normal (communication notifications)
+		3: Debug
+}}} '''
 
 # User management. {{{
 users = {}	# including admins.
@@ -32,40 +36,45 @@ admins = {}
 def mangle(src): # {{{
 	def escape(x):
 		return x.replace('\\', '\\\\').replace(';', '\,').replace(':', '\.').replace('\n', '\\n')
-	styles = ':'.join('/'.join(s) for s in src[1:])
+	styles = ':' + ':'.join(escape('/'.join(s)) for s in src[1])
 	answer = src[0]
-	# TODO: add styles to output.
 	if isinstance(answer, int):
-		return 'i{}'.format(answer)
+		return 'i{}'.format(answer) + styles
 	if isinstance(answer, float):
-		return 'f{}'.format(answer)
+		return 'f{}'.format(answer) + styles
 	if isinstance(answer, tuple):
 		if isinstance(answer[0], tuple):
 			if answer[0][0] is None:
 				return 'U/{}/{}'.format(escape(answer[0][1]), escape(answer[1]))
-			return 'U{}/{}/{}'.format(answer[0][0], escape(answer[0][1]), escape(answer[1]))
+			return 'U{}/{}/{}'.format(answer[0][0], escape(answer[0][1]), escape(answer[1])) + styles
 		if answer[0] is None:
-			return 'F/{}'.format(escape(answer[1]))
+			return 'F/{}'.format(escape(answer[1])) + styles
 		if isinstance(answer[0], int):
-			return 'I{}/{}'.format(answer[0], escape(answer[1]))
+			return 'I{}/{}'.format(answer[0], escape(answer[1])) + styles
 		elif isinstance(answer[0], float):
-			return 'F{}/{}'.format(answer[0], escape(answer[1]))
+			return 'F{}/{}'.format(answer[0], escape(answer[1])) + styles
 		else:
-			return 'S{}/{}'.format(answer[0], escape(answer[1]))
+			return 'S{}/{}'.format(answer[0], escape(answer[1])) + styles
 	try:
-		return 's' + escape(answer)
+		return 's' + escape(answer) + styles
 	except:
-		log('Error: unable to mangle {}'.format(repr(src)))
-		return 's' + escape(repr(src))
+		debug(1, 'Error: unable to mangle {}'.format(repr(src)))
+		return 's' + escape(repr(src)) + styles
 # }}}
 
 def unmangle(src): # {{{
+	# 'answer:key/value:key/value'
 	def unescape(x):
 		return x.replace('\\n', '\n').replace('\\.', ':').replace('\\,', ';').replace('\\/', '\\').strip()
 	try:
 		parts = src.split(':')
 		answer = parts[0]
-		styles = [tuple(p.split('/', 1)) for p in parts[1:]]
+		styles = []
+		for p in parts[1:]:
+			if '/' not in p:
+				continue
+			key, value = p.split('/', 1)
+			styles.append((unescape(key), unescape(value)))
 		if answer[0] == 'i':
 			return int(answer[1:]), styles
 		if answer[0] == 'f':
@@ -75,13 +84,13 @@ def unmangle(src): # {{{
 		if answer[0] == 'I':
 			r = re.match(r'I(.*?)/(.*)$', answer)
 			if not r:
-				log('Error unmangling long int: {}'.format(answer))
+				debug(1, 'Error unmangling long int: {}'.format(answer))
 				return (None, unescape(answer)), styles
 			return (int(r.group(1)), unescape(r.group(2))), styles
 		if answer[0] == 'F':
 			r = re.match(r'F(.*?)/(.*)$', answer)
 			if not r:
-				log('Error unmangling long float: {}'.format(answer))
+				debug(1, 'Error unmangling long float: {}'.format(answer))
 				return (None, unescape(answer)), styles
 			if r.group(1) == '':
 				return (None, unescape(r.group(2))), styles
@@ -89,20 +98,21 @@ def unmangle(src): # {{{
 		if answer[0] == 'S':
 			r = re.match(r'S(.*?)/(.*)$', answer)
 			if not r:
-				log('Error unmangling long string: {}'.format(answer))
+				debug(1, 'Error unmangling long string: {}'.format(answer))
 				return (None, unescape(answer)), styles
 			return (unescape(r.group(1)), unescape(r.group(2))), styles
 		if answer[0] == 'U':
 			r = re.match(r'U(.*?)/(.*?)/(.*)$', answer)
 			if not r:
-				log('Error unmangling long unit: {}'.format(answer))
+				debug(1, 'Error unmangling long unit: {}'.format(answer))
 				return ((None, ''), unescape(answer)), styles
 			if r.group(1) == '':
 				return ((None, unescape(r.group(2))), unescape(r.group(3))), styles
 			return ((float(r.group(1)), unescape(r.group(2))), unescape(r.group(3))), styles
 	except:
+		traceback.print_exc()
 		pass
-	log('Error unmangling: invalid first character of {}'.format(repr(src)))
+	debug(1, 'Error unmangling: invalid first character of {}'.format(repr(src)))
 	return src, ()
 # }}}
 
@@ -110,12 +120,12 @@ def load_user(name, group): # {{{
 	if (name.lower(), group.lower()) in users:
 		return users[(name.lower(), group.lower())], None
 	if not os.path.exists(os.path.join(config['data'], 'users', group.lower())):
-		debug(2, 'load_user called for nonexistent group {}:{}'.format(name, group))
+		debug(0, 'load_user called for nonexistent group {}:{}'.format(name, group))
 		return None, None
 	if not os.path.exists(os.path.join(config['data'], 'users', group.lower(), name.lower())):
-		debug(2, 'load_user called for nonexistent user {}:{}'.format(name, group))
+		debug(0, 'load_user called for nonexistent user {}:{}'.format(name, group))
 		return None, None
-	ret = {'name': name, 'group': group.lower(), 'connection': None, 'password': None, 'nosave': False}
+	ret = {'filename': name.lower(), 'name': name, 'group': group.lower(), 'connection': None, 'password': None, 'nosave': False}
 	answers = {}
 	for ln in open(os.path.join(config['data'], 'users', group.lower(), name.lower())):
 		if ln.strip() == '':
@@ -133,8 +143,8 @@ def load_user(name, group): # {{{
 			continue
 		ret[key] = value.rstrip('\n')
 	# Make sure name and group match file location.
-	if ret['name'].casefold() != name.casefold():
-		ret['name'] = name
+	if ret['filename'] != name.lower():
+		ret['filename'] = name.lower()
 	if ret['group'].casefold() != group.casefold():
 		ret['group'] = group
 	return ret, answers
@@ -143,14 +153,14 @@ def load_user(name, group): # {{{
 def list_users(group): # {{{
 	path = os.path.join(config['data'], 'users', group.lower())
 	if not os.path.exists(path):
-		debug(2, 'list_users called for nonexistent group {}'.format(group))
+		debug(0, 'list_users called for nonexistent group {}'.format(group))
 		return []
 	return [p for p in os.listdir(path) if p == p.lower() and not os.path.isdir(os.path.join(path, p))]
 # }}}
 
 def save_user(user): # {{{
 	'''Save user information to disk. user['connection'] is valid while this is called, but the connection may be closed.'''
-	with open(os.path.join(config['data'], 'users', user['group'].lower(), user['name'].lower()), 'w') as f:
+	with open(os.path.join(config['data'], 'users', user['group'].lower(), user['filename']), 'w') as f:
 		for key in user:
 			if key == 'connection':
 				continue
@@ -175,338 +185,6 @@ def refresh_admins(): # {{{
 # }}}
 # }}}
 
-# Content management. {{{
-def content_list(group): # {{{
-	content_dir = os.path.join(config['data'], 'users', group.lower(), 'Content')
-	'''Get a list of available sections.'''
-	ret = [os.path.splitext(c)[0] for c in os.listdir(content_dir) if c.endswith('.script') and not os.path.isdir(os.path.join(content_dir, c))]
-	ret.sort()
-	return ret
-# }}}
-
-def parse_transition(transition, at): # {{{
-	'''Parse a transition that was specified by "with".
-	Returns: (csskey, seconds, from, to)
-	'''
-	timing = .5
-	if not transition:
-		return ('left', 0, '', at)
-	if transition == 'move':
-		return ('left', timing, '', at)
-	elif transition == 'moveinleft':
-		return ('left', timing, '-20%', at)
-	elif transition == 'moveinright':
-		return ('left', timing, '120%', at)
-	elif transition == 'moveoutleft':
-		return ('left', timing, '', '-20%')
-	elif transition == 'moveoutright':
-		return ('left', timing, '', '120%')
-	elif transition == 'dissolve':
-		return ('opacity', timing, '0%', '100%')
-	else:
-		log('unknown transition: {}'.format(repr(transition)))
-		return ('left', 0, '', at)
-# }}}
-
-def showhide(show, tag, mod, at, transition, characters, in_with, with_hide):
-	'''Create event list for showing or hiding a character.'''
-	ret = []
-	if not at:
-		at = 'center'
-	names = {'left': '30%', 'right': '70%', 'center': '50%'}
-	if at in names:
-		at = names[at]
-	if tag not in characters:
-		log('{}: error: unknown character tag {}'.format(nr, tag))
-		return []
-	name, imgs, ext = characters[tag]
-	if transition:
-		transition = parse_transition(transition, at)
-	if in_with:
-		if not transition:
-			transition = in_with
-		if transition[3] is None:
-			transition = transition[:3] + (at,)
-		transition = (transition[0], in_with[1]) + transition[2:]
-	elif not transition:
-		transition = parse_transition(None, at)
-	if show:
-		# When showing, define the image first.
-		url = imgs + (mod if mod else 'default') + ext
-		ret.append(['image', tag, url])
-	if transition[2]:
-		# There is a from position specified.  Place the image there without a transition.
-		ret.append(['style', tag, 'transition', ''])
-		ret.append(['style', tag, transition[0], transition[2]])
-	if transition[1]:
-		# Timing is specified.  Apply it.
-		ret.append(['style', tag, 'transition', transition[0] + ' ' + str(transition[1]) + 's'])
-	if show or transition[1]:
-		# This is not an instantaneous hide.  Set the position.
-		ret.append(['style', tag, transition[0], transition[3]])
-	if transition[1] and not in_with:
-		# Timing is specified.  Wait for it.
-		ret.append(['wait', transition[1]])
-	if not show:
-		# When hiding, (un)define the image last.
-		if in_with:
-			with_hide.append(tag)
-		else:
-			ret.append(['image', tag, ''])
-	return ret
-
-def get_content(group, section): # {{{
-	'''Get the program for a section.'''
-	content_dir = os.path.join(config['data'], 'users', group.lower(), 'Content')
-	filename = os.path.join(content_dir, section + '.script')
-	if not os.path.exists(filename):
-		log('Error: file {} does not exist'.format(filename))
-		return [], {}
-	with open(filename) as f:
-		parts = []
-		stack = [parts]
-		istack = [None]
-		index = {}
-		characters = {}
-		labels = []
-		last_label = ''
-		in_string = False
-		in_comment = False
-		in_speech = False
-		in_with = False
-		with_hide = []
-		def add_story_item(item = None):
-			if len(stack) == 0 or len(stack[-1]) == 0 or stack[-1][-1][0] != 'story':
-				stack[-1].append(['story', None, []])
-			if item is not None:
-				if isinstance(item, str) and len(stack[-1][-1][2]) > 0 and isinstance(stack[-1][-1][2][-1], str):
-					stack[-1][-1][2][-1] += '\n' + item
-				else:
-					stack[-1][-1][2].append(item)
-		for nr, ln in enumerate(f):
-			ln = ln.rstrip()
-			if in_string:
-				if ln.strip() != '' and ln[:istack[-1]].strip() != '':
-					log('{}: indentation error in block string'.format(nr))
-				ln = ln[istack[-1]:]
-				if ln.endswith(in_string):
-					ln = ln[:-len(in_string)].rstrip()
-					in_string = False
-					if ln != '':
-						add_story_item(ln)
-					continue
-				add_story_item(ln)
-				continue
-			if in_comment:
-				if ln.strip() != '' and ln[:istack[-1]].strip() != '':
-					log('{}: indentation error in block comment'.format(nr))
-				if ln.endswith('###'):
-					in_comment = False
-				continue
-			if in_speech:
-				if ln.strip() == '' or ln[:istack[-1]].strip() == '':
-					stack[-1][-1][2] += '\n' + ln[istack[-1]:]
-					continue
-				in_speech = False
-				istack.pop()
-			ilevel = len(ln) - len(ln.strip())
-			ln = ln.strip()
-			if ln.startswith('###'):
-				if len(ln) > 3 and ln.endswith('###'):
-					continue
-				in_comment = True
-				continue
-			if ln.startswith('#') or ln == '':
-				continue
-			if istack[-1] is None:
-				if len(istack) > 1 and ilevel <= istack[-2]:
-					log('{}: indented block expected'.format(nr))
-					istack[-1] = istack[-2]
-				else:
-					istack[-1] = ilevel
-			while ilevel < istack[-1]:
-				istack.pop()
-				if in_with:
-					# Finish animation.
-					log('finish {}'.format(stack[-1][-1]))
-					stack[-1][-1][2].append(['wait', in_with[1]])
-					for tag in with_hide:
-						stack[-1][-1][2].append(['image', tag, ''])
-					with_hide = []
-					in_with = False
-				else:
-					stack.pop()
-			if ilevel != istack[-1]:
-				log('{}: unexpected indentation'.format(nr))
-			if len(istack) >= 2 and istack[-2] is None:
-				istack[-2] = istack[-1]
-			if ln.strip().startswith("'''") or ln.strip().startswith('"""'):
-				in_string = ln[:3]
-				ln = ln[3:]
-				if ln.endswith(in_string):
-					ln = ln[:-len(in_string)].rstrip()
-					in_string = False
-					add_story_item(ln)
-					continue
-				add_story_item()
-				if ln != '':
-					add_story_item(ln)
-				continue
-			r = re.match(r'(["\'])(.*)\1\s*$', ln)
-			if r:
-				add_story_item(r.group(2))
-				continue
-			r = re.match(r'answer\s+(.+?)\s+(.+?)\s*$', ln)
-			if r:
-				stack[-1].append(['answer', None, r.group(1), r.group(2)])
-				continue
-			r = re.match(r'label\s+(.+?)\s*$', ln)
-			if r:
-				# Labels are only allowed at top level.
-				if len(stack) != 1:
-					log('{}: labels are only allowed at top level'.format(nr))
-					continue
-				name = r.group(1)
-				if name.startswith('.'):
-					name = last_label + name
-				else:
-					last_label = name
-				index[name] = len(stack[-1])
-				stack[-1].append(['label', None, name]) # Label name is not used, but good for debugging.
-				continue
-			r = re.match(r'goto\s+(.+?)\s*$', ln)
-			if r:
-				name = r.group(1)
-				if name.startswith('.'):
-					name = last_label + name
-				stack[-1].append(['goto', None, 0]) # Label is filled in at end.
-				labels.append((name, stack[-1][-1]))
-				continue
-			r = re.match(r'if\s+(.+):$', ln)
-			if r:
-				stack[-1].append(['if', None, [r.group(1), []], None])
-				stack.append(stack[-1][-1][-2][1])
-				istack.append(None)
-				continue
-			r = re.match(r'elif\s+(.+):$', ln)
-			if r:
-				if stack[-1][-1][0] != 'if':
-					log('{}: elif without if'.format(nr))
-					continue
-				if stack[-1][-1][-1] is not None:
-					log('{}: elif after else'.format(nr))
-					continue
-				stack[-1][-1].insert(-1, [r.group(1), []])
-				stack.append(stack[-1][-1][-2][1])
-				istack.append(None)
-				continue
-			r = re.match(r'else\s*:$', ln)
-			if r:
-				if stack[-1][-1][0] != 'if':
-					log('{}: else without if'.format(nr))
-					continue
-				if stack[-1][-1][-1] is not None:
-					log('{}: else after else'.format(nr))
-					continue
-				stack[-1][-1][-1] = []
-				stack.append(stack[-1][-1][-1])
-				istack.append(None)
-				continue
-			r = re.match(r'while\s+(.+):$', ln)
-			if r:
-				stack[-1].append(['while', None, r.group(1), []])
-				stack.append(stack[-1][-1][3])
-				istack.append(None)
-				continue
-			if ln in ('continue', 'break'):
-				stack[-1].append([ln, None])
-				continue
-			r = re.match(r'character\s+(\S+)(\s+(\S+)(\s+(.*?))?)?\s*$', ln)
-			if r:
-				tag = r.group(1)
-				url = r.group(3)
-				name = r.group(5)
-				imgdir, ext = os.path.splitext(url)
-				fulldir = config['content'] + '/' + group.lower() + '/' + section + '/' + imgdir + '/'
-				characters[tag] = (name, fulldir, ext)
-				continue
-			r = re.match(r'scene(\s+(.*?))?$', ln)
-			if r:
-				add_story_item(['scene', r.group(1)])
-				continue
-			r = re.match(r'(show|hide)\s+(\S+)(\s+(\S*))?(\s+at\s+(.*?))?(\s+with\s+(.*?))?$', ln)
-			if r:
-				show = r.group(1) == 'show'
-				tag = r.group(2)
-				mod = r.group(4)
-				at = r.group(6)
-				transition = r.group(8)
-				add_story_item()
-				stack[-1][-1][2].extend(showhide(show, tag, mod, at, transition, characters, in_with, with_hide))
-				continue
-			r = re.match(r'with\s+(\S+)\s*:$', ln)
-			if r:
-				if in_with:
-					log('{}: error: nested with blocks')
-				in_with = parse_transition(r.group(1), None)
-				istack.append(None)
-				continue
-			r = re.match(r'say\s+(.)(.*?)\1:\s+(.*)$', ln)
-			if r:
-				add_story_item(['text', r.group(2), r.group(3), None])
-				if r.group(3) == '':
-					in_speech = True
-					istack.append(None)
-				continue
-			if ln.startswith('$'):
-				if len(stack[-1]) > 0 and stack[-1][-1][0] == 'python':
-					if ln[1:1 + indent].strip() != '':
-						log('{}: python indentation must be at least the initial indentation'.format(nr))
-						continue
-				else:
-					indent = len(ln) - len(ln[1:].strip()) - 1
-					stack[-1].append(['python', None, []])
-				stack[-1][-1][2].append(ln[1 + indent:])
-				continue
-			r = re.match(r'video\s+(.+)$', ln)
-			if r:
-				stack[-1].append(['video', None, r.group(1)])
-				continue
-			r = re.match(r'(number|unit|short|long|longnumber|longunit|longshort)\s+([a-zA-Z_][a-zA-Z0-9_]*)$', ln)
-			if r:
-				stack[-1].append([r.group(1), None, r.group(2)])
-				continue
-			r = re.match(r'((long)?choice)\s+([a-zA-Z_][a-zA-Z0-9_]*)(.)(.+)$', ln)
-			if r:
-				stack[-1].append([r.group(1), None, r.group(3)] + r.group(5).split(r.group(4)))
-				continue
-			r = re.match(r'(.*?)\s*:\s*(.*?)\s*$', ln)
-			if r and r.group(1) in characters:
-				c = characters[r.group(1)]
-				add_story_item(['text', c[0], r.group(2), c[1] + 'side' + c[2] if c[2] else None])
-				if not r.group(2):
-					in_speech = True
-					istack.append(None)
-				continue
-			debug(1, 'invalid line: ' + ln)
-		for label, src in labels:
-			src[2] = index[label]
-	# Create all paths.
-	def make_paths(path, items):
-		for i, item in enumerate(items):
-			item[1] = path + (i,)
-			if item[0] == 'while':
-				make_paths(path + (i,), item[3])
-			elif item[0] == 'if':
-				for n, target in enumerate(item[2:-1]):
-					make_paths(path + (i, n), target[1])
-				if item[-1] is not None:
-					make_paths(path + (i, len(item) - 2), item[-1])
-	make_paths((), parts)
-	return parts, index, characters
-# }}}
-# }}}
-
 class Admin_Connection: # {{{
 	def __init__(self, remote): # {{{
 		self.remote = remote
@@ -525,13 +203,11 @@ class Admin_Connection: # {{{
 	def login(self, name, password): # {{{
 		user, answers = load_user(name, 'admin')
 		if user is None:
-			debug(2, 'Invalid admin {}'.format(name))
+			debug(2, 'Invalid admin {} from {}:{}'.format(name, *self.remote.socket.remote))
 			return False
 		crypted = crypt.crypt(password, salt = user['password'])
-		log('pwd: {}'.format(repr(user['password'])))
-		log('new: {}'.format(repr(crypted)))
 		if crypted != user['password']:
-			debug(2, 'Invalid password for {}'.format(name))
+			debug(2, 'Invalid password for {} from {}:{}'.format(name, *self.remote.socket.remote))
 			return False
 		if not self._login(name):
 			self.remote.login.event()
@@ -553,7 +229,7 @@ class Admin_Connection: # {{{
 			users[(name.lower(), 'admin')] = user
 		user['connection'] = self
 		self.user = user
-		debug(3, 'Admin {} logged in'.format(name))
+		debug(2, 'Admin {} logged in from {}:{}'.format(name, *self.remote.socket.remote))
 		admins[name.lower()] = self
 		self.list_groups()
 		return True
@@ -561,14 +237,15 @@ class Admin_Connection: # {{{
 	def _closed(self): # {{{
 		self.remote.close()
 		if self.user is None:
+			debug(2, 'admin connection to {}:{} lost before logging in'.format(*self.remote.socket.remote))
 			return
-		debug(3, 'disconnecting admin {}'.format(self.user['name']))
+		debug(2, 'disconnecting admin {}'.format(self.user['name']))
 		try:
-			users.pop((self.user['name'].lower(), 'admin'))
+			users.pop((self.user['filename'], 'admin'))
 		except:
 			pass
 		try:
-			admins.pop(self.user['name'].lower())
+			admins.pop(self.user['filename'])
 		except:
 			pass
 	# }}}
@@ -580,7 +257,7 @@ class Admin_Connection: # {{{
 			if g == 'admin':
 				continue
 			groups.append([g])
-			for s in content_list(g):
+			for s in content.list(g):
 				groups[-1].append((s, sum(users[u]['group'].lower() == g and users[u]['connection'].section == s for u in users)))
 		groups.sort()
 		self.remote.group_list.event(groups)
@@ -588,10 +265,9 @@ class Admin_Connection: # {{{
 	def show_section(self, group, section): # {{{
 		'''Show questions for one section.'''
 		self.refresh = lambda: self.show_section(group, section)
-		parts, index, characters = get_content(group, section)
+		parts, index, characters = content.get(group, section)
 		questions = []
 		def add_block(block):
-			log('block: ' + repr(block))
 			for p in block:
 				if p[0] == 'while':
 					add_block(p[3])
@@ -625,7 +301,7 @@ class Admin_Connection: # {{{
 				continue
 			student, answers = load_user(u, group)
 			if student is None:
-				log('student found but unloadable: {}:{}'.format(u, group))
+				debug(0, 'student found but unloadable: {}:{}'.format(u, group))
 				continue
 			others.append((student['name'], None) + tuple(make_other_field(student, q, answers) for q in questions))
 		others.sort()
@@ -641,6 +317,7 @@ class Admin_Connection: # {{{
 
 class Connection: # {{{
 	def __init__(self, remote): # {{{
+		debug(2, 'New connection from {}:{}'.format(*remote.socket.remote))
 		self.remote = remote
 		self.text_buffer = []
 		self.full_section = []
@@ -649,6 +326,7 @@ class Connection: # {{{
 		self.section = None	# Current section.
 		self.answers = {}	# Answers that have been given to all the questions so far.
 		self.variables = {}
+		self.last_path = None
 		q = remote.data['query']
 		keys = ('name', 'group', 'secret')
 		if config['secret'] != '' and all(x in q for x in keys) and q['secret'][0] == config['secret']:
@@ -661,13 +339,12 @@ class Connection: # {{{
 		def subst(obj):
 			try:
 				ret = eval(obj.group(1), self.variables)
-				log('subst: ' + repr(ret))
 				return str(ret)
 			except:
-				log('error evaluating expression substitution {}'.format(obj.group(0)))
+				debug(1, 'error evaluating expression substitution {}'.format(obj.group(0)))
 				traceback.print_exc()
 				return '[fout]'
-		return re.sub('\${(.*?)}', subst, text).replace('FILE://', config['content'] + '/' + self.user['group'].lower() + '/' + self.section + '/')
+		return re.sub('\${(.*?)}', subst, text).replace('FILE://common/', config['content'] + 'common/').replace('FILE://', config['content'] + '/' + self.user['group'].lower() + '/' + self.section + '/')
 	# }}}
 	def _add_text(self, text): # {{{
 		'''Prepare text for displaying.'''
@@ -685,11 +362,11 @@ class Connection: # {{{
 	def login(self, name, group, password): # {{{
 		user, answers = load_user(name, group)
 		if user is None:
-			debug(2, 'Invalid user {}:{}'.format(name, group))
+			debug(2, 'Invalid user {}:{} on {}:{}'.format(name, group, *self.remote.socket.remote))
 			return False
 		crypted = crypt.crypt(password, salt = user['password'])
 		if user['password'] is not None and crypted != user['password']:
-			debug(2, 'Invalid password for {}:{}'.format(name, group))
+			debug(2, 'Invalid password for {}:{} on {}:{}'.format(name, group, *self.remote.socket.remote))
 			return False
 		user = self._login(name, group)
 		# In case the password is new, it needs to be stored.
@@ -699,10 +376,10 @@ class Connection: # {{{
 	def _login(self, name, group): # {{{
 		user, answers = load_user(name, group)
 		if user is None:
-			log('failed login for {}:{}'.format(name, group))
+			debug(2, 'failed login for {}:{}'.format(name, group))
 			return None
 		if user['connection'] is not None:
-			debug(3, 'Replacing connection for ' + name)
+			debug(2, 'Replacing connection for ' + name)
 			try:
 				user['connection'].remote.replaced.event()
 			except:
@@ -714,8 +391,8 @@ class Connection: # {{{
 			users[(name.lower(), group.lower())] = user
 		user['connection'] = self
 		self.user = user
-		debug(3, 'User {}:{} logged in'.format(name, group))
-		self.remote.contents.event(content_list(group))
+		debug(2, 'User {}:{} logged in from {}:{}'.format(name, group, *self.remote.socket.remote))
+		self.remote.contents.event(content.list(group))
 		self.remote.main.event()
 		refresh_admins()
 		return user
@@ -723,16 +400,23 @@ class Connection: # {{{
 	def _answer(self, key, value = None): # {{{
 		'''Set style for last answer.
 		With only one argument, the style of the background is set.'''
+		if self.last_path is None:
+			debug(1, 'answer style given before a question was answered')
+			return
 		if value is None:
 			value = key
+			key = None
+		if key is None:
 			key = 'background'
-		# TODO
+		self.answers[self.section][self.last_path][-1][1].append((key.strip(), value.strip()))
+		refresh_admins()
 	# }}}
 	def start(self, section): # {{{
 		self.section = section
-		self.full_section, self.index, characters = get_content(self.user['group'], self.section)
+		self.full_section, self.index, characters = content.get(self.user['group'], self.section)
 		self.run_stack = [[self.full_section, 0]]
 		self.characters = {}
+		self.last_path = None
 		def goto(label):
 			while len(self.run_stack) > 1:
 				self.run_stack.pop()
@@ -771,10 +455,10 @@ class Connection: # {{{
 		self.text_buffer.append(('text', name, self._parse_text(text), image))
 	# }}}
 	def _show(self, tag, mod = None, at = 'center', transition = None): # {{{
-		self._run_item(['story', None, showhide(True, tag, mod, at, transition, self.characters, None, None)])
+		self._run_item(['story', None, content.showhide(True, tag, mod, at, transition, self.characters, None, None)])
 	# }}}
 	def _hide(self, tag, at = 'center', transition = None): # {{{
-		self._run_item(['story', None, showhide(False, tag, None, at, transition, self.characters, None, None)])
+		self._run_item(['story', None, content.showhide(False, tag, None, at, transition, self.characters, None, None)])
 	# }}}
 	def _run(self): # {{{
 		while len(self.run_stack) > 0:
@@ -783,12 +467,13 @@ class Connection: # {{{
 				self.run_stack.pop()
 				if len(self.run_stack) == 0:
 					if len(self.text_buffer) > 0:
-						debug(4, 'final text')
 						self._handle_story('text', self.text_buffer)
 						self.text_buffer = []
 						self.run_stack = [[self.full_section, len(self.full_section)]]
+						refresh_admins()
 						return
 					self.section = None
+					refresh_admins()
 					self.remote.main.event()
 					return
 			# Run instructions.
@@ -797,7 +482,7 @@ class Connection: # {{{
 		refresh_admins()
 	# }}}
 	def _run_item(self, code): # {{{
-		debug(4, 'running item ' + repr(code))
+		debug(3, '{}:{} running item {}'.format(self.user['name'], self.user['group'], repr(code)))
 		if code[0] == 'label':
 			pass
 		elif code[0] == 'story':
@@ -872,26 +557,26 @@ class Connection: # {{{
 		self.remote.story.event(q, [handle(x) for x in text_buffer], *args)
 	# }}}
 	def answer(self, answer): # {{{
-		debug(4, '{}:{} answers {}'.format(self.user['name'], self.user['group'], answer))
+		debug(3, '{}:{} answers {}'.format(self.user['name'], self.user['group'], answer))
 		if self.run_stack[-1][1] >= len(self.run_stack[-1][0]):
 			self._run()
 			return
 		current = self.run_stack[-1][0][self.run_stack[-1][1]]
 		if current[0] not in ('number', 'short', 'long', 'choice', 'unit', 'longnumber', 'longshort', 'longunit', 'longchoice'):
-			log('answer given for non-question: {}'.format(current))
+			debug(1, 'answer given by {}:{} for non-question: {}'.format(self.remote.socket.remote[0], self.remote.socket.remote[1], current))
 			return
 		store = not current[2].startswith('_')
 		def parse_unit(src):
 			r = re.match('\s*([+-]?[0-9]*([.,]\d*)?(e[+-]?\d+)?)\s*(\S*)\s*$', src)
 			if not r:
-				debug(4, 'no match for unit answer')
+				debug(3, 'no match for unit answer')
 				answer = (None, str(src).strip())
 			try:
 				value = float(r.group(1).replace(',' ,'.'))
 				answer = (value, r.group(4))
 			except:
 				answer = (None, str(src).strip())
-			debug(4, 'unit-split answer: {}'.format(answer))
+			debug(3, 'unit-split answer: {}'.format(answer))
 			return answer
 		if current[0] == 'choice':
 			try:
@@ -933,8 +618,11 @@ class Connection: # {{{
 			if path not in self.answers[self.section]:
 				self.answers[self.section][path] = []
 			self.answers[self.section][path].append((answer, []))
+			self.last_path = path
 			if not config['lazysave']:
 				save_user(self.user)
+		else:
+			self.last_path = None
 		self.run_stack[-1][1] += 1
 		self._run()
 	# }}}
@@ -959,11 +647,12 @@ class Connection: # {{{
 	def _closed(self): # {{{
 		self.remote.close()
 		if not hasattr(self, 'user'):
+			debug(2, 'connection to {}:{} lost before logging in'.format(*self.remote.socket.remote))
 			return
-		debug(3, 'disconnecting {}:{}'.format(self.user['name'], self.user['group']))
+		debug(2, 'disconnecting {}:{}'.format(self.user['name'], self.user['group']))
 		save_user(self.user)
 		try:
-			users.pop((self.user['name'].lower(), self.user['group'].lower()))
+			users.pop((self.user['filename'], self.user['group'].lower()))
 		except:
 			pass
 		refresh_admins()
