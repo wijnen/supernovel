@@ -39,7 +39,7 @@ def parse_transition(transition, at): # {{{
 		return ('left', 0, '', at)
 # }}}
 
-def showhide(show, tag, mod, at, transition, characters, in_with, after): # {{{
+def showhide(show, tag, mod, at, transition, characters, in_with, after, hiders): # {{{
 	'''Create event list for showing or hiding a character.'''
 	ret = []
 	if not in_with:
@@ -82,7 +82,10 @@ def showhide(show, tag, mod, at, transition, characters, in_with, after): # {{{
 		after.append(['wait', transition[1]])
 	if not show:
 		# When hiding, (un)define the image last.
-		after.append(['image', tag, ''])
+		if in_with:
+			hiders.append(['image', tag, ''])
+		else:
+			after.append(['image', tag, ''])
 	if not in_with:
 		ret.append(['pre-wait'])
 		ret.extend(after)
@@ -109,6 +112,7 @@ def get(group, section): # {{{
 		in_speech = False
 		in_with = False
 		after = []
+		hiders = []
 		def add_story_item(item = None):
 			if len(stack) == 0 or len(stack[-1]) == 0 or stack[-1][-1][0] != 'story':
 				stack[-1].append(['story', None, []])
@@ -165,6 +169,7 @@ def get(group, section): # {{{
 					stack[-1][-1][2].append(['pre-wait'])
 					stack[-1][-1][2].extend(after)
 					stack[-1][-1][2].append(['wait', in_with[1]])
+					stack[-1][-1][2].extend(hiders)
 					in_with = False
 				else:
 					stack.pop()
@@ -267,10 +272,13 @@ def get(group, section): # {{{
 				continue
 			r = re.match(r'scene(\s+(.*?))?$', ln)
 			if r:
-				if r.group(2).startswith('common/'):
-					url = config['content'] + '/' + r.group(2)
+				if r.group(2):
+					if r.group(2).startswith('common/'):
+						url = config['content'] + '/' + r.group(2)
+					else:
+						url = config['content'] + '/' + group.lower() + '/' + section + '/' + r.group(2)
 				else:
-					url = config['content'] + '/' + group.lower() + '/' + section + '/' + r.group(2)
+					url = None
 				add_story_item(['scene', url])
 				continue
 			r = re.match(r'(show|hide)\s+(\S+)(\s+(\S*))?(\s+at\s+(.*?))?(\s+with\s+(.*?))?$', ln)
@@ -281,7 +289,7 @@ def get(group, section): # {{{
 				at = r.group(6)
 				transition = r.group(8)
 				add_story_item()
-				stack[-1][-1][2].extend(showhide(show, tag, mod, at, transition, characters, in_with, after))
+				stack[-1][-1][2].extend(showhide(show, tag, mod, at, transition, characters, in_with, after, hiders))
 				continue
 			r = re.match(r'with\s+(\S+)\s*:$', ln)
 			if r:
@@ -289,6 +297,7 @@ def get(group, section): # {{{
 					debug(1, '{}: error: nested with blocks')
 				in_with = parse_transition(r.group(1), None)
 				after = []
+				hiders = []
 				istack.append(None)
 				continue
 			r = re.match(r'say\s+(.)(.*?)\1:\s+(.*)$', ln)

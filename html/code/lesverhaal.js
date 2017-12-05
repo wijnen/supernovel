@@ -216,20 +216,21 @@ function next_kinetic(force) {
 					sprites.push(s);
 				for (var i = 0; i < sprites.length; ++i)
 					kill_sprite(sprites[i]);
-				console.info(cmd[1]);
+				//console.info('scene', cmd[1]);
 				document.getElementsByTagName('body')[0].style.backgroundImage = 'url(' + cmd[1] + ')';
 				break;
 			case 'style':
-				console.info('style', cmd[1], cmd[2], cmd[3]);
+				//console.info(preparing_animation, 'style', cmd[1], cmd[2], cmd[3]);
 				if (cmd[2] == 'transition') {
 					kinetic_sprites[cmd[1]].style.transition = cmd[3];
 					break;
 				}
 				classes[cmd[1]][0].style[cmd[2]] = (preparing_animation ? classes[cmd[1]][1].style[cmd[2]] : cmd[3]);
-				classes[cmd[1]][1].style[cmd[2]] = cmd[3];
 				kinetic_sprites[cmd[1]].RemoveClass('moved-' + cmd[1]);
+				classes[cmd[1]][1].style[cmd[2]] = cmd[3];
 				break;
 			case 'image':
+				//console.info('image', cmd[1], cmd[2]);
 				if (!(cmd[1] in kinetic_sprites))
 					new_sprite(cmd[1]);
 				if (cmd[2]) {
@@ -240,8 +241,8 @@ function next_kinetic(force) {
 					kill_sprite(cmd[1]);
 				break;
 			case 'pre-wait':
-				console.info('pre-wait');
-				preparing_animate = true;
+				//console.info('pre-wait');
+				preparing_animation = true;
 				// Wait two animation frames, just to be sure.
 				requestAnimationFrame(function() {
 					requestAnimationFrame(function() {
@@ -250,7 +251,7 @@ function next_kinetic(force) {
 				});
 				return;
 			case 'wait':
-				console.info('wait');
+				//console.info('wait');
 				for (var s in kinetic_sprites) {
 					kinetic_sprites[s].AddClass('moved-' + s);
 				}
