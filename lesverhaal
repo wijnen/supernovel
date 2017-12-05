@@ -350,7 +350,7 @@ class Connection: # {{{
 		'''Prepare text for displaying.'''
 		if not isinstance(text, str):
 			if text[0] == 'text':
-				self.text_buffer.append((text[0], text[1], self._parse_text(text[2]), text[3]))
+				self.text_buffer.append((text[0], self._parse_text(text[1]), self._parse_text(text[2]), text[3]))
 			else:
 				self.text_buffer.append(text)
 			return
@@ -426,7 +426,6 @@ class Connection: # {{{
 				'goto': goto,
 				'text': self._add_text,
 				'test': lambda value, target, error = 1e-6: abs(value - target) < target * error,
-				'create': self._add_character,
 				'character': lambda tag, name, url: self._add_character(tag, name, config['content'] + '/' + self.user['group'].lower() + '/' + section + '/' + os.path.splitext(url)[0] + '/', os.path.splitext(url)[1]),
 				'say': self._say,
 				'show': self._show,
