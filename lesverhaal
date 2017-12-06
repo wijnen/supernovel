@@ -432,6 +432,8 @@ class Connection: # {{{
 				'hide': self._hide,
 				'question': self._question,
 				'user': self.user,
+				'name': self.user['name'],
+				'group': self.user['group'],
 				'self': self,
 				}
 		for c in characters:

@@ -39,7 +39,7 @@ def parse_transition(transition, at): # {{{
 		return ('left', 0, '', at)
 # }}}
 
-def showhide(show, tag, mod, at, transition, characters, in_with, after, hiders): # {{{
+def showhide(show, tag, mod, at, transition, characters, in_with, after, hiders, nr): # {{{
 	'''Create event list for showing or hiding a character.'''
 	ret = []
 	if not in_with:
@@ -289,12 +289,12 @@ def get(group, section): # {{{
 				at = r.group(6)
 				transition = r.group(8)
 				add_story_item()
-				stack[-1][-1][2].extend(showhide(show, tag, mod, at, transition, characters, in_with, after, hiders))
+				stack[-1][-1][2].extend(showhide(show, tag, mod, at, transition, characters, in_with, after, hiders, nr))
 				continue
 			r = re.match(r'with\s+(\S+)\s*:$', ln)
 			if r:
 				if in_with:
-					debug(1, '{}: error: nested with blocks')
+					debug(1, '{}: error: nested with blocks'.format(nr))
 				in_with = parse_transition(r.group(1), None)
 				after = []
 				hiders = []
