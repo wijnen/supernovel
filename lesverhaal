@@ -408,6 +408,8 @@ class Connection: # {{{
 			key = None
 		if key is None:
 			key = 'background'
+		key = self._parse_text(key)
+		value = self._parse_text(value)
 		self.answers[self.section][self.last_path][-1][1].append((key.strip(), value.strip()))
 		refresh_admins()
 	# }}}

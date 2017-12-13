@@ -60,3 +60,9 @@ button {
 	background-color: rgba(255, 255, 255, .5);
 	height: 90vh;
 }
+
+#next {
+	position: fixed;
+	top: 0px;
+	right: 0px;
+}
