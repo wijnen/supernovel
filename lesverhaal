@@ -201,7 +201,7 @@ class Admin_Connection: # {{{
 			self.refresh = lambda: self.remote.login.event()
 	# }}}
 	def login(self, name, password): # {{{
-		user, answers = load_user(name, 'admin')
+		user, answers = load_user(name.strip(), 'admin')
 		if user is None:
 			debug(2, 'Invalid admin {} from {}:{}'.format(name, *self.remote.socket.remote))
 			return False
@@ -209,7 +209,7 @@ class Admin_Connection: # {{{
 		if crypted != user['password']:
 			debug(2, 'Invalid password for {} from {}:{}'.format(name, *self.remote.socket.remote))
 			return False
-		if not self._login(name):
+		if not self._login(name.strip()):
 			self.remote.login.event()
 			self.refresh = lambda: self.remote.login.event()
 		return True
@@ -360,7 +360,7 @@ class Connection: # {{{
 			self.text_buffer.append(self._parse_text(text))
 	# }}}
 	def login(self, name, group, password): # {{{
-		user, answers = load_user(name, group)
+		user, answers = load_user(name.strip(), group.strip())
 		if user is None:
 			debug(2, 'Invalid user {}:{} on {}:{}'.format(name, group, *self.remote.socket.remote))
 			return 'deze naam is onbekend'
@@ -368,7 +368,7 @@ class Connection: # {{{
 		if user['password'] is not None and crypted != user['password']:
 			debug(2, 'Invalid password for {}:{} on {}:{}'.format(name, group, *self.remote.socket.remote))
 			return 'dit wachtwoord is onjuist'
-		user = self._login(name, group)
+		user = self._login(name.strip(), group.strip())
 		# In case the password is new, it needs to be stored.
 		user['password'] = crypted
 		return None

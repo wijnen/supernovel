@@ -205,22 +205,20 @@ function next_kinetic(force) {
 	if (!force && in_kinetic)
 		return;
 	in_kinetic = true;
-	console.info(force, kinetic_pos, kinetic_script.length);
 	while (kinetic_script !== null && kinetic_pos < kinetic_script.length) {
 		var cmd = kinetic_script[kinetic_pos++];
-		console.info('kinetic', force, cmd);
+		//console.info('kinetic', force, cmd);
 		if (typeof cmd == 'string') {
 			question.innerHTML = cmd;
 			continue;
 		}
 		speechbox.style.display = 'block';
-		speaker.style.display = 'block';
 		question.style.display = 'none';
 		switch (cmd[0]) {
 			case 'text':
 				finish_moves();
-				speaker.style.display = (cmd[1] ? 'inline' : 'none');
 				speaker.innerHTML = cmd[1];
+				speaker.style.display = (cmd[1] ? 'inline' : 'none');
 				speech.innerHTML = cmd[2];
 				photo.style.display = (cmd[3] ? 'block' : 'none');
 				photo.src = cmd[3] ? cmd[3] : '';
@@ -240,7 +238,7 @@ function next_kinetic(force) {
 					sprites.push(s);
 				for (var i = 0; i < sprites.length; ++i)
 					kill_sprite(sprites[i]);
-				console.info('scene', cmd[1]);
+				//console.info('scene', cmd[1]);
 				document.getElementsByTagName('body')[0].style.backgroundImage = 'url(' + encodeURI(cmd[1]) + ')';
 				break;
 			case 'style':
@@ -306,7 +304,6 @@ function next_kinetic(force) {
 }
 
 function prev_kinetic(full) {
-	//console.info(kinetic_history);
 	// Throw out the current frame, if there is one.
 	if (kinetic_pos < kinetic_script.length)
 		kinetic_history.pop();
