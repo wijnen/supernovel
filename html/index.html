@@ -9,6 +9,11 @@
 		<link rel='stylesheet' href='code/style.css'></link>
 	</head>
 	<body>
+		<div id='error'>
+			<h1>Een moment geduld</h1>
+			<p>De verbinding met de server wordt gemaakt.</p>
+			<p>Als dit bericht blijft staan, is er iets mis.</p>
+		</div>
 		<div id='login'>
 			<form onsubmit='return log_in()'>
 				Naam: <input type='text' id='loginname'/><br/>
@@ -24,9 +29,14 @@
 			Snelheid: <input type='number' id='speed' onchange='speed()' value='100'/>%<br/>
 			<button onclick='video_done()'>Ga verder</button>
 		</div>
+		<div id='navigation'>
+			<button type='button' class='navbutton' onclick='prev_kinetic(true)'>&#x23ee;</button>
+			<button type='button' class='navbutton' onclick='prev_kinetic()'>&#x23ea;</button>
+			<button type='button' class='navbutton' onclick='next_kinetic()'>&#x23e9;</button>
+			<button type='button' class='navbutton' onclick='next_kinetic("finish")'>&#x23ed;</button>
+		</div>
 		<div id='spritebox'></div>
 		<div id='speechbox'>
-			<div id='next'>Verder</div>
 			<span id='speaker'></span><br/>
 			<img id='photo'/>
 			<div id='speech'></div>

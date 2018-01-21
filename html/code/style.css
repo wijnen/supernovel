@@ -7,6 +7,7 @@ body {
 }
 
 #login, #video, #question {
+	display: none;
 	position: absolute;
 	left: 0px;
 	top: 0px;
@@ -15,8 +16,33 @@ body {
 	margin: 1em 1em;
 }
 
-button {
+button.not(#navbutton) {
 	margin: 2em;
+}
+
+#navigation {
+	z-index: 2;
+	display: none;
+	text-align: justify;
+	position: fixed;
+	left: 0px;
+	right: 0px;
+	top: 0px;
+	height: 2em;
+}
+#navigation:after {
+	content: "";
+	display: inline-block;
+	width: 100%;
+}
+
+#spritebox {
+	z-index: 1;
+	position: fixed;
+	left: 0px;
+	right: 0px;
+	bottom: 0px;
+	top: 2em;
 }
 
 #speechbox {

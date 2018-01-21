@@ -363,15 +363,15 @@ class Connection: # {{{
 		user, answers = load_user(name, group)
 		if user is None:
 			debug(2, 'Invalid user {}:{} on {}:{}'.format(name, group, *self.remote.socket.remote))
-			return False
+			return 'deze naam is onbekend'
 		crypted = crypt.crypt(password, salt = user['password'])
 		if user['password'] is not None and crypted != user['password']:
 			debug(2, 'Invalid password for {}:{} on {}:{}'.format(name, group, *self.remote.socket.remote))
-			return False
+			return 'dit wachtwoord is onjuist'
 		user = self._login(name, group)
 		# In case the password is new, it needs to be stored.
 		user['password'] = crypted
-		return True
+		return None
 	# }}}
 	def _login(self, name, group): # {{{
 		user, answers = load_user(name, group)

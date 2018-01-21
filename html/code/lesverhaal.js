@@ -1,9 +1,10 @@
-var login, videodiv, video, contents, question, spritebox, speechbox, speaker, photo, speech;
+var error, login, videodiv, video, contents, question, navigation, spritebox, speechbox, speaker, photo, speech;
 var server_obj, server;
 var kinetic_script = null;
 var kinetic_pos = 0;
 var kinetic_sprites = {};
 var kinetic_end = null;
+var kinetic_history = [];
 var classes = {};
 var preparing_animation;
 
@@ -13,15 +14,19 @@ var Connection = {
 		init();
 	},
 	login: function() {
+		kinetic_script = null;
+		error.style.display = 'none';
 		login.style.display = 'block';
 		videodiv.style.display = 'none';
 		contents.style.display = 'none';
 		question.style.display = 'none';
 		speechbox.style.display = 'none';
+		navigation.style.display = 'none';
 		spritebox.style.display = 'none';
 		video.pause();
 	},
 	contents: function(data) {
+		kinetic_script = null;
 		var ul = contents.ClearAll().AddElement('ul');
 		for (var d = 0; d < data.length; ++d) {
 			var button = ul.AddElement('li').AddElement('button').AddText(data[d]).AddEvent('click', function() {
@@ -32,11 +37,14 @@ var Connection = {
 		}
 	},
 	main: function() {
+		kinetic_script = null;
+		error.style.display = 'none';
 		login.style.display = 'none';
 		videodiv.style.display = 'none';
 		contents.style.display = 'block';
 		question.style.display = 'none';
 		speechbox.style.display = 'none';
+		navigation.style.display = 'none';
 		spritebox.style.display = 'none';
 		video.pause();
 		for (var s in question.style)
@@ -50,6 +58,7 @@ var Connection = {
 		videodiv.style.display = 'none';
 		contents.style.display = 'none';
 		speechbox.style.display = 'block';
+		navigation.style.display = 'block';
 		spritebox.style.display = 'block';
 		question.innerHTML = '';
 		video.pause();
@@ -166,15 +175,18 @@ var Connection = {
 		kinetic_script = story;
 		kinetic_pos = 0;
 		preparing_animation = false;
+		kinetic_history = [];
 		next_kinetic(true);
 	},
 	video: function(file) {
+		kinetic_script = null;
 		video.src = file;
 		video.load();
 		videodiv.style.display = 'block';
 		contents.style.display = 'none';
 		question.style.display = 'none';
 		speechbox.style.display = 'none';
+		navigation.style.display = 'none';
 		spritebox.style.display = 'none';
 		speed(); // Set playback speed.
 		video.play();
@@ -193,14 +205,18 @@ function next_kinetic(force) {
 	if (!force && in_kinetic)
 		return;
 	in_kinetic = true;
+	console.info(force, kinetic_pos, kinetic_script.length);
 	while (kinetic_script !== null && kinetic_pos < kinetic_script.length) {
 		var cmd = kinetic_script[kinetic_pos++];
-		//console.info('kinetic', cmd);
+		console.info('kinetic', force, cmd);
 		if (typeof cmd == 'string') {
 			question.innerHTML = cmd;
 			continue;
 		}
-		switch(cmd[0]) {
+		speechbox.style.display = 'block';
+		speaker.style.display = 'block';
+		question.style.display = 'none';
+		switch (cmd[0]) {
 			case 'text':
 				finish_moves();
 				speaker.style.display = (cmd[1] ? 'inline' : 'none');
@@ -209,7 +225,15 @@ function next_kinetic(force) {
 				photo.style.display = (cmd[3] ? 'block' : 'none');
 				photo.src = cmd[3] ? cmd[3] : '';
 				in_kinetic = false;
-				return;
+				// Record state.
+				var sprites = {};
+				for (var s in kinetic_sprites)
+					sprites[s] = store_sprite(s);
+				var bg = document.getElementsByTagName('body')[0].style.backgroundImage;
+				kinetic_history.push([bg, sprites, kinetic_pos - 1]);
+				if (force != 'finish')
+					return;
+				break;
 			case 'scene':
 				var sprites = [];
 				for (var s in kinetic_sprites)
@@ -243,19 +267,26 @@ function next_kinetic(force) {
 			case 'pre-wait':
 				//console.info('pre-wait');
 				preparing_animation = true;
-				// Wait two animation frames, just to be sure.
-				requestAnimationFrame(function() {
+				if (force != 'finish') {
+					// Wait two animation frames, just to be sure.
 					requestAnimationFrame(function() {
-						next_kinetic(true);
+						requestAnimationFrame(function() {
+							next_kinetic(true);
+						});
 					});
-				});
-				return;
+					return;
+				}
+				break;
 			case 'wait':
 				//console.info('wait');
 				for (var s in kinetic_sprites) {
 					kinetic_sprites[s].AddClass('moved-' + s);
 				}
 				preparing_animation = false;
+				if (force == 'finish') {
+					finish_moves();
+					break;
+				}
 				setTimeout(function() {
 					finish_moves();
 					next_kinetic(true);
@@ -267,7 +298,6 @@ function next_kinetic(force) {
 	}
 	in_kinetic = false;
 	if (kinetic_script !== null && kinetic_pos >= kinetic_script.length) {
-		kinetic_script = null;
 		if (kinetic_end) {
 			kinetic_end();
 			kinetic_end = null;
@@ -275,14 +305,53 @@ function next_kinetic(force) {
 	}
 }
 
-function prev_kinetic() {
-	// TODO.
+function prev_kinetic(full) {
+	//console.info(kinetic_history);
+	// Throw out the current frame, if there is one.
+	if (kinetic_pos < kinetic_script.length)
+		kinetic_history.pop();
+	// Use last frame, or if there is none, go back to start.
+	// The last frame will be rebuilt, so remove it from the stack.
+	var data;
+	if (!full && kinetic_history.length > 0)
+		data = kinetic_history.pop();
+	else {
+		// Full rewind: remove all history.
+		kinetic_history = [];
+		data = ['', {}, 0];
+	}
+	// Remove all sprites.
+	var sprites = [];
+	for (var s in kinetic_sprites)
+		sprites.push(s);
+	for (var i = 0; i < sprites.length; ++i)
+		kill_sprite(sprites[i]);
+	// Set the background.
+	document.getElementsByTagName('body')[0].style.backgroundImage = data[0];
+	// Create all sprites.
+	for (var spr in data[1]) {
+		new_sprite(spr);
+		kinetic_sprites[spr].src = data[1][spr][0];
+		var s = classes[spr];
+		for (var i = 0; i < 2; ++i) {
+			s[i].style.left = data[1][spr][1];
+			s[i].style.top = data[1][spr][2];
+			s[i].style.right = data[1][spr][3];
+			s[i].style.bottom = data[1][spr][4];
+			s[i].style.width = data[1][spr][5];
+			s[i].style.height = data[1][spr][6];
+		}
+	}
+	// Set story position.
+	kinetic_pos = data[2];
+	next_kinetic();
 }
 
 function new_sprite(tag) {
 	kinetic_sprites[tag] = spritebox.AddElement('img', 'sprite ' + 'base-' + tag);
 	kinetic_sprites[tag].AddEvent('load', function() {
-		classes[tag][0].style.marginLeft = '-' + (kinetic_sprites[tag].width / 2) + 'px';
+		if (kinetic_sprites[tag] !== undefined)
+			classes[tag][0].style.marginLeft = '-' + (kinetic_sprites[tag].width / 2) + 'px';
 	});
 	// If classes are already created, we're done.
 	if (tag in classes)
@@ -301,6 +370,11 @@ function kill_sprite(tag) {
 	delete kinetic_sprites[tag];
 }
 
+function store_sprite(tag) {
+	var s = classes[tag][0].style;
+	return [kinetic_sprites[tag].src, s.left, s.top, s.right, s.bottom, s.width, s.height];
+}
+
 function finish_moves() {
 	for (var s in kinetic_sprites) {
 		for (var st in classes[s][1].style)
@@ -313,12 +387,14 @@ function finish_moves() {
 }
 
 function init() {
+	error = document.getElementById('error');
 	login = document.getElementById('login');
 	videodiv = document.getElementById('video');
 	video = document.getElementsByTagName('video')[0];
 	contents = document.getElementById('contents');
 	question = document.getElementById('question');
 	speechbox = document.getElementById('speechbox');
+	navigation = document.getElementById('navigation');
 	spritebox = document.getElementById('spritebox');
 	speaker = document.getElementById('speaker');
 	photo = document.getElementById('photo');
@@ -329,11 +405,13 @@ function init() {
 	kinetic_pos = 0;
 	kinetic_sprites = {};
 
+	error.style.display = 'block';
 	login.style.display = 'none';
 	videodiv.style.display = 'none';
 	contents.style.display = 'none';
 	question.style.display = 'none';
 	speechbox.style.display = 'none';
+	navigation.style.display = 'none';
 	spritebox.style.display = 'none';
 	speaker.style.display = 'none';
 
@@ -349,7 +427,7 @@ function init() {
 		else
 			prev_kinetic();
 	});
-	window.AddEvent('click', function(event) {
+	spritebox.AddEvent('click', function(event) {
 		if (event.button != 0)
 			return;
 		if (kinetic_script === null)
@@ -363,8 +441,17 @@ window.AddEvent('load', init);
 function connection_lost() {
 	try {
 		alert('De verbinding met de server is verbroken.');
+		error.style.display = 'block';
+		login.style.display = 'none';
+		videodiv.style.display = 'none';
+		contents.style.display = 'none';
+		question.style.display = 'none';
+		speechbox.style.display = 'none';
+		navigation.style.display = 'none';
+		spritebox.style.display = 'none';
+		video.pause();
 	}
-	catch(err) {
+	catch (err) {
 	}
 }
 
@@ -372,7 +459,10 @@ function log_in() {
 	var loginname = document.getElementById('loginname').value;
 	var group = document.getElementById('class').value;
 	var password = document.getElementById('password').value;
-	server.login(loginname, group, password);
+	server_obj.call('login', [loginname, group, password], {}, function(error) {
+		if (error)
+			alert('Inloggen is mislukt: ' + error);
+	});
 	return false;
 }
 
