@@ -118,16 +118,16 @@ def unmangle(src): # {{{
 
 def load_user(name, group): # {{{
 	if (name.lower(), group.lower()) in users:
-		return users[(name.lower(), group.lower())], None
+		return users[(name.lower(), group.lower())], {}
 	if not os.path.exists(os.path.join(config['data'], 'users', group.lower())):
 		debug(0, 'load_user called for nonexistent group {}:{}'.format(name, group))
-		return None, None
+		return None, {}
 	if not os.path.exists(os.path.join(config['data'], 'users', group.lower(), name.lower())):
 		debug(0, 'load_user called for nonexistent user {}:{}'.format(name, group))
-		return None, None
+		return None, {}
 	ret = {'filename': name.lower(), 'name': name, 'group': group.lower(), 'connection': None, 'password': None, 'nosave': False}
 	answers = {}
-	for ln in open(os.path.join(config['data'], 'users', group.lower(), name.lower())):
+	for ln in open(os.path.join(config['data'], 'users', group.lower(), name.lower()), errors = 'replace'):
 		if ln.strip() == '':
 			continue
 		key, value = ln.split('=', 1)
@@ -160,7 +160,7 @@ def list_users(group): # {{{
 
 def save_user(user): # {{{
 	'''Save user information to disk. user['connection'] is valid while this is called, but the connection may be closed.'''
-	with open(os.path.join(config['data'], 'users', user['group'].lower(), user['filename']), 'w') as f:
+	with open(os.path.join(config['data'], 'users', user['group'].lower(), user['filename']), 'w', errors = 'replace') as f:
 		for key in user:
 			if key == 'connection':
 				continue
@@ -267,6 +267,7 @@ class Admin_Connection: # {{{
 		self.refresh = lambda: self.show_section(group, section)
 		parts, index, characters = content.get(group, section)
 		questions = []
+		prev = ['']
 		def add_block(block):
 			for p in block:
 				if p[0] == 'while':
@@ -277,9 +278,12 @@ class Admin_Connection: # {{{
 					if p[-1] is not None:
 						add_block(p[-1])
 				elif p[0] == 'video':
-					questions.append((p[1], os.path.splitext(p[2])[0]))
+					questions.append((p[1], os.path.splitext(p[2])[0], 'video'))
 				elif p[0] in ('unit', 'number', 'short', 'long', 'choice', 'longunit', 'longnumber', 'longshort', 'longchoice'):
-					questions.append((p[1], p[2]))
+					questions.append((p[1], p[2], prev[0]))
+					prev[0] = ''
+				elif p[0] == 'story':
+					prev[0] = str(p[2][-1])
 		add_block(parts)
 		questions.append(((len(parts),), ''))
 		students = []
@@ -292,8 +296,8 @@ class Admin_Connection: # {{{
 		for s in users:
 			if users[s]['group'].lower() != group.lower():
 				continue
-			students.append((users[s]['name'], users[s]['connection'].section == section) + tuple(make_field(users[s], q) for q in questions))
-		students.sort(key = lambda s: (not s[1], s[0]))
+			students.append(((users[s]['name'], s), users[s]['connection'].section == section) + tuple(make_field(users[s], q) for q in questions))
+		students.sort(key = lambda s: (not s[1], s[0][0], s[0][1]))
 		# Add non-connected students to the list.
 		others = []
 		for u in list_users(group):
@@ -303,8 +307,11 @@ class Admin_Connection: # {{{
 			if student is None:
 				debug(0, 'student found but unloadable: {}:{}'.format(u, group))
 				continue
-			others.append((student['name'], None) + tuple(make_other_field(student, q, answers) for q in questions))
-		others.sort()
+			others.append(((student['name'], u), None) + tuple(make_other_field(student, q, answers) for q in questions))
+		try:
+			others.sort()
+		except:
+			pass
 		students.extend(others)
 		self.remote.students_list.event(group, questions, students)
 	# }}}

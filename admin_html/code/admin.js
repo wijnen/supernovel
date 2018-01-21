@@ -31,7 +31,6 @@ var Connection = {
 		// Show the list of groups, with the available sections for each group.
 		show('groups');
 		groups.ClearAll();
-		console.info('groups:', list);
 		for (var g = 0; g < list.length; ++g) {
 			var group = list[g];
 			var div = groups.AddElement('div');
@@ -52,18 +51,20 @@ var Connection = {
 		var tr = table.AddElement('tr');
 		tr.AddElement('th').AddText(group);
 		for (var q = 0; q < questions.length; ++q)
-			tr.AddElement('th').AddText(questions[q][1]).title = questions[q][0];
-		console.info('students:', students);
+			tr.AddElement('th').AddText(questions[q][1]).title = questions[q][2];
 		var parse = function(ans) {
 			return ans.length == 2 ? String(ans[0]).replace('.', ',') + ' ' + ans[1] : ans;
 		};
 		for (var s = 0; s < students.length; ++s) {
 			// Fill a table row for a student.
 			tr = table.AddElement('tr');
-			tr.AddElement('th').AddText(students[s][0]).style.color = students[s][1] ? '' : students[s][1] !== null ? 'blue' : 'grey';
+			var th = tr.AddElement('th').AddText(students[s][0][0]);
+			th.title = students[s][0][1];
+			th.style.color = students[s][1] ? '' : students[s][1] !== null ? 'blue' : 'grey';
 			for (var q = 2; q < students[s].length; ++q) {
 				// Add all answers.
 				var td = tr.AddElement('td');
+				td.title = questions[q - 2][2];
 				var answers = students[s][q][1];
 				if (answers !== null && answers.length >= 1) {
 					// There is at least one answer: fill the cell.
