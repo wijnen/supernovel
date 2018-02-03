@@ -85,6 +85,7 @@ button.not(#navbutton) {
 #question {
 	background-color: rgba(255, 255, 255, .5);
 	height: 90vh;
+	z-index: 2;
 }
 
 #next {
