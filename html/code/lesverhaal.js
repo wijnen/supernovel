@@ -7,6 +7,7 @@ var kinetic_end = null;
 var kinetic_history = [];
 var classes = {};
 var preparing_animation;
+var show_question = false;
 
 var Connection = {
 	replaced: function() {
@@ -63,6 +64,9 @@ var Connection = {
 		question.innerHTML = '';
 		video.pause();
 		kinetic_end = function() {
+			if (show_question)
+				return;
+			show_question = true;
 			speechbox.style.display = 'none';
 			question.style.display = 'block';
 			// Clear speech so the old text cannot reappear by accident.
@@ -202,9 +206,12 @@ var Connection = {
 // ['wait', seconds]: wait specified time before next step.
 
 function next_kinetic(force) {
-	if (!force && in_kinetic)
+	if (document.activeElement != document.body)
+		document.activeElement.blur();
+	if (show_question || (!force && in_kinetic))
 		return;
 	in_kinetic = true;
+	show_question = false;
 	while (kinetic_script !== null && kinetic_pos < kinetic_script.length) {
 		var cmd = kinetic_script[kinetic_pos++];
 		//console.info('kinetic', force, cmd);
@@ -298,12 +305,14 @@ function next_kinetic(force) {
 	if (kinetic_script !== null && kinetic_pos >= kinetic_script.length) {
 		if (kinetic_end) {
 			kinetic_end();
-			kinetic_end = null;
 		}
 	}
 }
 
 function prev_kinetic(full) {
+	if (document.activeElement != document.body)
+		document.activeElement.blur();
+	show_question = false;
 	// Throw out the current frame, if there is one.
 	if (kinetic_pos < kinetic_script.length)
 		kinetic_history.pop();
@@ -425,7 +434,7 @@ window.AddEvent('load', init);
 
 function keypress(event) {
 	//console.info(event);
-	if (event.charCode != 32 && event.keyCode != 8)
+	if (show_question || (event.charCode != 32 && event.keyCode != 8))
 		return;
 	if (kinetic_script === null)
 		return;
@@ -434,7 +443,7 @@ function keypress(event) {
 		next_kinetic(false);
 	else
 		prev_kinetic();
-});
+}
 
 function connection_lost() {
 	try {
