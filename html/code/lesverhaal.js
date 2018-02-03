@@ -412,18 +412,6 @@ function init() {
 	spritebox.style.display = 'none';
 	speaker.style.display = 'none';
 
-	window.AddEvent('keypress', function(event) {
-		//console.info(event);
-		if (event.charCode != 32 && event.keyCode != 8)
-			return;
-		if (kinetic_script === null)
-			return;
-		event.preventDefault();
-		if (event.charCode == 32)
-			next_kinetic(false);
-		else
-			prev_kinetic();
-	});
 	spritebox.AddEvent('click', function(event) {
 		if (event.button != 0)
 			return;
@@ -434,6 +422,19 @@ function init() {
 	});
 }
 window.AddEvent('load', init);
+
+function keypress(event) {
+	//console.info(event);
+	if (event.charCode != 32 && event.keyCode != 8)
+		return;
+	if (kinetic_script === null)
+		return;
+	event.preventDefault();
+	if (event.charCode == 32)
+		next_kinetic(false);
+	else
+		prev_kinetic();
+});
 
 function connection_lost() {
 	try {
