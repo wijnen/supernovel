@@ -1,5 +1,5 @@
 var error, login, videodiv, video, contents, question, navigation, spritebox, speechbox, speaker, photo, speech;
-var server_obj, server;
+var server;
 var kinetic_script = null;
 var kinetic_pos = 0;
 var kinetic_sprites = {};
@@ -31,7 +31,7 @@ var Connection = {
 		var ul = contents.ClearAll().AddElement('ul');
 		for (var d = 0; d < data.length; ++d) {
 			var button = ul.AddElement('li').AddElement('button').AddText(data[d]).AddEvent('click', function() {
-				server.start(this.section);
+				server.call('start', [this.section]);
 			});
 			button.section = data[d];
 			button.type = 'button';
@@ -93,11 +93,11 @@ var Connection = {
 					var l = question.AddElement('textarea');
 					var div = question.AddElement('div');
 					for (var o = 0; o < options.length; ++o) {
-						var button = div.AddElement('button').AddText(options[o]);
+						var button = div.AddElement('button', 'choicebutton').AddText(options[o]);
 						button.type = 'button';
 						button.value = options[o];
 						button.AddEvent('click', function() {
-							server.answer([this.value, l.value]);
+							server.call('answer', [[this.value, l.value]]);
 						});
 					}
 					return;
@@ -130,11 +130,11 @@ var Connection = {
 				case 'choice':
 					var div = question.AddElement('div');
 					for (var o = 0; o < options.length; ++o) {
-						var button = div.AddElement('button').AddText(options[o]);
+						var button = div.AddElement('button', 'choicebutton').AddText(options[o]);
 						button.type = 'button';
 						button.value = options[o];
 						button.AddEvent('click', function() {
-							server.answer(this.value);
+							server.call('answer', [this.value]);
 						});
 					}
 					return;
@@ -163,7 +163,7 @@ var Connection = {
 				case 'text': // Not a real question, just continue.
 					question.AddElement('br');
 					question.AddElement('button').AddText('Ga Verder').AddEvent('click', function() {
-						server.text_done();
+						server.call('text_done', []);
 					}).type = 'button';
 					return;
 				default:
@@ -173,11 +173,12 @@ var Connection = {
 				var answer = get_value();
 				if (answer === null)
 					return;
-				server.answer(answer);
+				server.call('answer', [answer]);
 			}).type = 'button';
 		};
 		kinetic_script = story;
 		kinetic_pos = 0;
+		show_question = false;
 		preparing_animation = false;
 		kinetic_history = [];
 		next_kinetic(true);
@@ -383,8 +384,14 @@ function store_sprite(tag) {
 
 function finish_moves() {
 	for (var s in kinetic_sprites) {
-		for (var st in classes[s][1].style)
-			classes[s][0].style[st] = classes[s][1].style[st];
+		for (var st in classes[s][1].style) {
+			try {
+				classes[s][0].style[st] = classes[s][1].style[st];
+			}
+			catch(e) {
+				//console.warn('error finishing move:', s, st, e, classes[s][0].style);
+			}
+		}
 		// restore margin-left.
 		classes[s][0].style.marginLeft = '-' + (kinetic_sprites[s].width / 2) + 'px';
 		kinetic_sprites[s].RemoveClass('moved-' + s);
@@ -405,8 +412,7 @@ function init() {
 	speaker = document.getElementById('speaker');
 	photo = document.getElementById('photo');
 	speech = document.getElementById('speech');
-	server_obj = Rpc(Connection, null, connection_lost);
-	server = server_obj.proxy;
+	server = Rpc(Connection, null, connection_lost);
 	kinetic_script = null;
 	kinetic_pos = 0;
 	kinetic_sprites = {};
@@ -466,7 +472,7 @@ function log_in() {
 	var loginname = document.getElementById('loginname').value;
 	var group = document.getElementById('class').value;
 	var password = document.getElementById('password').value;
-	server_obj.call('login', [loginname, group, password], {}, function(error) {
+	server.call('login', [loginname, group, password], {}, function(error) {
 		if (error)
 			alert('Inloggen is mislukt: ' + error);
 	});
@@ -481,7 +487,7 @@ function speed() {
 
 function video_done() {
 	video.pause();
-	server.video_done();
+	server.call('video_done', []);
 }
 
 // vim: set foldmethod=marker foldmarker={,} :

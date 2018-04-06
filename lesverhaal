@@ -11,7 +11,7 @@ import fhs
 import websocketd
 from markdown import markdown
 from websocketd import log
-config = fhs.init({'data': '.', 'port': '8000', 'admin-port': '8001', 'loglimit': 2, 'content': 'content', 'lazysave': False, 'secret': '', 'logfile': ''})
+config = fhs.init({'data': '.', 'port': '8000', 'admin-port': '8001', 'loglimit': 1, 'content': 'content', 'lazysave': False, 'secret': '', 'logfile': ''})
 logfile = open(config['logfile'], 'a') if config['logfile'] else None
 def debug(priority, message):
 	if priority <= config['loglimit']:
@@ -351,13 +351,14 @@ class Connection: # {{{
 				debug(1, 'error evaluating expression substitution {}'.format(obj.group(0)))
 				traceback.print_exc()
 				return '[fout]'
+		debug(2, repr(text))
 		return re.sub('\${(.*?)}', subst, text).replace('FILE://common/', config['content'] + 'common/').replace('FILE://', config['content'] + '/' + self.user['group'].lower() + '/' + self.section + '/')
 	# }}}
 	def _add_text(self, text): # {{{
 		'''Prepare text for displaying.'''
 		if not isinstance(text, str):
 			if text[0] == 'text':
-				self.text_buffer.append((text[0], self._parse_text(text[1]), self._parse_text(text[2]), text[3]))
+				self.text_buffer.append((text[0], '' if text[1] is None else self._parse_text(text[1]), self._parse_text(text[2]), text[3]))
 			else:
 				self.text_buffer.append(text)
 			return
@@ -434,7 +435,7 @@ class Connection: # {{{
 				'answer': self._answer,
 				'goto': goto,
 				'text': self._add_text,
-				'test': lambda value, target, error = 1e-6: abs(value - target) < target * error,
+				'test': lambda value, target, error = 1e-6: value is not None and abs(value - target) < target * error,
 				'character': lambda tag, name, url: self._add_character(tag, name, config['content'] + '/' + self.user['group'].lower() + '/' + section + '/' + os.path.splitext(url)[0] + '/', os.path.splitext(url)[1]),
 				'say': self._say,
 				'show': self._show,
@@ -496,6 +497,7 @@ class Connection: # {{{
 		if code[0] == 'label':
 			pass
 		elif code[0] == 'story':
+			debug(2, repr(code))
 			for item in code[2]:
 				self._add_text(item)
 		elif code[0] == 'answer':

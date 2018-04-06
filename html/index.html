@@ -6,26 +6,28 @@
 		<script src='code/builders.js'></script>
 		<script src='code/rpc.js'></script>
 		<script src='code/lesverhaal.js'></script>
-		<link rel='stylesheet' href='code/style.css'></link>
+		<link rel='stylesheet' href='code/style.css'/>
 	</head>
 	<body onkeypress='keypress(event)'>
 		<div id='error'>
 			<h1>Een moment geduld</h1>
 			<p>De verbinding met de server wordt gemaakt.</p>
 			<p>Als dit bericht blijft staan, is er iets mis.</p>
+			<p>Hieronder kunnen meldingen staan die het probleem hopelijk verduidelijken.</p>
+			<div id='debugging_console'></div>
 		</div>
 		<div id='login'>
 			<form onsubmit='return log_in()'>
 				Naam: <input type='text' id='loginname'/><br/>
 				Klas: <input type='text' id='class'/><br/>
 				Wachtwoord: <input type='password' id='password'/><br/>
-				<input type='submit' value='Log in'/>
+				<button type='button' value='Log in' onclick='log_in()'>Log in</button>
 			</form>
 		</div>
 		<div id='contents'>
 		</div>
 		<div id='video'>
-			<video preload='auto', controls></video><br/>
+			<video preload='auto' controls></video><br/>
 			Snelheid: <input type='number' id='speed' onchange='speed()' value='100'/>%<br/>
 			<button onclick='video_done()'>Ga verder</button>
 		</div>
