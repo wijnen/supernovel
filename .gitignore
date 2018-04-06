@@ -4,3 +4,4 @@ html/code/builders.js
 html/code/rpc.js
 html/content/
 users/
+__pycache__/
