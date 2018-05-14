@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset='utf-8'/>
+		<title>Lesverhaal</title>
+		<script src='code/builders.js'></script>
+		<script src='code/rpc.js'></script>
+		<script src='code/admin.js'></script>
+		<link rel='stylesheet' href='code/style.css'/>
+	</head>
+	<body>
+		<div id='error'>
+			<h1>Een moment geduld</h1>
+			<p>De verbinding met de server wordt gemaakt.</p>
+			<p>Als dit bericht blijft staan, is er iets mis.</p>
+			<p>Hieronder kunnen meldingen staan die het probleem hopelijk verduidelijken.</p>
+			<div id='debugging_console'></div>
+		</div>
+		<div id='login'>
+			<div id='group'>Klas: </div>
+			<form onsubmit='return log_in()'>
+				Naam: <input type='text' id='loginname'/><br/>
+				Wachtwoord: <input type='password' id='password'/><br/>
+				<button type='button' value='Log in' onclick='log_in()'>Log in</button>
+			</form>
+		</div>
+		<div id='content'>
+		</div>
+	</body>
+</html>

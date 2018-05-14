@@ -1,0 +1,98 @@
+body {
+	background-origin: content-box;
+	background-attachment: fixed;
+	background-position: center center;
+	background-repeat: no-repeat;
+	background-size: cover;
+}
+
+#login, #video, #question {
+	display: none;
+	position: absolute;
+	left: 0px;
+	top: 0px;
+	right: 0px;
+	padding: 1em 1em;
+	margin: 1em 1em;
+}
+
+button.not(#navbutton) {
+	margin: 2em;
+}
+
+#navigation {
+	z-index: 2;
+	display: none;
+	text-align: justify;
+	position: fixed;
+	left: 0px;
+	right: 0px;
+	top: 0px;
+	height: 2em;
+}
+#navigation:after {
+	content: "";
+	display: inline-block;
+	width: 100%;
+}
+
+#spritebox {
+	z-index: 1;
+	position: fixed;
+	left: 0px;
+	right: 0px;
+	bottom: 0px;
+	top: 2em;
+}
+
+#speechbox {
+	display: none;
+	position: fixed;
+	left: 1em;
+	right: 1em;
+	bottom: 1em;
+	height: 8em;
+	border: 2px black solid;
+	border-radius: 1em;
+	background-color: rgba(255, 255, 255, 0.9);
+}
+
+#speaker {
+	position: relative;
+	left: 2em;
+	top: -.75ex;
+	border: 2px black solid;
+	border-radius: 1ex;
+	padding: 1ex 1ex;
+	background: white;
+}
+
+#photo {
+	float: left;
+	height: 6em;
+	padding: 1ex 1ex
+}
+
+#speech {
+	padding: 1ex 1ex;
+}
+
+.sprite {
+	position: fixed;
+	bottom: 9em;
+}
+
+#question {
+	background-color: rgba(255, 255, 255, .5);
+	height: 90vh;
+	z-index: 2;
+}
+
+#next {
+	position: fixed;
+	top: 0px;
+	right: 0px;
+}
+.choicebutton {
+	display: block;
+}

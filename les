@@ -1,0 +1,302 @@
+#!/usr/bin/python3
+
+# Imports and config. {{{
+import sys
+import os
+import re
+import crypt
+import traceback
+import time
+import fhs
+import websocketd
+from markdown import markdown
+config = fhs.init({'data': '.', 'port': '8002', 'admin-port': '8003', 'beamer-port': '8004', 'loglimit': 1, 'content': 'les-content', 'lazysave': False, 'secret': '', 'logfile': '', 'group': None})
+from debug import debug
+import user
+# }}}
+
+''' Log priorities: {{{
+		0: Critical (system code errors)
+		1: Important (user code errors)
+		2: Normal (communication notifications)
+		3: Debug
+}}} '''
+
+group = config['group']
+variables = {}
+def parse_text(text): # {{{
+	def subst(obj):
+		try:
+			ret = eval(obj.group(1), variables)
+			return str(ret)
+		except:
+			debug(1, 'error evaluating expression substitution {}'.format(obj.group(0)))
+			traceback.print_exc()
+			return '[fout]'
+	debug(2, repr(text))
+	return re.sub('\${(.*?)}', subst, text).replace('FILE://', config['content'] + '/')
+# }}}
+
+all_users = user.list_group(group)
+responses = {u: None for u in all_users}
+
+# Read program from standard input. {{{
+program = []
+lineno = 0
+toplevel = re.compile(r'^([A-Z][a-z]*)\s*:\s*(.*?)\s*$')
+block = re.compile(r'^\s(.*?)\s*$')
+# Read blocks. {{{
+for ln in sys.stdin:
+	lineno += 1
+	if ln.strip() == '':
+		if len(program) > 0 and program[-1]['indent'] not in (-1, None):
+			program[-1]['arg'].append('')
+		continue
+	r = toplevel.match(ln)
+	if r:
+		cmd = r.group(1)
+		arg = r.group(2)
+		if len(arg) > 0:
+			arg = [arg]
+			indent = -1
+		else:
+			arg = []
+			indent = None
+		program.append({'cmd': cmd, 'arg': arg, 'indent': indent, 'lineno': lineno})
+	else:
+		r = block.match(ln)
+		if r:
+			if len(program) == 0:
+				debug(0, '%d: block before first toplevel command is not allowed' % lineno)
+				continue
+			if program[-1]['indent'] == -1:
+				debug(0, '%d: block after toplevel command with argument is not allowed' % lineno)
+				continue
+			indent = program[-1]['indent']
+			l = r.group(1)
+			if indent is not None and l[:indent].strip() != '':
+				debug(0, '%d: incorrect indentation' % lineno)
+			if indent is None:
+				indent = len(l) - len(l.lstrip())
+				program[-1]['indent'] = indent
+			program[-1]['arg'].append(l[indent:].rstrip())
+		else:
+			debug('%d: invalid line: ' % lineno + ln)
+			continue
+# }}}
+# Combine blocks. {{{
+current = 0
+mc = ('Choice', 'Choices')
+toplevel = ('Python', 'Term', 'Terms', 'Title') + mc
+args = ('Score', 'Mangle')
+while current < len(program):
+	p = program[current]
+	if p['cmd'] not in toplevel:
+		if p['cmd'] not in args:
+			debug(0, '%d: ignoring invalid command ' % p['lineno'] + p['cmd'])
+			continue
+		if current == 0:
+			debug(0, '%d: ignoring invalid initial command ' % p['lineno'] + p['cmd'])
+			continue
+		program[current - 1][p['cmd']] = p['arg']
+		program.pop(current)
+		continue
+	if p['cmd'] not in mc:
+		p['arg'] = parse_text('\n'.join(p['arg']))
+		if p['cmd'] != 'Python':
+			p['arg'] = markdown(p['arg'])
+	current += 1
+# }}}
+# }}}
+current = 0
+def run(index): # {{{
+	global current
+	current = index
+	if isinstance(current, int):
+		while current < len(program):
+			p = program[current]
+			if p['cmd'] != 'Python':
+				break
+			current += 1
+			exec(p['arg'], variables)
+	for u in all_users:
+		responses[u] = None
+		if (u, group) in user.users:
+			user.users[(u, group)]['connection']._send_state()
+	for a in user.admins:
+		user.admins[a].remote.current.event(current)
+		user.admins[a]._update_responses()
+# }}}
+
+def update_responses(): # {{{
+	for a in user.admins:
+		user.admins[a]._update_responses()
+# }}}
+
+class Admin_Connection: # {{{
+	def __init__(self, remote): # {{{
+		self.remote = remote
+		remote.closed = self._closed
+		self.remote.group.event(group)
+		self.user = None
+		q = remote.data['query']
+		keys = ('name', 'secret')
+		if config['secret'] != '' and all(x in q for x in keys) and q['secret'][0] == config['secret']:
+			if not self._login(q['name'][0], 'admin'):
+				self.remote.login.event()
+		else:
+			self.remote.login.event()
+	# }}}
+	def login(self, name, password): # {{{
+		debug(2, 'admin login attempt')
+		u, answers = user.load(name.strip(), 'admin')
+		if u is None:
+			debug(2, 'Invalid admin {} from {}:{}'.format(name, *self.remote.socket.remote))
+			return 'Invalid admin name'
+		crypted = crypt.crypt(password, salt = u['password'])
+		if crypted != u['password']:
+			debug(2, 'Invalid password for {} from {}:{}'.format(name, *self.remote.socket.remote))
+			return 'Invalid password'
+		if not self._login(name.strip()):
+			self.remote.login.event()
+		return None
+	# }}}
+	def _login(self, name): # {{{
+		new_user, answers = user.load(name, 'admin')
+		if new_user is None:
+			return False
+		if new_user['connection'] is not None:
+			debug(3, 'Replacing connection for ' + name)
+			try:
+				new_user['connection'].remote.replaced.event()
+			except:
+				pass
+			new_user['connection'].remote.close()
+		else:
+			user.users[(name.lower(), 'admin')] = new_user
+		new_user['connection'] = self
+		self.user = new_user
+		debug(2, 'Admin {} logged in from {}:{}'.format(name, *self.remote.socket.remote))
+		user.admins[name.lower()] = self
+		self.remote.program(program)
+		self.remote.current(current)
+		self._update_responses()
+		return True
+	# }}}
+	def _closed(self): # {{{
+		self.remote.close()
+		if self.user is None:
+			debug(2, 'admin connection to {}:{} lost before logging in'.format(*self.remote.socket.remote))
+			return
+		debug(2, 'disconnecting admin {}'.format(self.user['name']))
+		try:
+			user.users.pop((self.user['filename'], 'admin'))
+		except:
+			pass
+		try:
+			user.admins.pop(self.user['filename'])
+		except:
+			pass
+	# }}}
+	#'
+	def _update_responses(self): # {{{
+		self.remote.responses.event([(u, responses[u], (u, group) in user.users) for u in all_users])
+	# }}}
+	def run(self, index): # {{{
+		run(index)
+	# }}}
+	def refresh(self): # {{{
+		pass
+	# }}}
+# }}}
+
+class Connection: # {{{
+	def __init__(self, remote): # {{{
+		debug(2, 'New connection from {}:{}'.format(*remote.socket.remote))
+		self.remote = remote
+		remote.closed = self._closed
+		self.remote.group.event(group)
+		self.response = None
+		q = remote.data['query']
+		keys = ('name', 'group', 'secret')
+		if config['secret'] != '' and all(x in q for x in keys) and q['secret'][0] == config['secret']:
+			if not self._login(q['name'][0], q['group'][0]):
+				self.remote.login.event()
+		else:
+			self.remote.login.event()
+	# }}}
+	#'
+	def login(self, name, password): # {{{
+		debug(2, 'user login attempt {}/{}'.format(name, password))
+		u, answers = user.load(name.strip(), group)
+		if u is None:
+			debug(2, 'Invalid user {}:{} on {}:{}'.format(name, group, *self.remote.socket.remote))
+			return 'deze naam is onbekend'
+		crypted = crypt.crypt(password, salt = u['password'])
+		if u['password'] is not None and crypted != u['password']:
+			debug(2, 'Invalid password for {}:{} on {}:{}'.format(name, group, *self.remote.socket.remote))
+			return 'dit wachtwoord is onjuist'
+		u = self._login(name.strip(), group.strip())
+		# In case the password is new, it needs to be stored.
+		u['password'] = crypted
+		return None
+	# }}}
+	def _login(self, name, group): # {{{
+		u, answers = user.load(name, group)
+		if u is None:
+			debug(2, 'failed login for {}:{}'.format(name, group))
+			return None
+		if u['connection'] is not None:
+			debug(2, 'Replacing connection for ' + name)
+			try:
+				u['connection'].remote.replaced.event()
+			except:
+				pass
+			self.answers = u['connection'].answers
+			u['connection'].remote.close()
+		else:
+			self.answers = answers
+			user.users[(name.lower(), group.lower())] = u
+		u['connection'] = self
+		self.user = u
+		debug(2, 'User {}:{} logged in from {}:{}'.format(name, group, *self.remote.socket.remote))
+		self._send_state()
+		user.refresh_admins()
+		return u
+	# }}}
+	def _closed(self): # {{{
+		self.remote.close()
+		if not hasattr(self, 'user'):
+			debug(2, 'connection to {}:{} lost before logging in'.format(*self.remote.socket.remote))
+			return
+		debug(2, 'disconnecting {}:{}'.format(self.user['name'], self.user['group']))
+		user.save(self.user)
+		try:
+			user.users.pop((self.user['filename'], group.lower()))
+		except:
+			pass
+		user.refresh_admins()
+	# }}}
+	def _send_state(self): # {{{
+		self.remote.content.event(current, program[current] if current < len(program) else None, responses[self.user['name'].lower()])
+	# }}}
+	def respond(self, serial, response): # {{{
+		if serial != current:
+			debug(1, 'response for wrong question received from ' + self.user['name'])
+		else:
+			responses[self.user['name'].lower()] = response
+			update_responses()
+		self._send_state()
+	# }}}
+# }}}
+
+# Main program {{{
+server = websocketd.RPChttpd(config['port'], Connection, httpdirs = [os.path.join('les-html', 'main')], tls = False)
+adminserver = websocketd.RPChttpd(config['admin-port'], Admin_Connection, httpdirs = [os.path.join('les-html', 'admin')], tls = False)
+# The beamer is the same in terms of handling, but it uses different html.
+beamerserver = websocketd.RPChttpd(config['beamer-port'], Admin_Connection, httpdirs = [os.path.join('les-html', 'beamer')], tls = False)
+print('servers are running')
+websocketd.fgloop()
+# }}}
+
+# vim: set foldmethod=marker :

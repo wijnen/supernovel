@@ -4,7 +4,8 @@
 import sys
 import os
 import re
-from __main__ import config, debug
+from __main__ import config
+from debug import debug
 # }}}
 
 def list(group): # {{{
