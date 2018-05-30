@@ -23,3 +23,17 @@ body {
 .floater {
 	float: left;
 }
+
+#content {
+	position: absolute;
+	left: 0px;
+	top: 0px;
+	width: 50vw;
+}
+
+#names {
+	position: absolute;
+	right: 0px;
+	top: 0px;
+	width: 50vw;
+}

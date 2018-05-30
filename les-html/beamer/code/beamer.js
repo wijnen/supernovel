@@ -1,4 +1,4 @@
-var server, error, login, group, content, program, current, responses, hidebox, hidelabel, shown;
+var server, error, login, group, content, program, current, responses, hidebox, hidelabel, shown, blocked;
 
 function build_content() {
 	// Don't update screen while content is visible.
@@ -26,11 +26,9 @@ function build_content() {
 	var clear = content.AddElement('div', 'clear');
 	vague.AddElement('h1').AddText('Antwoorden gezien: ' + ans + ' / ' + responses.length);
 	var ol = clear.AddElement('ul');
-	for (var i = 0; i < opts.length; ++i)
-		ol.AddElement('li').AddText(opts[i] + ': ' + anss[opts[i]]);
-	if (ans > 0 && ans == responses.length && !shown) {
-		hidebox.checked = true;
-		shown = true;
+	for (var i = 0; i < opts.length; ++i) {
+		if (!blocked[opts[i]])
+			ol.AddElement('li').AddText(opts[i] + ': ' + anss[opts[i]]);
 	}
 }
 
@@ -65,6 +63,10 @@ var Connection = {
 		responses = res;
 		build_content();
 	},
+	blocked: function(b) {
+		blocked = b;
+		build_content();
+	},
 };
 
 function init() {
@@ -72,6 +74,8 @@ function init() {
 	login = document.getElementById('login');
 	group = document.getElementById('group');
 	content = document.getElementById('content');
+	responses = [];
+	blocked = {};
 	server = Rpc(Connection, null, connection_lost);
 
 	error.style.display = 'block';
@@ -79,7 +83,6 @@ function init() {
 	content.style.display = 'none';
 	program = [];
 	current = 0;
-	responses = [];
 	hidebox = Create('input');
 	hidebox.type = 'checkbox';
 	hidebox.id = 'hidebox';

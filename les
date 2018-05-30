@@ -133,6 +133,11 @@ def update_responses(): # {{{
 		user.admins[a]._update_responses()
 # }}}
 
+blocked = set()
+def update_blocks():
+	for a in user.admins:
+		user.admins[a]._update_blocks()
+
 class Admin_Connection: # {{{
 	def __init__(self, remote): # {{{
 		self.remote = remote
@@ -202,12 +207,22 @@ class Admin_Connection: # {{{
 	def _update_responses(self): # {{{
 		self.remote.responses.event([(u, responses[u], (u, group) in user.users) for u in all_users])
 	# }}}
+	def _update_blocks(self): # {{{
+		self.remote.blocked.event({b: True for b in blocked})
+	# }}}
 	def run(self, index): # {{{
 		run(index)
 	# }}}
 	def refresh(self): # {{{
 		pass
 	# }}}
+	def block(self, option, value):
+		if value:
+			blocked.add(option)
+		else:
+			if option in blocked:
+				blocked.remove(option)
+		update_blocks()
 # }}}
 
 class Connection: # {{{
