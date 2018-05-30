@@ -1,6 +1,9 @@
-var server, error, login, group, content, program, current, responses, hidebox, hidelabel;
+var server, error, login, group, content, program, current, responses, hidebox, hidelabel, shown;
 
 function build_content() {
+	// Don't update screen while content is visible.
+	if (hidebox.checked)
+		return;
 	content.ClearAll();
 	content.Add(hidebox);
 	content.Add(hidelabel);
@@ -11,21 +14,24 @@ function build_content() {
 		var a = responses[i][1];
 		if (a !== null) {
 			ans += 1;
-			opts.push(a);
-			if (anss[a] === undefined)
+			if (anss[a] === undefined) {
 				anss[a] = 0;
+				opts.push(a);
+			}
 			anss[a] += 1;
 		}
 	}
-	opts.sort(function(a, b) { return anss[a] - anss[b]; });
+	opts.sort(function(a, b) { return anss[b] - anss[a]; });
 	var vague = content.AddElement('div', 'vague');
 	var clear = content.AddElement('div', 'clear');
 	vague.AddElement('h1').AddText('Antwoorden gezien: ' + ans + ' / ' + responses.length);
 	var ol = clear.AddElement('ul');
 	for (var i = 0; i < opts.length; ++i)
 		ol.AddElement('li').AddText(opts[i] + ': ' + anss[opts[i]]);
-	if (ans > 0 && ans == responses.length)
+	if (ans > 0 && ans == responses.length && !shown) {
 		hidebox.checked = true;
+		shown = true;
+	}
 }
 
 var Connection = {
@@ -51,7 +57,9 @@ var Connection = {
 	current: function(cur) {
 		current = cur;
 		hidebox.checked = false;
+		shown = true;
 		build_content();
+		shown = false;
 	},
 	responses: function(res) {
 		responses = res;
@@ -78,6 +86,7 @@ function init() {
 	hidelabel = Create('label');
 	hidelabel.htmlFor = 'hidebox';
 	hidelabel.AddText('Toon antwoorden');
+	hidebox.AddEvent('change', build_content);
 }
 window.AddEvent('load', init);
 

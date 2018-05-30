@@ -1,7 +1,6 @@
-admin_html/code/builders.js
-admin_html/code/rpc.js
-html/code/builders.js
-html/code/rpc.js
+builders.js
+rpc.js
 html/content/
+lessen/
 users/
 __pycache__/
