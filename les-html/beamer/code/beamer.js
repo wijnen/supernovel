@@ -7,28 +7,45 @@ function build_content() {
 	content.ClearAll();
 	content.Add(hidebox);
 	content.Add(hidelabel);
-	var ans = 0;
-	var anss = {};
-	var opts = [];
+	var ans = 0;	// Number of participants that have answered.
+	var anss = {};	// For each answer, number of times it is answered.
+	var opts = [];	// List of answers that have been given.
 	for (var i = 0; i < responses.length; ++i) {
 		var a = responses[i][1];
 		if (a !== null) {
 			ans += 1;
-			if (anss[a] === undefined) {
-				anss[a] = 0;
-				opts.push(a);
+			if (program[current].cmd != 'choices' && program[current].cmd != 'terms' && program[current].cmd != 'words') {
+				a = [a];
 			}
-			anss[a] += 1;
+			for (var ia = 0; ia < a.length; ++ia) {
+				if (anss[a[ia]] === undefined) {
+					anss[a[ia]] = 0;
+					opts.push(a[ia]);
+				}
+				anss[a[ia]] += 1;
+			}
 		}
 	}
 	opts.sort(function(a, b) { return anss[b] - anss[a]; });
 	var vague = content.AddElement('div', 'vague');
 	var clear = content.AddElement('div', 'clear');
-	vague.AddElement('h1').AddText('Antwoorden gezien: ' + ans + ' / ' + responses.length);
-	var ol = clear.AddElement('ul');
-	for (var i = 0; i < opts.length; ++i) {
-		if (!blocked[opts[i]])
-			ol.AddElement('li').AddText(opts[i] + ': ' + anss[opts[i]]);
+	if (program[current]) {
+		vague.AddElement('div').innerHTML = program[current].arg;
+		if (program[current].cmd != 'title') {
+			vague.AddElement('br');
+			vague.AddElement('h1').AddText('Antwoorden gezien: ' + ans + ' / ' + responses.length);
+		}
+		var ol = clear.AddElement('ul');
+		for (var i = 0; i < opts.length; ++i) {
+			if (!blocked[opts[i]]) {
+				var opt;
+				if (program[current].cmd == 'choice' || program[current].cmd == 'choices')
+					opt = program[current].option[opts[i]];
+				else
+					opt = opts[i];
+				ol.AddElement('li').AddText(opt + ': ' + anss[opts[i]]);
+			}
+		}
 	}
 }
 
@@ -67,6 +84,10 @@ var Connection = {
 		blocked = b;
 		build_content();
 	},
+	cookie: function(n, c) {
+		document.cookie = 'name=' + n;
+		document.cookie = 'key=' + c;
+	},
 };
 
 function init() {
@@ -95,10 +116,10 @@ window.AddEvent('load', init);
 
 function connection_lost() {
 	try {
-		alert('De verbinding met de server is verbroken.');
 		error.style.display = 'block';
 		login.style.display = 'none';
 		content.style.display = 'none';
+		server = Rpc(Connection, null, connection_lost);
 	}
 	catch (err) {
 	}

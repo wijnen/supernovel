@@ -1,4 +1,4 @@
-var server, error, login, group, content, response;
+var server, error, login, group, content, response, myname;
 
 var Connection = {
 	replaced: function() {
@@ -19,22 +19,31 @@ var Connection = {
 		content.style.display = 'block';
 		document.getElementsByTagName('body')[0].style.background = (my_response === null ? '' : 'lightblue');
 		response.ClearAll();
-		if (my_response !== null)
-			response.AddText(my_response);
-		var cmd = data['cmd'];
-		var arg = data['arg'];
+		if (my_response !== null) {
+			if (data.cmd == 'choice')
+				response.AddText(data.option[my_response]);
+			else if (data.cmd == 'choices') {
+				var r = [];
+				for (var i = 0; i < my_response.length; ++i)
+					r.push(data.option[my_response[i]]);
+				response.AddText(r);
+			}
+			else
+				response.AddText(my_response);
+		}
 		var response_cb;
 		var div = content.ClearAll().AddElement('div');
-		if (cmd == 'Choice') {
+		div.innerHTML = data.arg;
+		if (data.cmd == 'choice') {
 			var ul = div.AddElement('ul');
 			var opts = [];
-			for (var i = 0; i < data.length; ++i) {
+			for (var i = 0; i < data.option.length; ++i) {
 				var l = ul.AddElement('li').AddElement('label');
 				var input = l.AddElement('input');
 				input.type = 'radio';
 				opts.push(input);
 				input.name = 'input';
-				l.AddElement('span').innerHTML = data[i];
+				l.AddElement('span').innerHTML = data.option[i];
 			}
 			response_cb = function() {
 				var r = [];
@@ -44,44 +53,61 @@ var Connection = {
 				return null;
 			};
 		}
-		else if (cmd == 'Choices') {
+		else if (data.cmd == 'choices') {
 			var ul = div.AddElement('ul');
 			var opts = [];
-			for (var i = 0; i < data.length; ++i) {
+			for (var i = 0; i < data.option.length; ++i) {
 				var l = ul.AddElement('li').AddElement('label');
 				var input = l.AddElement('input');
 				input.type = 'checkbox';
 				opts.push(input);
-				l.AddElement('span').innerHTML = data[i];
+				l.AddElement('span').innerHTML = data.option[i];
 			}
 			response_cb = function() {
 				var r = [];
-				for (var i = 0; i < opts.length; ++i)
-					r.push(opts[i].checked);
+				for (var i = 0; i < opts.length; ++i) {
+					if (opts[i].checked)
+						r.push(i);
+				}
 				return r;
 			};
 		}
 		else {
-			div.innerHTML = arg;
 			var div2 = content.AddElement('div');
 			var e;
-			if (cmd == 'Term') {
+			if (data.cmd == 'term') {
+				div2.AddText('Je antwoord: ');
 				e = div2.AddElement('input');
 				response_cb = function() {
 					return e.value;
 				};
 			}
-			else if (cmd == 'Terms') {
-				e = div2.AddElement('textarea');
+			if (data.cmd == 'word') {
+				div2.AddText('Je antwoord (1 woord): ');
+				e = div2.AddElement('input');
 				response_cb = function() {
 					return e.value;
 				};
 			}
-			else if (cmd == 'Title') {
+			if (data.cmd == 'words') {
+				div2.AddText('Je antwoord (1 of meer woorden): ');
+				e = div2.AddElement('input');
+				response_cb = function() {
+					return e.value.split(' ');
+				};
+			}
+			else if (data.cmd == 'terms') {
+				div2.AddText('Je antwoorden (1 per regel): ');
+				e = div2.AddElement('textarea');
+				response_cb = function() {
+					return e.value.split('\n');
+				};
+			}
+			else if (data.cmd == 'title') {
 				response_cb = function() { return null; };
 			}
 		}
-		if (cmd != 'Title') {
+		if (data.cmd != 'title') {
 			var button = content.AddElement('div').AddElement('button');
 			button.type = 'button';
 			button.AddText('Versturen');
@@ -91,6 +117,10 @@ var Connection = {
 			});
 		}
 		content.Add(response);
+	},
+	cookie: function(n, c) {
+		document.cookie = 'name=' + encodeURIComponent(n);
+		document.cookie = 'key=' + encodeURIComponent(c);
 	},
 };
 
@@ -110,10 +140,10 @@ window.AddEvent('load', init);
 
 function connection_lost() {
 	try {
-		alert('De verbinding met de server is verbroken.');
 		error.style.display = 'block';
 		login.style.display = 'none';
 		content.style.display = 'none';
+		server = Rpc(Connection, null, connection_lost);
 	}
 	catch (err) {
 	}

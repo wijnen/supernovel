@@ -5,7 +5,7 @@ function build_content() {
 	for (var i = 0; i < program.length; ++i) {
 		var li = ul.AddElement('li');
 		var button = li.AddElement('button');
-		button.innerHTML = program[i]['arg'];
+		button.innerHTML = program[i].arg;
 		button.type = 'button';
 		if (i == current) {
 			li.AddClass('active');
@@ -101,6 +101,10 @@ var Connection = {
 		blocked = b;
 		build_content();
 	},
+	cookie: function(n, c) {
+		document.cookie = 'name=' + encodeURIComponent(n);
+		document.cookie = 'key=' + encodeURIComponent(c);
+	},
 };
 
 function init() {
@@ -122,11 +126,11 @@ window.AddEvent('load', init);
 
 function connection_lost() {
 	try {
-		alert('De verbinding met de server is verbroken.');
 		error.style.display = 'block';
 		login.style.display = 'none';
 		content.style.display = 'none';
 		names.style.display = 'none';
+		server = Rpc(Connection, null, connection_lost);
 	}
 	catch (err) {
 	}

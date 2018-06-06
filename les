@@ -4,6 +4,7 @@
 import sys
 import os
 import re
+import random
 import crypt
 import traceback
 import time
@@ -38,12 +39,15 @@ def parse_text(text): # {{{
 # }}}
 
 all_users = user.list_group(group)
+all_admins = user.list_group('admin')
 responses = {u: None for u in all_users}
+cookies = {u: ''.join(chr(random.randrange(ord('a'), ord('z') + 1)) for _ in range(32)) for u in all_users}
+admin_cookies = {u: ''.join(chr(random.randrange(ord('a'), ord('z') + 1)) for _ in range(32)) for u in all_admins}
 
 # Read program from standard input. {{{
 program = []
 lineno = 0
-toplevel = re.compile(r'^([A-Z][a-z]*)\s*:\s*(.*?)\s*$')
+toplevel = re.compile(r'^([A-Za-z][a-z]*)\s*:\s*(.*?)\s*$')
 block = re.compile(r'^\s(.*?)\s*$')
 # Read blocks. {{{
 for ln in sys.stdin:
@@ -62,7 +66,7 @@ for ln in sys.stdin:
 		else:
 			arg = []
 			indent = None
-		program.append({'cmd': cmd, 'arg': arg, 'indent': indent, 'lineno': lineno})
+		program.append({'cmd': cmd.lower(), 'case': cmd != cmd.lower(), 'arg': arg, 'indent': indent, 'lineno': lineno, 'option': []})
 	else:
 		r = block.match(ln)
 		if r:
@@ -70,9 +74,9 @@ for ln in sys.stdin:
 				debug(0, '%d: block before first toplevel command is not allowed' % lineno)
 				continue
 			if program[-1]['indent'] == -1:
-				debug(0, '%d: block after toplevel command with argument is not allowed' % lineno)
-				continue
-			indent = program[-1]['indent']
+				indent = None
+			else:
+				indent = program[-1]['indent']
 			l = r.group(1)
 			if indent is not None and l[:indent].strip() != '':
 				debug(0, '%d: incorrect indentation' % lineno)
@@ -81,14 +85,14 @@ for ln in sys.stdin:
 				program[-1]['indent'] = indent
 			program[-1]['arg'].append(l[indent:].rstrip())
 		else:
-			debug('%d: invalid line: ' % lineno + ln)
+			debug(0, '%d: invalid line: ' % lineno + ln)
 			continue
 # }}}
 # Combine blocks. {{{
 current = 0
-mc = ('Choice', 'Choices')
-toplevel = ('Python', 'Term', 'Terms', 'Title') + mc
-args = ('Score', 'Mangle')
+mc = ('choice', 'choices')
+toplevel = ('python', 'term', 'terms', 'word', 'words', 'title') + mc
+args = ('score', 'filter', 'option')
 while current < len(program):
 	p = program[current]
 	if p['cmd'] not in toplevel:
@@ -98,14 +102,31 @@ while current < len(program):
 		if current == 0:
 			debug(0, '%d: ignoring invalid initial command ' % p['lineno'] + p['cmd'])
 			continue
-		program[current - 1][p['cmd']] = p['arg']
+		if p['cmd'] == 'option':
+			program[current - 1]['option'].append(' '.join(p['arg']))
+		else:
+			program[current - 1][p['cmd']] = p['arg']
 		program.pop(current)
 		continue
-	if p['cmd'] not in mc:
-		p['arg'] = parse_text('\n'.join(p['arg']))
-		if p['cmd'] != 'Python':
-			p['arg'] = markdown(p['arg'])
+	if p['cmd'] in mc:
+		p['case'] = True
+	p['arg'] = parse_text('\n'.join(p['arg']))
+	if p['cmd'] != 'python':
+		p['arg'] = markdown(p['arg'])
 	current += 1
+# }}}
+# Set up scores and filters. {{{
+for p in program:
+	# Put this in a function to create a new scope for expr.
+	run_eval = lambda expr: lambda r: eval(expr, variables, {'response': r})
+	if 'filter' in p:
+		p['filter'] = run_eval(p['filter'])
+	else:
+		p['filter'] = lambda r: r
+	if 'score' in p:
+		p['score'] = run_eval(p['score'])
+	else:
+		p['score'] = lambda r: 0
 # }}}
 # }}}
 current = 0
@@ -115,7 +136,7 @@ def run(index): # {{{
 	if isinstance(current, int):
 		while current < len(program):
 			p = program[current]
-			if p['cmd'] != 'Python':
+			if p['cmd'] != 'python':
 				break
 			current += 1
 			exec(p['arg'], variables)
@@ -145,12 +166,19 @@ class Admin_Connection: # {{{
 		self.remote.group.event(group)
 		self.user = None
 		q = remote.data['query']
+		if 'cookie' in self.remote.data['headers']:
+			c = self.remote.data['headers']['cookie']
+			kv = [chunk.strip().split('=', 1) for chunk in c.split(';')]
+			kv = {x[0]: x[1] for x in kv}
+			if 'name' in kv and 'key' in kv and kv['name'] in all_admins and admin_cookies[kv['name']] == kv['key']:
+				# Session key is correct; log the user in.
+				if self._login(kv['name']):
+					return
 		keys = ('name', 'secret')
 		if config['secret'] != '' and all(x in q for x in keys) and q['secret'][0] == config['secret']:
-			if not self._login(q['name'][0], 'admin'):
-				self.remote.login.event()
-		else:
-			self.remote.login.event()
+			if self._login(q['name'][0]):
+				return
+		self.remote.login.event()
 	# }}}
 	def login(self, name, password): # {{{
 		debug(2, 'admin login attempt')
@@ -183,8 +211,9 @@ class Admin_Connection: # {{{
 		self.user = new_user
 		debug(2, 'Admin {} logged in from {}:{}'.format(name, *self.remote.socket.remote))
 		user.admins[name.lower()] = self
-		self.remote.program(program)
-		self.remote.current(current)
+		self.remote.cookie.event(self.user['filename'], admin_cookies[self.user['filename']])
+		self.remote.program.event([{k: v for k, v in p.items() if k not in ('filter', 'score')} for p in program])
+		self.remote.current.event(current)
 		self._update_responses()
 		return True
 	# }}}
@@ -232,13 +261,20 @@ class Connection: # {{{
 		remote.closed = self._closed
 		self.remote.group.event(group)
 		self.response = None
+		if 'cookie' in self.remote.data['headers']:
+			c = self.remote.data['headers']['cookie']
+			kv = [chunk.strip().split('=', 1) for chunk in c.split(';')]
+			kv = {x[0]: x[1] for x in kv}
+			if 'name' in kv and 'key' in kv and kv['name'] in all_users and cookies[kv['name']] == kv['key']:
+				# Session key is correct; log the user in.
+				if self._login(kv['name'], group):
+					return
 		q = remote.data['query']
 		keys = ('name', 'group', 'secret')
-		if config['secret'] != '' and all(x in q for x in keys) and q['secret'][0] == config['secret']:
-			if not self._login(q['name'][0], q['group'][0]):
-				self.remote.login.event()
-		else:
-			self.remote.login.event()
+		if config['secret'] != '' and all(x in q for x in keys) and q['secret'][0] == config['secret'] and keys['group'] == group:
+			if self._login(q['name'][0], q['group'][0]):
+				return
+		self.remote.login.event()
 	# }}}
 	#'
 	def login(self, name, password): # {{{
@@ -275,6 +311,7 @@ class Connection: # {{{
 		u['connection'] = self
 		self.user = u
 		debug(2, 'User {}:{} logged in from {}:{}'.format(name, group, *self.remote.socket.remote))
+		self.remote.cookie.event(self.user['filename'], cookies[self.user['filename']])
 		self._send_state()
 		user.refresh_admins()
 		return u
@@ -293,13 +330,22 @@ class Connection: # {{{
 		user.refresh_admins()
 	# }}}
 	def _send_state(self): # {{{
-		self.remote.content.event(current, program[current] if current < len(program) else None, responses[self.user['name'].lower()])
+		self.remote.content.event(current, {k: v for k, v in program[current].items() if k not in ('filter', 'score')} if current < len(program) else None, responses[self.user['name'].lower()])
 	# }}}
 	def respond(self, serial, response): # {{{
 		if serial != current:
 			debug(1, 'response for wrong question received from ' + self.user['name'])
 		else:
-			responses[self.user['name'].lower()] = response
+			if program[current]['cmd'] == 'word':
+				response = (response.split() + [''])[0]
+			elif program[current]['cmd'] == 'words':
+				response = [x.strip() for x in response if x.strip() != '']
+			if not program[current]['case']:
+				if program[current]['cmd'] in ('words', 'terms'):
+					response = [x.lower() for x in response]
+				else:
+					response = response.lower()
+			responses[self.user['name'].lower()] = program[current]['filter'](response)
 			update_responses()
 		self._send_state()
 	# }}}
