@@ -131,8 +131,9 @@ for p in program:
 # }}}
 current = 0
 def run(index): # {{{
-	global current
+	global current, blocked
 	current = index
+	blocked = set()
 	if isinstance(current, int):
 		while current < len(program):
 			p = program[current]
@@ -215,6 +216,7 @@ class Admin_Connection: # {{{
 		self.remote.program.event([{k: v for k, v in p.items() if k not in ('filter', 'score')} for p in program])
 		self.remote.current.event(current)
 		self._update_responses()
+		self._update_blocks()
 		return True
 	# }}}
 	def _closed(self): # {{{
@@ -245,13 +247,16 @@ class Admin_Connection: # {{{
 	def refresh(self): # {{{
 		pass
 	# }}}
-	def block(self, option, value):
+	def block(self, option, value): # {{{
+		if isinstance(option, list):
+			option = ','.join(option)
 		if value:
 			blocked.add(option)
 		else:
 			if option in blocked:
 				blocked.remove(option)
 		update_blocks()
+	# }}}
 # }}}
 
 class Connection: # {{{
@@ -339,7 +344,9 @@ class Connection: # {{{
 			if program[current]['cmd'] == 'word':
 				response = (response.split() + [''])[0]
 			elif program[current]['cmd'] == 'words':
-				response = [x.strip() for x in response if x.strip() != '']
+				response = list(set(x.strip() for x in response if x.strip() != ''))
+				response.sort()
+				response = tuple(response)
 			if not program[current]['case']:
 				if program[current]['cmd'] in ('words', 'terms'):
 					response = [x.lower() for x in response]
