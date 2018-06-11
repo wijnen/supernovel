@@ -91,6 +91,10 @@ var Connection = {
 		single.ClearAll();
 		// TODO: show student details.
 	},
+	cookie: function(n, c) {
+		document.cookie = 'name=' + encodeURIComponent(n);
+		document.cookie = 'key=' + encodeURIComponent(c);
+	},
 };
 
 function log_in() {

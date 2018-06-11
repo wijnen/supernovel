@@ -11,6 +11,8 @@ from debug import debug
 
 users = {}	# including admins.
 admins = {}
+# Keys which are never saved.
+unsaved = ('connection', 'text_buffer', 'full_section', 'run_stack', 'section', 'answers', 'variables', 'last_path', 'characters')
 
 def mangle(src): # {{{
 	def escape(x):
@@ -110,6 +112,9 @@ def load(name, group): # {{{
 		if ln.strip() == '':
 			continue
 		key, value = ln.split('=', 1)
+		if key in unsaved:
+			# This key should not have been in the file.
+			continue
 		if key == 'nosave':
 			ret[key] = value == 'True'
 			continue
@@ -138,16 +143,16 @@ def list_group(group): # {{{
 # }}}
 
 def save(user): # {{{
-	'''Save user information to disk. user['connection'] is valid while this is called, but the connection may be closed.'''
+	'''Save user information to disk.'''
 	with open(os.path.join(config['data'], 'users', user['group'].lower(), user['filename']), 'w', errors = 'replace') as f:
 		for key in user:
-			if key == 'connection':
+			if key in unsaved:
 				continue
 			f.write('{}={}\n'.format(key, user[key]))
 		# Record answers.
 		if not user['nosave']:
-			for s in user['connection'].answers:
-				section = user['connection'].answers[s]
+			for s in user['answers']:
+				section = user['answers'][s]
 				for q in section:
 					question = section[q]
 					f.write('answer:{}:{}={}\n'.format(s, ','.join(str(i) for i in q), ';'.join(mangle(a) for a in question)))

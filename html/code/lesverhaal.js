@@ -196,6 +196,11 @@ var Connection = {
 		speed(); // Set playback speed.
 		video.play();
 	},
+	cookie: function(n, g, c) {
+		document.cookie = 'name=' + encodeURIComponent(n);
+		document.cookie = 'group=' + encodeURIComponent(g);
+		document.cookie = 'key=' + encodeURIComponent(c);
+	},
 };
 
 // Script is a list of instructions:
@@ -205,6 +210,10 @@ var Connection = {
 // ['image', tag, url]: set sprite image.
 // ['pre-wait']: wait for next animation frame, to make sure all prepared style attributes are applied.
 // ['wait', seconds]: wait specified time before next step.
+
+function home() {
+	server.call('home');
+}
 
 function next_kinetic(force) {
 	if (document.activeElement != document.body)
@@ -453,7 +462,6 @@ function keypress(event) {
 
 function connection_lost() {
 	try {
-		alert('De verbinding met de server is verbroken.');
 		error.style.display = 'block';
 		login.style.display = 'none';
 		videodiv.style.display = 'none';
@@ -463,8 +471,14 @@ function connection_lost() {
 		navigation.style.display = 'none';
 		spritebox.style.display = 'none';
 		video.pause();
+		server = Rpc(Connection, null, connection_lost);
 	}
 	catch (err) {
+		try {
+			alert('De verbinding met de server is verbroken en kan niet worden hersteld.');
+		}
+		catch (err) {
+		}
 	}
 }
 

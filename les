@@ -166,7 +166,6 @@ class Admin_Connection: # {{{
 		remote.closed = self._closed
 		self.remote.group.event(group)
 		self.user = None
-		q = remote.data['query']
 		if 'cookie' in self.remote.data['headers']:
 			c = self.remote.data['headers']['cookie']
 			kv = [chunk.strip().split('=', 1) for chunk in c.split(';')]
@@ -175,6 +174,7 @@ class Admin_Connection: # {{{
 				# Session key is correct; log the user in.
 				if self._login(kv['name']):
 					return
+		q = remote.data['query']
 		keys = ('name', 'secret')
 		if config['secret'] != '' and all(x in q for x in keys) and q['secret'][0] == config['secret']:
 			if self._login(q['name'][0]):

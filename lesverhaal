@@ -7,6 +7,7 @@ import re
 import crypt
 import traceback
 import time
+import random
 import fhs
 import websocketd
 from markdown import markdown
@@ -23,21 +24,27 @@ import user
 		2: Normal (communication notifications)
 		3: Debug
 }}} '''
+#'''
 
 class Admin_Connection: # {{{
 	def __init__(self, remote): # {{{
 		self.remote = remote
 		remote.closed = self._closed
 		self.user = None
+		if 'cookie' in self.remote.data['headers']:
+			c = self.remote.data['headers']['cookie']
+			kv = [chunk.strip().split('=', 1) for chunk in c.split(';')]
+			kv = {x[0]: x[1] for x in kv}
+			if 'name' in kv and 'key' in kv and (kv['name'], 'admin') in user.users and user.users[(kv['name'], 'admin')]['cookie'] == kv['key']:
+				if self._login(kv['name']):
+					return
 		q = remote.data['query']
 		keys = ('name', 'secret')
 		if config['secret'] != '' and all(x in q for x in keys) and q['secret'][0] == config['secret']:
-			if not self._login(q['name'][0], 'admin'):
-				self.remote.login.event()
-				self.refresh = lambda: self.remote.login.event()
-		else:
-			self.remote.login.event()
-			self.refresh = lambda: self.remote.login.event()
+			if self._login(q['name'][0], 'admin'):
+				return
+		self.refresh = lambda: self.remote.login.event()
+		self.remote.login.event()
 	# }}}
 	def login(self, name, password): # {{{
 		user, answers = user.load(name.strip(), 'admin')
@@ -54,20 +61,23 @@ class Admin_Connection: # {{{
 		return True
 	# }}}
 	def _login(self, name): # {{{
-		user, answers = user.load(name, 'admin')
-		if user is None:
+		u, answers = user.load(name, 'admin')
+		if u is None:
 			return False
-		if user['connection'] is not None:
+		if u['connection'] is not None:
 			debug(3, 'Replacing connection for ' + name)
 			try:
-				user['connection'].remote.replaced.event()
+				u['connection'].remote.replaced.event()
 			except:
 				pass
-			user['connection'].remote.close()
+			u['connection'].remote.close()
 		else:
-			user.users[(name.lower(), 'admin')] = user
-		user['connection'] = self
-		self.user = user
+			user.users[(name.lower(), 'admin')] = u
+		u['connection'] = self
+		self.user = u
+		if (u['filename'], 'admin') not in user.users:
+			user.users[(u['filename'], 'admin')] = {'cookie': ''.join(chr(random.randrange(ord('a'), ord('z') + 1)) for _ in range(32))}
+		self.remote.cookie.event(u['filename'], user.users[(u['filename'], 'admin')]['cookie'])
 		debug(2, 'Admin {} logged in from {}:{}'.format(name, *self.remote.socket.remote))
 		user.admins[name.lower()] = self
 		self.list_groups()
@@ -97,7 +107,7 @@ class Admin_Connection: # {{{
 				continue
 			groups.append([g])
 			for s in content.list(g):
-				groups[-1].append((s, sum(user.users[u]['group'].lower() == g and user.users[u]['connection'].section == s for u in user.users)))
+				groups[-1].append((s, sum(user.users[u]['group'].lower() == g and user.users[u]['section'] == s for u in user.users)))
 		groups.sort()
 		self.remote.group_list.event(groups)
 	# }}}
@@ -128,14 +138,14 @@ class Admin_Connection: # {{{
 		students = []
 		def make_field(student, question):
 			s = student['connection']
-			active = s.section == section and len(s.run_stack[-1][0]) > s.run_stack[-1][1] and s.run_stack[-1][0][s.run_stack[-1][1]][1] == question[0]
-			return (active, s.answers[section][question[0]] if section in s.answers and question[0] in s.answers[section] else None)
+			active = student['section'] == section and len(s.user['run_stack'][-1][0]) > s.user['run_stack'][-1][1] and s.user['run_stack'][-1][0][s.user['run_stack'][-1][1]][1] == question[0]
+			return (active, student['answers'][section][question[0]] if section in student['answers'] and question[0] in student['answers'][section] else None)
 		def make_other_field(student, question, answers):
 			return (False, answers[section][question[0]] if section in answers and question[0] in answers[section] else None)
 		for s in user.users:
 			if user.users[s]['group'].lower() != group.lower():
 				continue
-			students.append(((user.users[s]['name'], s), user.users[s]['connection'].section == section) + tuple(make_field(user.users[s], q) for q in questions))
+			students.append(((user.users[s]['name'], s), user.users[s]['section'] == section) + tuple(make_field(user.users[s], q) for q in questions))
 		students.sort(key = lambda s: (not s[1], s[0][0], s[0][1]))
 		# Add non-connected students to the list.
 		others = []
@@ -161,93 +171,107 @@ class Admin_Connection: # {{{
 	# }}}
 # }}}
 
+#'''
 class Connection: # {{{
 	def __init__(self, remote): # {{{
 		debug(2, 'New connection from {}:{}'.format(*remote.socket.remote))
 		self.remote = remote
-		self.text_buffer = []
-		self.full_section = []
-		self.run_stack = []
 		remote.closed = self._closed
-		self.section = None	# Current section.
-		self.answers = {}	# Answers that have been given to all the questions so far.
-		self.variables = {}
-		self.last_path = None
+		if 'cookie' in self.remote.data['headers']:
+			c = self.remote.data['headers']['cookie']
+			kv = [chunk.strip().split('=', 1) for chunk in c.split(';')]
+			kv = {x[0]: x[1] for x in kv}
+			if 'name' in kv and 'group' in kv and 'key' in kv and (kv['name'], kv['group']) in user.users and user.users[(kv['name'], kv['group'])]['cookie'] == kv['key']:
+				if self._login(kv['name'], kv['group']):
+					return
 		q = remote.data['query']
 		keys = ('name', 'group', 'secret')
 		if config['secret'] != '' and all(x in q for x in keys) and q['secret'][0] == config['secret']:
-			if not self._login(q['name'][0], q['group'][0]):
-				self.remote.login.event()
-		else:
-			self.remote.login.event()
+			if self._login(q['name'][0], q['group'][0]):
+				return
+		self.remote.login.event()
 	# }}}
 	def _parse_text(self, text): # {{{
 		def subst(obj):
 			try:
-				ret = eval(obj.group(1), self.variables)
+				ret = eval(obj.group(1), self.user['variables'])
 				return str(ret)
 			except:
 				debug(1, 'error evaluating expression substitution {}'.format(obj.group(0)))
 				traceback.print_exc()
 				return '[fout]'
 		debug(2, repr(text))
-		return re.sub('\${(.*?)}', subst, text).replace('FILE://common/', config['content'] + 'common/').replace('FILE://', config['content'] + '/' + self.user['group'].lower() + '/' + self.section + '/')
+		return re.sub('\${(.*?)}', subst, text).replace('FILE://common/', config['content'] + 'common/').replace('FILE://', config['content'] + '/' + self.user['group'].lower() + '/' + self.user['section'] + '/')
 	# }}}
 	def _add_text(self, text): # {{{
 		'''Prepare text for displaying.'''
 		if not isinstance(text, str):
 			if text[0] == 'text':
-				self.text_buffer.append((text[0], '' if text[1] is None else self._parse_text(text[1]), self._parse_text(text[2]), text[3]))
+				self.user['text_buffer'].append((text[0], '' if text[1] is None else self._parse_text(text[1]), self._parse_text(text[2]), text[3]))
 			else:
-				self.text_buffer.append(text)
+				self.user['text_buffer'].append(text)
 			return
-		if len(self.text_buffer) > 0 and isinstance(self.text_buffer[-1], str):
-			self.text_buffer[-1] += '\n' + self._parse_text(text)
+		if len(self.user['text_buffer']) > 0 and isinstance(self.user['text_buffer'][-1], str):
+			self.user['text_buffer'][-1] += '\n' + self._parse_text(text)
 		else:
-			self.text_buffer.append(self._parse_text(text))
+			self.user['text_buffer'].append(self._parse_text(text))
 	# }}}
 	def login(self, name, group, password): # {{{
-		user, answers = user.load(name.strip(), group.strip())
-		if user is None:
+		u, answers = user.load(name.strip(), group.strip())
+		if u is None:
 			debug(2, 'Invalid user {}:{} on {}:{}'.format(name, group, *self.remote.socket.remote))
 			return 'deze naam is onbekend'
-		crypted = crypt.crypt(password, salt = user['password'])
-		if user['password'] is not None and crypted != user['password']:
+		crypted = crypt.crypt(password, salt = u['password'])
+		if u['password'] is not None and crypted != u['password']:
 			debug(2, 'Invalid password for {}:{} on {}:{}'.format(name, group, *self.remote.socket.remote))
 			return 'dit wachtwoord is onjuist'
-		user = self._login(name.strip(), group.strip())
+		u = self._login(name.strip(), group.strip())
 		# In case the password is new, it needs to be stored.
-		user['password'] = crypted
+		u['password'] = crypted
 		return None
 	# }}}
 	def _login(self, name, group): # {{{
-		user, answers = user.load(name, group)
-		if user is None:
+		u, answers = user.load(name, group.lower())
+		if u is None:
 			debug(2, 'failed login for {}:{}'.format(name, group))
 			return None
-		if user['connection'] is not None:
+		if u['connection'] is not None:
 			debug(2, 'Replacing connection for ' + name)
 			try:
-				user['connection'].remote.replaced.event()
+				u['connection'].remote.replaced.event()
 			except:
 				pass
-			self.answers = user['connection'].answers
-			user['connection'].remote.close()
+			u['connection'].remote.close()
 		else:
-			self.answers = answers
-			user.users[(name.lower(), group.lower())] = user
-		user['connection'] = self
-		self.user = user
+			u['answers'] = answers
+			user.users[(name.lower(), group.lower())] = u
+		u['connection'] = self
+		self.user = u
 		debug(2, 'User {}:{} logged in from {}:{}'.format(name, group, *self.remote.socket.remote))
+		if 'cookie' not in u:
+			u['cookie'] = ''.join(chr(random.randrange(ord('a'), ord('z') + 1)) for _ in range(32))
+		if 'section' not in u:
+			u['text_buffer'] = []
+			u['full_section'] = []
+			u['run_stack'] = []
+			u['section'] = None	# Current section.
+			u['answers'] = {}	# Answers that have been given to all the questions so far.
+			u['variables'] = {}
+			u['last_path'] = None
+		self.remote.cookie.event(u['filename'], group.lower(), u['cookie'])
 		self.remote.contents.event(content.list(group))
 		self.remote.main.event()
+		if u['section'] is not None:
+			if not self._run_item(self.user['run_stack'][-1][0][self.user['run_stack'][-1][1]]):
+				debug(0, 'Bug: saved state of user {}:{} was not a waiting state'.format(name, group))
+				self._run()
 		user.refresh_admins()
-		return user
+		return u
 	# }}}
 	def _answer(self, key, value = None): # {{{
 		'''Set style for last answer.
 		With only one argument, the style of the background is set.'''
-		if self.last_path is None:
+		if self.user['last_path'] is None:
 			debug(1, 'answer style given before a question was answered')
 			return
 		if value is None:
@@ -257,20 +281,24 @@ class Connection: # {{{
 			key = 'background'
 		key = self._parse_text(key)
 		value = self._parse_text(value)
-		self.answers[self.section][self.last_path][-1][1].append((key.strip(), value.strip()))
+		self.user['answers'][self.user['section']][self.user['last_path']][-1][1].append((key.strip(), value.strip()))
 		user.refresh_admins()
 	# }}}
+	def home(self): # {{{
+		self.user['section'] = None
+		self.remote.main.event()
+	# }}}
 	def start(self, section): # {{{
-		self.section = section
-		self.full_section, self.index, characters = content.get(self.user['group'], self.section)
-		self.run_stack = [[self.full_section, 0]]
-		self.characters = {}
-		self.last_path = None
+		self.user['section'] = section
+		self.user['full_section'], self.index, characters = content.get(self.user['group'], self.user['section'])
+		self.user['run_stack'] = [[self.user['full_section'], 0]]
+		self.user['characters'] = {}
+		self.user['last_path'] = None
 		def goto(label):
-			while len(self.run_stack) > 1:
-				self.run_stack.pop()
-			self.run_stack[-1][1] = self.index(label)
-		self.variables = {
+			while len(self.user['run_stack']) > 1:
+				self.user['run_stack'].pop()
+			self.user['run_stack'][-1][1] = self.index(label)
+		self.user['variables'] = {
 				'answer': self._answer,
 				'goto': goto,
 				'text': self._add_text,
@@ -292,42 +320,42 @@ class Connection: # {{{
 	def _question(self, qtype, params = ()): # {{{
 		if qtype == 'unit':
 			qtype = 'short'
-		self._handle_story(qtype, self.text_buffer, params)
-		self.text_buffer = []
+		self._handle_story(qtype, self.user['text_buffer'], params)
 		self.breaking = True
 		return True
 	# }}}
 	def _add_character(self, code, name, imgs, ext): # {{{
-		self.characters[code] = [name, imgs, ext]
-		self.variables[code] = lambda text: self._say(self.characters[code][0], text, image = self.characters[code][1] + 'side' + self.characters[code][2] if self.characters[code][2] else None)
+		self.user['characters'][code] = [name, imgs, ext]
+		self.user['variables'][code] = lambda text: self._say(self.user['characters'][code][0], text, image = self.user['characters'][code][1] + 'side' + self.user['characters'][code][2] if self.user['characters'][code][2] else None)
 	# }}}
 	def _say(self, name, text, image = None): # {{{
-		self.text_buffer.append(('text', name, self._parse_text(text), image))
+		self.user['text_buffer'].append(('text', name, self._parse_text(text), image))
 	# }}}
 	def _show(self, tag, mod = None, at = 'center', transition = None): # {{{
-		self._run_item(['story', None, content.showhide(True, tag, mod, at, transition, self.characters, None, None)])
+		self._run_item(['story', None, content.showhide(True, tag, mod, at, transition, self.user['characters'], None, None)])
 	# }}}
 	def _hide(self, tag, at = 'center', transition = None): # {{{
-		self._run_item(['story', None, content.showhide(False, tag, None, at, transition, self.characters, None, None)])
+		self._run_item(['story', None, content.showhide(False, tag, None, at, transition, self.user['characters'], None, None)])
 	# }}}
 	def _run(self): # {{{
-		while len(self.run_stack) > 0:
+		self.user['text_buffer'] = []
+		while len(self.user['run_stack']) > 0:
 			# Pop off stack levels until there's an instruction.
-			while len(self.run_stack[-1][0]) <= self.run_stack[-1][1]:
-				self.run_stack.pop()
-				if len(self.run_stack) == 0:
-					if len(self.text_buffer) > 0:
-						self._handle_story('text', self.text_buffer)
-						self.text_buffer = []
-						self.run_stack = [[self.full_section, len(self.full_section)]]
+			while len(self.user['run_stack'][-1][0]) <= self.user['run_stack'][-1][1]:
+				self.user['run_stack'].pop()
+				if len(self.user['run_stack']) == 0:
+					if len(self.user['text_buffer']) > 0:
+						self._handle_story('text', self.user['text_buffer'])
+						self.user['text_buffer'] = []
+						self.user['run_stack'] = [[self.user['full_section'], len(self.user['full_section'])]]
 						user.refresh_admins()
 						return
-					self.section = None
+					self.user['section'] = None
 					user.refresh_admins()
 					self.remote.main.event()
 					return
 			# Run instructions.
-			if self._run_item(self.run_stack[-1][0][self.run_stack[-1][1]]):
+			if self._run_item(self.user['run_stack'][-1][0][self.user['run_stack'][-1][1]]):
 				break
 		user.refresh_admins()
 	# }}}
@@ -342,53 +370,53 @@ class Connection: # {{{
 		elif code[0] == 'answer':
 			self._answer(code[2], code[3])
 		elif code[0] == 'if':
-			self.run_stack[-1][1] += 1
+			self.user['run_stack'][-1][1] += 1
 			for expr, target in code[2:-1]:
-				if eval(expr, self.variables):
-					self.run_stack.append([target, 0])
+				if eval(expr, self.user['variables']):
+					self.user['run_stack'].append([target, 0])
 					break
 			else:
 				if code[-1] is not None:
-					self.run_stack.append([code[-1], 0])
+					self.user['run_stack'].append([code[-1], 0])
 			return False
 		elif code[0] == 'while':
 			# Don't increment instruction pointer, so the loop restarts.
 			if eval(code[2]):
-				self.run_stack.append([code[3], 0])
+				self.user['run_stack'].append([code[3], 0])
 			else:
-				self.run_stack[-1][1] += 1
+				self.user['run_stack'][-1][1] += 1
 			return False
 		elif code[0] == 'continue':
-			while self.run_stack[-1][1] >= len(self.run_stack[-1][0]) or self.run_stack[-1][0][self.run_stack[-1][1]][0] != 'while':
-				self.run_stack.pop()
+			while self.user['run_stack'][-1][1] >= len(self.user['run_stack'][-1][0]) or self.user['run_stack'][-1][0][self.user['run_stack'][-1][1]][0] != 'while':
+				self.user['run_stack'].pop()
 			return False
 		elif code[0] == 'break':
-			while self.run_stack[-1][1] >= len(self.run_stack[-1][0]) or self.run_stack[-1][0][self.run_stack[-1][1]][0] != 'while':
-				self.run_stack.pop()
-			self.run_stack[-1][1] += 1
+			while self.user['run_stack'][-1][1] >= len(self.user['run_stack'][-1][0]) or self.user['run_stack'][-1][0][self.user['run_stack'][-1][1]][0] != 'while':
+				self.user['run_stack'].pop()
+			self.user['run_stack'][-1][1] += 1
 			return False
 		elif code[0] == 'goto':
 			# Break to top level and jump to requested label.
-			while len(self.run_stack) > 1:
-				self.run_stack.pop()
-			self.run_stack[-1][1] = code[2]
+			while len(self.user['run_stack']) > 1:
+				self.user['run_stack'].pop()
+			self.user['run_stack'][-1][1] = code[2]
 			return False
 		elif code[0] == 'python':
 			self.breaking = False
-			self.run_stack[-1][1] += 1	# Do this before running the code, so goto works.
-			exec('\n'.join(code[2]), self.variables)
+			self.user['run_stack'][-1][1] += 1	# Do this before running the code, so goto works.
+			exec('\n'.join(code[2]), self.user['variables'])
 			return self.breaking
 		elif code[0] == 'video':
-			if len(self.text_buffer) > 0:
-				self._handle_story('text', self.text_buffer)
-				self.text_buffer = []
+			if len(self.user['text_buffer']) > 0:
+				self._handle_story('text', self.user['text_buffer'])
+				self.user['text_buffer'] = []
 			else:
-				self.remote.video.event(config['content'] + '/' + self.user['group'].lower() + '/' + self.section + '/' + code[2])
+				self.remote.video.event(config['content'] + '/' + self.user['group'].lower() + '/' + self.user['section'] + '/' + code[2])
 			return True
 		else:
 			# Question.
 			return self._question(code[0], code[3:])
-		self.run_stack[-1][1] += 1
+		self.user['run_stack'][-1][1] += 1
 		return False
 	# }}}
 	def _handle_story(self, q, text_buffer, *args): # {{{
@@ -409,10 +437,10 @@ class Connection: # {{{
 	# }}}
 	def answer(self, answer): # {{{
 		debug(3, '{}:{} answers {}'.format(self.user['name'], self.user['group'], answer))
-		if self.run_stack[-1][1] >= len(self.run_stack[-1][0]):
+		if self.user['run_stack'][-1][1] >= len(self.user['run_stack'][-1][0]):
 			self._run()
 			return
-		current = self.run_stack[-1][0][self.run_stack[-1][1]]
+		current = self.user['run_stack'][-1][0][self.user['run_stack'][-1][1]]
 		if current[0] not in ('number', 'short', 'long', 'choice', 'unit', 'longnumber', 'longshort', 'longunit', 'longchoice'):
 			debug(1, 'answer given by {}:{} for non-question: {}'.format(self.remote.socket.remote[0], self.remote.socket.remote[1], current))
 			return
@@ -461,38 +489,38 @@ class Connection: # {{{
 				# Leave answer string as is (but force str); this only happens when users are messing with the js.
 				debug(2, 'unparsable long* answer: {}'.format(answer))
 				answer = ('', str(answer).strip())
-		self.variables[current[2]] = answer
+		self.user['variables'][current[2]] = answer
 		if store:
-			if self.section not in self.answers:
-				self.answers[self.section] = {}
-			path = self.run_stack[-1][0][self.run_stack[-1][1]][1]
-			if path not in self.answers[self.section]:
-				self.answers[self.section][path] = []
-			self.answers[self.section][path].append((answer, []))
-			self.last_path = path
+			if self.user['section'] not in self.user['answers']:
+				self.user['answers'][self.user['section']] = {}
+			path = self.user['run_stack'][-1][0][self.user['run_stack'][-1][1]][1]
+			if path not in self.user['answers'][self.user['section']]:
+				self.user['answers'][self.user['section']][path] = []
+			self.user['answers'][self.user['section']][path].append((answer, []))
+			self.user['last_path'] = path
 			if not config['lazysave']:
 				user.save(self.user)
 		else:
-			self.last_path = None
-		self.run_stack[-1][1] += 1
+			self.user['last_path'] = None
+		self.user['run_stack'][-1][1] += 1
 		self._run()
 	# }}}
 	def video_done(self): # {{{
-		if self.run_stack[-1][1] >= len(self.run_stack[-1][0]):
+		if self.user['run_stack'][-1][1] >= len(self.user['run_stack'][-1][0]):
 			self._run()
 			return
-		current = self.run_stack[-1][0][self.run_stack[-1][1]]
+		current = self.user['run_stack'][-1][0][self.user['run_stack'][-1][1]]
 		if current[0] == 'video':
-			self.run_stack[-1][1] += 1
+			self.user['run_stack'][-1][1] += 1
 			self._run()
 	# }}}
 	def text_done(self): # {{{
-		if self.run_stack[-1][1] >= len(self.run_stack[-1][0]):
+		if self.user['run_stack'][-1][1] >= len(self.user['run_stack'][-1][0]):
 			self._run()
 			return
-		current = self.run_stack[-1][0][self.run_stack[-1][1]]
+		current = self.user['run_stack'][-1][0][self.user['run_stack'][-1][1]]
 		if current[0] == 'story':
-			self.run_stack[-1][1] += 1
+			self.user['run_stack'][-1][1] += 1
 		self._run()
 	# }}}
 	def _closed(self): # {{{
@@ -502,10 +530,7 @@ class Connection: # {{{
 			return
 		debug(2, 'disconnecting {}:{}'.format(self.user['name'], self.user['group']))
 		user.save(self.user)
-		try:
-			user.users.pop((self.user['filename'], self.user['group'].lower()))
-		except:
-			pass
+		# TODO: schedule a timeout for discarding user data from memory.
 		user.refresh_admins()
 	# }}}
 # }}}
