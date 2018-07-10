@@ -114,7 +114,9 @@ def get(group, section): # {{{
 		in_with = False
 		after = []
 		hiders = []
+		pending_emote = [None]
 		def add_story_item(item = None):
+			finish_story_item(item)
 			if len(stack) == 0 or len(stack[-1]) == 0 or stack[-1][-1][0] != 'story':
 				stack[-1].append(['story', None, []])
 			if item is not None:
@@ -122,6 +124,25 @@ def get(group, section): # {{{
 					stack[-1][-1][2][-1] += '\n' + item
 				else:
 					stack[-1][-1][2].append(item)
+		def finish_story_item(item = None):
+			if pending_emote[0] is None:
+				return
+			assert stack[-1][-1][0] == 'story'
+			p = pending_emote[0]
+			if isinstance(item, str):
+				pass
+			elif item[0] == 'image':
+				if item[1] == p:
+					# My image is set. Don't change to pending.
+					pending_emote[0] = None
+					return
+				else:
+					# Someone else's image: don't change image yet.
+					return
+			else:
+				pending_emote[0] = None
+				name, imgs, ext = characters[p]
+				add_story_item(['image', p, imgs + 'default' + ext])
 		for nr, ln in enumerate(f):
 			ln = ln.rstrip()
 			if in_string:
@@ -196,6 +217,7 @@ def get(group, section): # {{{
 				continue
 			r = re.match(r'answer\s+((.+?)\s+)?(.+?)\s*$', ln)
 			if r:
+				finish_story_item()
 				stack[-1].append(['answer', None, r.group(2), r.group(3)])
 				continue
 			r = re.match(r'label\s+(.+?)\s*$', ln)
@@ -217,11 +239,13 @@ def get(group, section): # {{{
 				name = r.group(1)
 				if name.startswith('.'):
 					name = last_label + name
+				finish_story_item()
 				stack[-1].append(['goto', None, 0]) # Label is filled in at end.
 				labels.append((name, stack[-1][-1]))
 				continue
 			r = re.match(r'if\s+(.+):$', ln)
 			if r:
+				finish_story_item()
 				stack[-1].append(['if', None, [r.group(1), []], None])
 				stack.append(stack[-1][-1][-2][1])
 				istack.append(None)
@@ -252,11 +276,13 @@ def get(group, section): # {{{
 				continue
 			r = re.match(r'while\s+(.+):$', ln)
 			if r:
+				finish_story_item()
 				stack[-1].append(['while', None, r.group(1), []])
 				stack.append(stack[-1][-1][3])
 				istack.append(None)
 				continue
 			if ln in ('continue', 'break'):
+				finish_story_item()
 				stack[-1].append([ln, None])
 				continue
 			r = re.match(r'character\s+(\S+)(\s+(\S+)(\s+(.*?))?)?\s*$', ln)
@@ -315,26 +341,33 @@ def get(group, section): # {{{
 						continue
 				else:
 					indent = len(ln) - len(ln[1:].strip()) - 1
+					finish_story_item()
 					stack[-1].append(['python', None, []])
 				stack[-1][-1][2].append(ln[1 + indent:])
 				continue
 			r = re.match(r'video\s+(.+)$', ln)
 			if r:
+				finish_story_item()
 				stack[-1].append(['video', None, r.group(1)])
 				continue
 			r = re.match(r'(number|unit|short|long|longnumber|longunit|longshort)\s+([a-zA-Z_][a-zA-Z0-9_]*)$', ln)
 			if r:
+				finish_story_item()
 				stack[-1].append([r.group(1), None, r.group(2)])
 				continue
 			r = re.match(r'((long)?choice)\s+([a-zA-Z_][a-zA-Z0-9_]*)(.)(.+)$', ln)
 			if r:
+				finish_story_item()
 				stack[-1].append([r.group(1), None, r.group(3)] + r.group(5).split(r.group(4)))
 				continue
-			r = re.match(r'(.*?)\s*:\s*(.*?)\s*$', ln)
+			r = re.match(r'(.*?)(?:\s+(.*?))?\s*:\s*(.*?)\s*$', ln)
 			if r and r.group(1) in characters:
-				c = characters[r.group(1)]
-				add_story_item(['text', c[0], r.group(2), c[1] + 'side' + c[2] if c[2] else None])
-				if not r.group(2):
+				name, imgs, ext = characters[r.group(1)]
+				if r.group(2) is not None:
+					add_story_item(['image', r.group(1), imgs + r.group(2) + ext])
+				add_story_item(['text', name, r.group(3), imgs + 'side' + ext if imgs else None])
+				pending_emote[0] = r.group(1)
+				if not r.group(3):
 					in_speech = True
 					istack.append(None)
 				continue
