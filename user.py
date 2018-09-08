@@ -150,7 +150,7 @@ def save(user): # {{{
 				continue
 			f.write('{}={}\n'.format(key, user[key]))
 		# Record answers.
-		if not user['nosave']:
+		if not user['nosave'] and 'answers' in user:
 			for s in user['answers']:
 				section = user['answers'][s]
 				for q in section:

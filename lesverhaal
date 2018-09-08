@@ -47,12 +47,12 @@ class Admin_Connection: # {{{
 		self.remote.login.event()
 	# }}}
 	def login(self, name, password): # {{{
-		user, answers = user.load(name.strip(), 'admin')
-		if user is None:
+		u, answers = user.load(name.strip(), 'admin')
+		if u is None:
 			debug(2, 'Invalid admin {} from {}:{}'.format(name, *self.remote.socket.remote))
 			return False
-		crypted = crypt.crypt(password, salt = user['password'])
-		if crypted != user['password']:
+		crypted = crypt.crypt(password, salt = u['password'])
+		if crypted != u['password']:
 			debug(2, 'Invalid password for {} from {}:{}'.format(name, *self.remote.socket.remote))
 			return False
 		if not self._login(name.strip()):
@@ -72,11 +72,11 @@ class Admin_Connection: # {{{
 				pass
 			u['connection'].remote.close()
 		else:
-			user.users[(name.lower(), 'admin')] = u
+			user.users[(u['filename'], 'admin')] = u
 		u['connection'] = self
 		self.user = u
-		if (u['filename'], 'admin') not in user.users:
-			user.users[(u['filename'], 'admin')] = {'cookie': ''.join(chr(random.randrange(ord('a'), ord('z') + 1)) for _ in range(32))}
+		if 'cookie' not in user.users[(u['filename'], 'admin')]:
+			user.users[(u['filename'], 'admin')]['cookie'] = ''.join(chr(random.randrange(ord('a'), ord('z') + 1)) for _ in range(32))
 		self.remote.cookie.event(u['filename'], user.users[(u['filename'], 'admin')]['cookie'])
 		debug(2, 'Admin {} logged in from {}:{}'.format(name, *self.remote.socket.remote))
 		user.admins[name.lower()] = self
@@ -103,7 +103,7 @@ class Admin_Connection: # {{{
 		self.refresh = lambda: self.list_groups()
 		groups = []
 		for g in os.listdir(os.path.join(config['data'], 'users')):
-			if g == 'admin':
+			if g == 'admin' or g.lower() != g:
 				continue
 			groups.append([g])
 			for s in content.list(g):
