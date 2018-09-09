@@ -125,13 +125,17 @@ def get(group, section): # {{{
 				else:
 					stack[-1][-1][2].append(item)
 		def finish_story_item(item = None):
+			# If there is no story item, do nothing.
+			if len(stack[-1]) < 1 or len(stack[-1][-1]) < 1 or stack[-1][-1][0] != 'story':
+				return
+			# If there is no pending emote in the story, do nothing.
 			if pending_emote[0] is None:
 				return
-			assert stack[-1][-1][0] == 'story'
 			p = pending_emote[0]
+			# If the new item is a question, don't bother restoring the image.
 			if isinstance(item, str):
 				pass
-			elif item[0] == 'image':
+			elif item is not None and item[0] == 'image':
 				if item[1] == p:
 					# My image is set. Don't change to pending.
 					pending_emote[0] = None

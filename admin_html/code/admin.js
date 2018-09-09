@@ -60,7 +60,8 @@ var Connection = {
 			tr = table.AddElement('tr');
 			var th = tr.AddElement('th').AddText(students[s][0][0]);
 			th.title = students[s][0][1];
-			th.style.color = students[s][1] ? '' : students[s][1] !== null ? 'blue' : 'grey';
+			th.style.color = students[s][1][0] ? '' : students[s][1][0] !== null ? 'blue' : 'grey';
+			th.style.background = students[s][1][1] ? '' : 'lightgrey';
 			for (var q = 2; q < students[s].length; ++q) {
 				// Add all answers.
 				var td = tr.AddElement('td');
@@ -81,7 +82,7 @@ var Connection = {
 							span.style[answer[1][n][0]] = answer[1][n][1];
 					}
 				}
-				td.style.background = (students[s][q][0] ? 'white' : '');
+				td.style.background = (students[s][q][0] ? students[s][1][1] ? 'white' : 'grey' : '');
 			}
 		}
 	},

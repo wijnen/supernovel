@@ -31,13 +31,16 @@ class Admin_Connection: # {{{
 		self.remote = remote
 		remote.closed = self._closed
 		self.user = None
-		if 'cookie' in self.remote.data['headers']:
-			c = self.remote.data['headers']['cookie']
-			kv = [chunk.strip().split('=', 1) for chunk in c.split(';')]
-			kv = {x[0]: x[1] for x in kv}
-			if 'name' in kv and 'key' in kv and (kv['name'], 'admin') in user.users and user.users[(kv['name'], 'admin')]['cookie'] == kv['key']:
-				if self._login(kv['name']):
-					return
+		try:
+			if 'cookie' in self.remote.data['headers']:
+				c = self.remote.data['headers']['cookie']
+				kv = [chunk.strip().split('=', 1) for chunk in c.split(';')]
+				kv = {x[0]: x[1] for x in kv}
+				if 'name' in kv and 'key' in kv and (kv['name'], 'admin') in user.users and user.users[(kv['name'], 'admin')]['cookie'] == kv['key']:
+					if self._login(kv['name']):
+						return
+		except IndexError:
+			pass
 		q = remote.data['query']
 		keys = ('name', 'secret')
 		if config['secret'] != '' and all(x in q for x in keys) and q['secret'][0] == config['secret']:
@@ -137,16 +140,15 @@ class Admin_Connection: # {{{
 		questions.append(((len(parts),), ''))
 		students = []
 		def make_field(student, question):
-			s = student['connection']
-			active = student['section'] == section and len(s.user['run_stack'][-1][0]) > s.user['run_stack'][-1][1] and s.user['run_stack'][-1][0][s.user['run_stack'][-1][1]][1] == question[0]
+			active = student['section'] == section and len(student['run_stack'][-1][0]) > student['run_stack'][-1][1] and student['run_stack'][-1][0][student['run_stack'][-1][1]][1] == question[0]
 			return (active, student['answers'][section][question[0]] if section in student['answers'] and question[0] in student['answers'][section] else None)
 		def make_other_field(student, question, answers):
 			return (False, answers[section][question[0]] if section in answers and question[0] in answers[section] else None)
 		for s in user.users:
 			if user.users[s]['group'].lower() != group.lower():
 				continue
-			students.append(((user.users[s]['name'], s), user.users[s]['section'] == section) + tuple(make_field(user.users[s], q) for q in questions))
-		students.sort(key = lambda s: (not s[1], s[0][0], s[0][1]))
+			students.append(((user.users[s]['name'], s), (user.users[s]['section'] == section, user.users[s]['connection'] is not None)) + tuple(make_field(user.users[s], q) for q in questions))
+		students.sort(key = lambda s: (not s[1][0], s[0][0], s[0][1]))
 		# Add non-connected students to the list.
 		others = []
 		for u in user.list_group(group):
@@ -156,7 +158,7 @@ class Admin_Connection: # {{{
 			if student is None:
 				debug(0, 'student found but unloadable: {}:{}'.format(u, group))
 				continue
-			others.append(((student['name'], u), None) + tuple(make_other_field(student, q, answers) for q in questions))
+			others.append(((student['name'], u), (None, False)) + tuple(make_other_field(student, q, answers) for q in questions))
 		try:
 			others.sort()
 		except:
@@ -177,13 +179,16 @@ class Connection: # {{{
 		debug(2, 'New connection from {}:{}'.format(*remote.socket.remote))
 		self.remote = remote
 		remote.closed = self._closed
-		if 'cookie' in self.remote.data['headers']:
-			c = self.remote.data['headers']['cookie']
-			kv = [chunk.strip().split('=', 1) for chunk in c.split(';')]
-			kv = {x[0]: x[1] for x in kv}
-			if 'name' in kv and 'group' in kv and 'key' in kv and (kv['name'], kv['group']) in user.users and user.users[(kv['name'], kv['group'])]['cookie'] == kv['key']:
-				if self._login(kv['name'], kv['group']):
-					return
+		try:
+			if 'cookie' in self.remote.data['headers']:
+				c = self.remote.data['headers']['cookie']
+				kv = [chunk.strip().split('=', 1) for chunk in c.split(';')]
+				kv = {x[0]: x[1] for x in kv}
+				if 'name' in kv and 'group' in kv and 'key' in kv and (kv['name'], kv['group']) in user.users and user.users[(kv['name'], kv['group'])]['cookie'] == kv['key']:
+					if self._login(kv['name'], kv['group']):
+						return
+		except IndexError:
+			pass
 		q = remote.data['query']
 		keys = ('name', 'group', 'secret')
 		if config['secret'] != '' and all(x in q for x in keys) and q['secret'][0] == config['secret']:
@@ -530,6 +535,7 @@ class Connection: # {{{
 			return
 		debug(2, 'disconnecting {}:{}'.format(self.user['name'], self.user['group']))
 		user.save(self.user)
+		self.user['connection'] = None
 		# TODO: schedule a timeout for discarding user data from memory.
 		user.refresh_admins()
 	# }}}
