@@ -137,13 +137,13 @@ class Admin_Connection: # {{{
 				elif p[0] == 'story':
 					prev[0] = str(p[2][-1])
 		add_block(parts)
-		questions.append(((len(parts),), ''))
+		questions.append(((len(parts),), '', ''))
 		students = []
 		def make_field(student, question):
 			active = student['section'] == section and len(student['run_stack'][-1][0]) > student['run_stack'][-1][1] and student['run_stack'][-1][0][student['run_stack'][-1][1]][1] == question[0]
-			return (active, student['answers'][section][question[0]] if section in student['answers'] and question[0] in student['answers'][section] else None)
+			return (active, student['answers'][section][question[1]] if section in student['answers'] and question[1] in student['answers'][section] else None)
 		def make_other_field(student, question, answers):
-			return (False, answers[section][question[0]] if section in answers and question[0] in answers[section] else None)
+			return (False, answers[section][question[1]] if section in answers and question[1] in answers[section] else None)
 		for s in user.users:
 			if user.users[s]['group'].lower() != group.lower():
 				continue
@@ -260,7 +260,8 @@ class Connection: # {{{
 			u['full_section'] = []
 			u['run_stack'] = []
 			u['section'] = None	# Current section.
-			u['answers'] = {}	# Answers that have been given to all the questions so far.
+			if 'answers' not in u:
+				u['answers'] = {}	# Answers that have been given to all the questions so far.
 			u['variables'] = {}
 			u['last_path'] = None
 		self.remote.cookie.event(u['filename'], group.lower(), u['cookie'])
@@ -500,11 +501,11 @@ class Connection: # {{{
 		if store:
 			if self.user['section'] not in self.user['answers']:
 				self.user['answers'][self.user['section']] = {}
-			path = self.user['run_stack'][-1][0][self.user['run_stack'][-1][1]][1]
-			if path not in self.user['answers'][self.user['section']]:
-				self.user['answers'][self.user['section']][path] = []
-			self.user['answers'][self.user['section']][path].append((answer, []))
-			self.user['last_path'] = path
+			question = current[2]
+			if question not in self.user['answers'][self.user['section']]:
+				self.user['answers'][self.user['section']][question] = []
+			self.user['answers'][self.user['section']][question].append((answer, []))
+			self.user['last_path'] = question
 			if not config['lazysave']:
 				user.save(self.user)
 		else:

@@ -120,7 +120,6 @@ def load(name, group): # {{{
 			continue
 		if key.startswith('answer:'):
 			a, s, q = key.split(':', 2)
-			q = tuple(int(x) for x in q.split(','))
 			if s not in answers:
 				answers[s] = {}
 			answers[s][q] = [unmangle(a) for a in value.split(';')]
@@ -155,7 +154,7 @@ def save(user): # {{{
 				section = user['answers'][s]
 				for q in section:
 					question = section[q]
-					f.write('answer:{}:{}={}\n'.format(s, ','.join(str(i) for i in q), ';'.join(mangle(a) for a in question)))
+					f.write('answer:{}:{}={}\n'.format(s, q, ';'.join(mangle(a) for a in question)))
 # }}}
 
 def save_all(): # {{{
