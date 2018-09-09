@@ -248,8 +248,8 @@ class Connection: # {{{
 				pass
 			u['connection'].remote.close()
 		else:
-			u['answers'] = answers
 			user.users[(name.lower(), group.lower())] = u
+		u['answers'] = answers
 		u['connection'] = self
 		self.user = u
 		debug(2, 'User {}:{} logged in from {}:{}'.format(name, group, *self.remote.socket.remote))
@@ -260,8 +260,6 @@ class Connection: # {{{
 			u['full_section'] = []
 			u['run_stack'] = []
 			u['section'] = None	# Current section.
-			if 'answers' not in u:
-				u['answers'] = {}	# Answers that have been given to all the questions so far.
 			u['variables'] = {}
 			u['last_path'] = None
 		self.remote.cookie.event(u['filename'], group.lower(), u['cookie'])
