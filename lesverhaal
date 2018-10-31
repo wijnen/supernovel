@@ -74,14 +74,13 @@ class Admin_Connection: # {{{
 			except:
 				pass
 			u['connection'].remote.close()
-		else:
-			user.users[(u['filename'], 'admin')] = u
+		user.users[(u['filename'], 'admin')] = u
 		u['connection'] = self
 		self.user = u
 		if 'cookie' not in user.users[(u['filename'], 'admin')]:
 			user.users[(u['filename'], 'admin')]['cookie'] = ''.join(chr(random.randrange(ord('a'), ord('z') + 1)) for _ in range(32))
 		self.remote.cookie.event(u['filename'], user.users[(u['filename'], 'admin')]['cookie'])
-		debug(2, 'Admin {} logged in from {}:{}'.format(name, *self.remote.socket.remote))
+		debug(1, 'Admin {} logged in from {}:{}'.format(name, *self.remote.socket.remote))
 		user.admins[name.lower()] = self
 		self.list_groups()
 		return True
@@ -91,7 +90,7 @@ class Admin_Connection: # {{{
 		if self.user is None:
 			debug(2, 'admin connection to {}:{} lost before logging in'.format(*self.remote.socket.remote))
 			return
-		debug(2, 'disconnecting admin {}'.format(self.user['name']))
+		debug(1, 'disconnecting admin {}'.format(self.user['name']))
 		try:
 			user.users.pop((self.user['filename'], 'admin'))
 		except:
@@ -130,20 +129,20 @@ class Admin_Connection: # {{{
 					if p[-1] is not None:
 						add_block(p[-1])
 				elif p[0] == 'video':
-					questions.append((p[1], os.path.splitext(p[2])[0], 'video'))
+					questions.append((p[1], os.path.splitext(p[2])[0], 'video', p[0]))
 				elif p[0] in ('unit', 'number', 'short', 'long', 'choice', 'longunit', 'longnumber', 'longshort', 'longchoice'):
-					questions.append((p[1], p[2], prev[0]))
+					questions.append((p[1], p[2], prev[0], p[0]))
 					prev[0] = ''
 				elif p[0] == 'story':
 					prev[0] = str(p[2][-1])
 		add_block(parts)
-		questions.append(((len(parts),), '', ''))
+		questions.append(((len(parts),), '', '', 'end'))
 		students = []
 		def make_field(student, question):
 			active = student['section'] == section and len(student['run_stack'][-1][0]) > student['run_stack'][-1][1] and student['run_stack'][-1][0][student['run_stack'][-1][1]][1] == question[0]
-			return (active, student['answers'][section][question[1]] if section in student['answers'] and question[1] in student['answers'][section] else None)
+			return (active, student['answers'][section][question[1]] if question[3] not in ('video', 'end') and section in student['answers'] and question[1] in student['answers'][section] else None)
 		def make_other_field(student, question, answers):
-			return (False, answers[section][question[1]] if section in answers and question[1] in answers[section] else None)
+			return (False, answers[section][question[1]] if question[3] not in ('video', 'end') and section in answers and question[1] in answers[section] else None)
 		for s in user.users:
 			if user.users[s]['group'].lower() != group.lower():
 				continue
@@ -205,7 +204,6 @@ class Connection: # {{{
 				debug(1, 'error evaluating expression substitution {}'.format(obj.group(0)))
 				traceback.print_exc()
 				return '[fout]'
-		debug(2, repr(text))
 		return re.sub('\${(.*?)}', subst, text).replace('FILE://common/', config['content'] + 'common/').replace('FILE://', config['content'] + '/' + self.user['group'].lower() + '/' + self.user['section'] + '/')
 	# }}}
 	def _add_text(self, text): # {{{
@@ -252,7 +250,7 @@ class Connection: # {{{
 		u['answers'] = answers
 		u['connection'] = self
 		self.user = u
-		debug(2, 'User {}:{} logged in from {}:{}'.format(name, group, *self.remote.socket.remote))
+		debug(1, 'User {}:{} logged in from {}:{}'.format(name, group, *self.remote.socket.remote))
 		if 'cookie' not in u:
 			u['cookie'] = ''.join(chr(random.randrange(ord('a'), ord('z') + 1)) for _ in range(32))
 		if 'section' not in u:
@@ -370,7 +368,6 @@ class Connection: # {{{
 		if code[0] == 'label':
 			pass
 		elif code[0] == 'story':
-			debug(2, repr(code))
 			for item in code[2]:
 				self._add_text(item)
 		elif code[0] == 'answer':
@@ -410,7 +407,11 @@ class Connection: # {{{
 		elif code[0] == 'python':
 			self.breaking = False
 			self.user['run_stack'][-1][1] += 1	# Do this before running the code, so goto works.
-			exec('\n'.join(code[2]), self.user['variables'])
+			try:
+				exec('\n'.join(code[2]), self.user['variables'])
+			except:
+				debug(0, 'Error in script: {}'.format(code[2]))
+				traceback.print_exc()
 			return self.breaking
 		elif code[0] == 'video':
 			if len(self.user['text_buffer']) > 0:
@@ -534,7 +535,7 @@ class Connection: # {{{
 		if not hasattr(self, 'user'):
 			debug(2, 'connection to {}:{} lost before logging in'.format(*self.remote.socket.remote))
 			return
-		debug(2, 'disconnecting {}:{}'.format(self.user['name'], self.user['group']))
+		debug(1, 'disconnecting {}:{}'.format(self.user['name'], self.user['group']))
 		user.save(self.user)
 		self.user['connection'] = None
 		# TODO: schedule a timeout for discarding user data from memory.

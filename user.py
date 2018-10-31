@@ -12,7 +12,7 @@ from debug import debug
 users = {}	# including admins.
 admins = {}
 # Keys which are never saved.
-unsaved = ('connection', 'text_buffer', 'full_section', 'run_stack', 'section', 'answers', 'variables', 'last_path', 'characters')
+unsaved = ('connection', 'text_buffer', 'full_section', 'run_stack', 'section', 'answers', 'variables', 'last_path', 'characters', 'cookie')
 
 def mangle(src): # {{{
 	def escape(x):
@@ -98,20 +98,25 @@ def unmangle(src): # {{{
 # }}}
 
 def load(name, group): # {{{
-	if (name.lower(), group.lower()) in users:
-		return users[(name.lower(), group.lower())], {}
 	if not os.path.exists(os.path.join(config['data'], 'users', group.lower())):
 		debug(0, 'user.load called for nonexistent group {}:{}'.format(name, group))
 		return None, {}
 	if not os.path.exists(os.path.join(config['data'], 'users', group.lower(), name.lower())):
 		debug(0, 'user.load called for nonexistent user {}:{}'.format(name, group))
 		return None, {}
-	ret = {'filename': name.lower(), 'name': name, 'group': group.lower(), 'connection': None, 'password': None, 'nosave': False}
+	if (name.lower(), group.lower()) in users:
+		ret = users[(name.lower(), group.lower())]
+	else:
+		ret = {'filename': name.lower(), 'name': name, 'group': group.lower(), 'connection': None, 'password': None, 'nosave': False}
 	answers = {}
 	for ln in open(os.path.join(config['data'], 'users', group.lower(), name.lower()), errors = 'replace'):
 		if ln.strip() == '':
 			continue
-		key, value = ln.split('=', 1)
+		try:
+			key, value = ln.split('=', 1)
+		except ValueError:
+			log('Failed to parse line from user config for %s:%s: %s' % (name, group, ln.strip()))
+			continue
 		if key in unsaved:
 			# This key should not have been in the file.
 			continue
