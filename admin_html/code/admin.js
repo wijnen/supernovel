@@ -69,18 +69,12 @@ var Connection = {
 				var answers = students[s][q][1];
 				if (answers !== null && answers.length >= 1) {
 					// There is at least one answer: fill the cell.
-					var answer = answers[0];
-					var span = td.AddElement('span').AddText(parse(answer[0]));
+					// There are more answers: add the last one.
+					answer = answers[answers.length - 1];
+					span = td.AddText(answers.length + ':').AddElement('span').AddText(parse(answer[0]));
 					for (var n = 0; n < answer[1].length; ++n)
 						span.style[answer[1][n][0]] = answer[1][n][1];
-					if (answers.length > 1) {
-						// There are more answers: add the last one.
-						answer = answers[answers.length - 1];
-						td.AddElement('br');
-						span = td.AddText(answers.length + ':').AddElement('span').AddText(parse(answer[0]));
-						for (var n = 0; n < answer[1].length; ++n)
-							span.style[answer[1][n][0]] = answer[1][n][1];
-					}
+					span.title = answers;
 				}
 				td.style.background = (students[s][q][0] ? students[s][1][1] ? 'white' : 'grey' : '');
 			}

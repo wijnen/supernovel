@@ -21,7 +21,7 @@ button.not(#navbutton) {
 }
 
 #navigation {
-	z-index: 2;
+	z-index: 3;
 	display: none;
 	text-align: justify;
 	position: fixed;
@@ -95,4 +95,16 @@ button.not(#navbutton) {
 }
 .choicebutton {
 	display: block;
+}
+
+#contents {
+	text-align: center;
+}
+
+ul {
+	list-style-type: none;
+}
+
+#logout {
+	text-align: right;
 }

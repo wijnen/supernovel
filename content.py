@@ -146,7 +146,8 @@ def get(group, section): # {{{
 			else:
 				pending_emote[0] = None
 				name, imgs, ext = characters[p]
-				add_story_item(['image', p, imgs + 'default' + ext])
+				if imgs and ext:
+					add_story_item(['image', p, imgs + 'default' + ext])
 		for nr, ln in enumerate(f):
 			ln = ln.rstrip()
 			if in_string:
@@ -294,11 +295,15 @@ def get(group, section): # {{{
 				tag = r.group(1)
 				url = r.group(3)
 				name = r.group(5)
-				imgdir, ext = os.path.splitext(url)
-				if imgdir.startswith('common/'):
-					fulldir = config['content'] + '/' + imgdir + '/'
+				if url == '-':
+					fulldir = None
+					ext = None
 				else:
-					fulldir = config['content'] + '/' + group.lower() + '/' + section + '/' + imgdir + '/'
+					imgdir, ext = os.path.splitext(url)
+					if imgdir.startswith('common/'):
+						fulldir = config['content'] + '/' + imgdir + '/'
+					else:
+						fulldir = config['content'] + '/' + group.lower() + '/' + section + '/' + imgdir + '/'
 				characters[tag] = (name, fulldir, ext)
 				continue
 			r = re.match(r'scene(\s+(.*?))?$', ln)

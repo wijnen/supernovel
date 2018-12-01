@@ -1,4 +1,4 @@
-var error, login, videodiv, video, contents, question, navigation, spritebox, speechbox, speaker, photo, speech;
+var error, login, videodiv, video, contents, contentslist, question, navigation, spritebox, speechbox, speaker, photo, speech;
 var server;
 var kinetic_script = null;
 var kinetic_pos = 0;
@@ -28,9 +28,9 @@ var Connection = {
 	},
 	contents: function(data) {
 		kinetic_script = null;
-		var ul = contents.ClearAll().AddElement('ul');
+		contentslist.ClearAll();
 		for (var d = 0; d < data.length; ++d) {
-			var button = ul.AddElement('li').AddElement('button').AddText(data[d]).AddEvent('click', function() {
+			var button = contentslist.AddElement('li').AddElement('button').AddText(data[d]).AddEvent('click', function() {
 				server.call('start', [this.section]);
 			});
 			button.section = data[d];
@@ -54,7 +54,7 @@ var Connection = {
 	style: function(key, value) {
 		question.style[key] = value;
 	},
-	story: function(type, story, options) {
+	story: function(type, story, last_answer, options) {
 		question.style.display = 'none';
 		videodiv.style.display = 'none';
 		contents.style.display = 'none';
@@ -100,6 +100,14 @@ var Connection = {
 							server.call('answer', [[this.value, l.value]]);
 						});
 					}
+					if (last_answer != null) {
+						div.AddElement('hr');
+						var button = div.AddElement('button', 'choicebutton').AddText('Herhaal laatste antwoord: ' + last_answer[1] + ': ' + options[last_answer[0]]);
+						button.type = 'button';
+						button.AddEvent('click', function() {
+							server.call('answer', [[options[last_answer[0]], last_answer[1]]]);
+						});
+					}
 					return;
 				case 'longshort':
 				case 'longunit':
@@ -135,6 +143,14 @@ var Connection = {
 						button.value = options[o];
 						button.AddEvent('click', function() {
 							server.call('answer', [this.value]);
+						});
+					}
+					if (last_answer != null) {
+						div.AddElement('hr');
+						var button = div.AddElement('button', 'choicebutton').AddText('Herhaal laatste antwoord: ' + options[last_answer[0]]);
+						button.type = 'button';
+						button.AddEvent('click', function() {
+							server.call('answer', [last_answer]);
 						});
 					}
 					return;
@@ -175,6 +191,11 @@ var Connection = {
 					return;
 				server.call('answer', [answer]);
 			}).type = 'button';
+			if (last_answer != null) {
+				question.AddElement('button').AddText('Herhaal vorige antwoord: ' + last_answer).AddEvent('click', function() {
+					server.call('answer', [last_answer]);
+				}).type = 'button';
+			}
 		};
 		kinetic_script = story;
 		kinetic_pos = 0;
@@ -414,6 +435,8 @@ function init() {
 	videodiv = document.getElementById('video');
 	video = document.getElementsByTagName('video')[0];
 	contents = document.getElementById('contents');
+	if (contentslist === undefined)
+		contentslist = contents.AddElement('ul');
 	question = document.getElementById('question');
 	speechbox = document.getElementById('speechbox');
 	navigation = document.getElementById('navigation');
@@ -491,6 +514,11 @@ function log_in() {
 			alert('Inloggen is mislukt: ' + error);
 	});
 	return false;
+}
+
+function log_out() {
+	Connection.cookie('', '', '');
+	Connection.login();
 }
 
 function speed() {

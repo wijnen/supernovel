@@ -321,10 +321,10 @@ class Connection: # {{{
 			self._add_character(c, *characters[c])
 		self._run()
 	# }}}
-	def _question(self, qtype, params = ()): # {{{
+	def _question(self, qtype, last_answer = None, params = ()): # {{{
 		if qtype == 'unit':
 			qtype = 'short'
-		self._handle_story(qtype, self.user['text_buffer'], params)
+		self._handle_story(qtype, self.user['text_buffer'], last_answer, params)
 		self.breaking = True
 		return True
 	# }}}
@@ -422,11 +422,15 @@ class Connection: # {{{
 			return True
 		else:
 			# Question.
-			return self._question(code[0], code[3:])
+			if self.user['section'] in self.user['answers'] and code[2] in self.user['answers'][self.user['section']]:
+				last_answer = self.user['answers'][self.user['section']][code[2]][-1][0]
+			else:
+				last_answer = None
+			return self._question(code[0], last_answer, code[3:])
 		self.user['run_stack'][-1][1] += 1
 		return False
 	# }}}
-	def _handle_story(self, q, text_buffer, *args): # {{{
+	def _handle_story(self, q, text_buffer, last_answer = None, *args): # {{{
 		def handle(item):
 			if isinstance(item, str):
 				return markdown(item)
@@ -440,7 +444,7 @@ class Connection: # {{{
 			# ('image', tag, url)
 			# ('wait', seconds)
 			return item
-		self.remote.story.event(q, [handle(x) for x in text_buffer], *args)
+		self.remote.story.event(q, [handle(x) for x in text_buffer], last_answer, *args)
 	# }}}
 	def answer(self, answer): # {{{
 		debug(3, '{}:{} answers {}'.format(self.user['name'], self.user['group'], answer))
@@ -503,7 +507,8 @@ class Connection: # {{{
 			question = current[2]
 			if question not in self.user['answers'][self.user['section']]:
 				self.user['answers'][self.user['section']][question] = []
-			self.user['answers'][self.user['section']][question].append((answer, []))
+			if len(self.user['answers'][self.user['section']][question]) == 0 or answer != self.user['answers'][self.user['section']][question][-1]:
+				self.user['answers'][self.user['section']][question].append((answer, []))
 			self.user['last_path'] = question
 			if not config['lazysave']:
 				user.save(self.user)
