@@ -59,8 +59,10 @@ class Admin_Connection: # {{{
 			debug(2, 'Invalid password for {} from {}:{}'.format(name, *self.remote.socket.remote))
 			return False
 		if not self._login(name.strip()):
+			debug(2, 'Login failed for other reason')
 			self.remote.login.event()
 			self.refresh = lambda: self.remote.login.event()
+		debug(2, 'login function returns')
 		return True
 	# }}}
 	def _login(self, name): # {{{
@@ -108,13 +110,18 @@ class Admin_Connection: # {{{
 			if g == 'admin' or g.lower() != g:
 				continue
 			groups.append([g])
-			for s in content.list(g):
-				groups[-1].append((s, sum(user.users[u]['group'].lower() == g and user.users[u]['section'] == s for u in user.users)))
+			chapters = content.list(g)
+			keys = list(chapters.keys())
+			keys.sort()
+			for c in keys:
+				for s in chapters[c]:
+					groups[-1].append(((c, s), sum(user.users[u]['group'].lower() == g and user.users[u]['section'] == (c, s) for u in user.users)))
 		groups.sort()
 		self.remote.group_list.event(groups)
 	# }}}
 	def show_section(self, group, section): # {{{
 		'''Show questions for one section.'''
+		section = tuple(section)
 		self.refresh = lambda: self.show_section(group, section)
 		parts, index, characters = content.get(group, section)
 		questions = []
@@ -204,7 +211,7 @@ class Connection: # {{{
 				debug(1, 'error evaluating expression substitution {}'.format(obj.group(0)))
 				traceback.print_exc()
 				return '[fout]'
-		return re.sub('\${(.*?)}', subst, text).replace('FILE://common/', config['content'] + 'common/').replace('FILE://', config['content'] + '/' + self.user['group'].lower() + '/' + self.user['section'] + '/')
+		return re.sub('\${(.*?)}', subst, text).replace('FILE://common/', config['content'] + 'common/').replace('FILE://', config['content'] + '/' + self.user['group'].lower() + '/' + self.user['section'][0] + '/' + self.user['section'][1] + '/')
 	# }}}
 	def _add_text(self, text): # {{{
 		'''Prepare text for displaying.'''
@@ -291,7 +298,7 @@ class Connection: # {{{
 		self.remote.main.event()
 	# }}}
 	def start(self, section): # {{{
-		self.user['section'] = section
+		self.user['section'] = tuple(section)
 		self.user['full_section'], self.index, characters = content.get(self.user['group'], self.user['section'])
 		self.user['run_stack'] = [[self.user['full_section'], 0]]
 		self.user['characters'] = {}
@@ -304,7 +311,7 @@ class Connection: # {{{
 				'answer': self._answer,
 				'goto': goto,
 				'text': self._add_text,
-				'character': lambda tag, name, url: self._add_character(tag, name, config['content'] + '/' + self.user['group'].lower() + '/' + section + '/' + os.path.splitext(url)[0] + '/', os.path.splitext(url)[1]),
+				'character': lambda tag, name, url: self._add_character(tag, name, config['content'] + '/' + self.user['group'].lower() + '/' + section[0] + '/' + section[1] + '/' + os.path.splitext(url)[0] + '/', os.path.splitext(url)[1]),
 				'say': self._say,
 				'show': self._show,
 				'hide': self._hide,
@@ -418,7 +425,7 @@ class Connection: # {{{
 				self._handle_story('text', self.user['text_buffer'])
 				self.user['text_buffer'] = []
 			else:
-				self.remote.video.event(config['content'] + '/' + self.user['group'].lower() + '/' + self.user['section'] + '/' + code[2])
+				self.remote.video.event(config['content'] + '/' + self.user['group'].lower() + '/' + self.user['section'][0] + '/' + self.user['section'][1] + '/' + code[2])
 			return True
 		else:
 			# Question.

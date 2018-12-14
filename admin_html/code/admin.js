@@ -13,10 +13,18 @@ function init() {
 	table = document.getElementById('table');
 	single = document.getElementById('single');
 	show(null);
-	server_obj = Rpc(Connection);
+	server_obj = Rpc(Connection, onopen, onclose);
 	server = server_obj.proxy;
 }
 window.AddEvent('load', init);
+
+function onopen() {
+	document.getElementsByTagName('body')[0].AddClass('open');
+}
+
+function onclose() {
+	document.getElementsByTagName('body')[0].RemoveClass('open');
+}
 
 var Connection = {
 	replaced: function() {
@@ -30,13 +38,27 @@ var Connection = {
 	group_list: function(list) {
 		// Show the list of groups, with the available sections for each group.
 		show('groups');
+		// list = [ ['klas', [ ['chapter', 'section'], num ], ...], ... ]
+		console.info(list);
 		groups.ClearAll();
+		var top_ul = groups.AddElement('ul');
 		for (var g = 0; g < list.length; ++g) {
 			var group = list[g];
-			var div = groups.AddElement('div');
-			div.AddElement('b').AddText(group[0] + ': ');
+			var group_li = top_ul.AddElement('li');
+			group_li.AddElement('b').AddText(group[0] + ': ');
+			var chapters_ul = group_li.AddElement('ul');
+			var last_chapter = null;
+			var current_ul;
 			for (var s = 1; s < group.length; ++s) {
-				var a = div.AddElement('a').AddText(group[s][0] + ' (' + group[s][1] + ')').AddEvent('click', function() {
+				var chapter = group[s][0][0];
+				var section = group[s][0][1];
+				if (chapter != last_chapter) {
+					var li = chapters_ul.AddElement('li');
+					li.AddElement('b').AddText(chapter);
+					current_ul = li.AddElement('ul');
+					last_chapter = chapter;
+				}
+				var a = current_ul.AddElement('li').AddElement('a').AddText(section + ' (' + group[s][1] + ')').AddEvent('click', function() {
 					server.show_section(this.group, this.section);
 				});
 				a.group = group[0];

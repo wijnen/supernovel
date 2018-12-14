@@ -9,10 +9,25 @@ from debug import debug
 # }}}
 
 def list(group): # {{{
-	content_dir = os.path.join(config['data'], 'users', group.lower(), 'Content')
 	'''Get a list of available sections.'''
-	ret = [os.path.splitext(c)[0] for c in os.listdir(content_dir) if c.endswith('.script') and not os.path.isdir(os.path.join(content_dir, c))]
-	ret.sort()
+	content_dir = os.path.join(config['data'], 'users', group.lower(), 'Content')
+	ret = {}
+	for chapter in os.listdir(content_dir):
+		cpath = os.path.join(content_dir, chapter)
+		if not os.path.isdir(cpath):
+			continue
+		section = []
+		for s in os.listdir(cpath):
+			if not s.endswith('.script'):
+				continue
+			spath = os.path.join(cpath, s)
+			if os.path.isdir(spath):
+				continue
+			section.append(os.path.splitext(s)[0])
+		if len(section) == 0:
+			continue
+		section.sort()
+		ret[chapter] = section
 	return ret
 # }}}
 
@@ -96,7 +111,7 @@ def showhide(show, tag, mod, at, transition, characters, in_with, after, hiders,
 def get(group, section): # {{{
 	'''Get the program for a section.'''
 	content_dir = os.path.join(config['data'], 'users', group.lower(), 'Content')
-	filename = os.path.join(content_dir, section + '.script')
+	filename = os.path.join(content_dir, section[0], section[1] + '.script')
 	if not os.path.exists(filename):
 		debug(1, 'Error: file {} does not exist'.format(filename))
 		return [], {}
@@ -303,7 +318,7 @@ def get(group, section): # {{{
 					if imgdir.startswith('common/'):
 						fulldir = config['content'] + '/' + imgdir + '/'
 					else:
-						fulldir = config['content'] + '/' + group.lower() + '/' + section + '/' + imgdir + '/'
+						fulldir = config['content'] + '/' + group.lower() + '/' + section[0] + '/' + section[1] + '/' + imgdir + '/'
 				characters[tag] = (name, fulldir, ext)
 				continue
 			r = re.match(r'scene(\s+(.*?))?$', ln)
@@ -312,7 +327,7 @@ def get(group, section): # {{{
 					if r.group(2).startswith('common/'):
 						url = config['content'] + '/' + r.group(2)
 					else:
-						url = config['content'] + '/' + group.lower() + '/' + section + '/' + r.group(2)
+						url = config['content'] + '/' + group.lower() + '/' + section[0] + '/' + section[1] + '/' + r.group(2)
 				else:
 					url = None
 				add_story_item(['scene', url])

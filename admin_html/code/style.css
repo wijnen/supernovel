@@ -6,3 +6,11 @@ td {
 	background: #ff8;
 	margin: 1px;
 }
+
+body {
+	background: red;
+}
+
+body.open {
+	background: lightgreen;
+}

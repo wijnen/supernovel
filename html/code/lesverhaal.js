@@ -28,13 +28,32 @@ var Connection = {
 	},
 	contents: function(data) {
 		kinetic_script = null;
-		contentslist.ClearAll();
-		for (var d = 0; d < data.length; ++d) {
-			var button = contentslist.AddElement('li').AddElement('button').AddText(data[d]).AddEvent('click', function() {
-				server.call('start', [this.section]);
-			});
-			button.section = data[d];
-			button.type = 'button';
+		chapters.ClearAll();
+		sections.ClearAll();
+		var chapterlist = [];
+		for (var d in data)
+			chapterlist.push(d);
+		chapterlist.sort();
+		var buttons = [];
+		for (var c = 0; c < chapterlist.length; ++c) {
+			var chapter = chapterlist[c];
+			buttons.push(chapters.AddElement('li').AddElement('button').AddText(chapter).AddEvent('click', function() {
+				sections.ClearAll();
+				for (var b = 0; b < buttons.length; ++b)
+					buttons[b].RemoveClass('active');
+				this.AddClass('active');
+				for (var s = 0; s < data[this.chapter].length; ++s) {
+					var section = data[this.chapter][s];
+					var button = sections.AddElement('li').AddElement('button').AddText(section).AddEvent('click', function() {
+						server.call('start', [[this.chapter, this.section]]);
+					});
+					button.chapter = this.chapter;
+					button.section = section;
+					button.type = 'button';
+				}
+			}));
+			buttons[c].chapter = chapter;
+			buttons[c].type = 'button';
 		}
 	},
 	main: function() {
@@ -435,8 +454,8 @@ function init() {
 	videodiv = document.getElementById('video');
 	video = document.getElementsByTagName('video')[0];
 	contents = document.getElementById('contents');
-	if (contentslist === undefined)
-		contentslist = contents.AddElement('ul');
+	chapters = document.getElementById('chapters');
+	sections = document.getElementById('sections');
 	question = document.getElementById('question');
 	speechbox = document.getElementById('speechbox');
 	navigation = document.getElementById('navigation');

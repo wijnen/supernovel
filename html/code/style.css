@@ -108,3 +108,7 @@ ul {
 #logout {
 	text-align: right;
 }
+
+.active {
+	background-color: blue;
+}
