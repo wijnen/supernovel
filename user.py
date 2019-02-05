@@ -124,10 +124,14 @@ def load(name, group): # {{{
 			ret[key] = value == 'True'
 			continue
 		if key.startswith('answer:'):
-			a, s, q = key.split(':', 2)
-			if s not in answers:
-				answers[s] = {}
-			answers[s][q] = [unmangle(a) for a in value.split(';')]
+			try:
+				a, c, s, q = key.split(':', 3)
+			except:
+				log('Failed to parse answer key {}; ignoring'.format(key))
+				continue
+			if (c, s) not in answers:
+				answers[(c, s)] = {}
+			answers[(c, s)][q] = [unmangle(a) for a in value.split(';')]
 			continue
 		ret[key] = value.rstrip('\n')
 	# Make sure name and group match file location.
@@ -159,7 +163,7 @@ def save(user): # {{{
 				section = user['answers'][s]
 				for q in section:
 					question = section[q]
-					f.write('answer:{}:{}={}\n'.format(s, q, ';'.join(mangle(a) for a in question)))
+					f.write('answer:{}:{}:{}={}\n'.format(s[0], s[1], q, ';'.join(mangle(a) for a in question)))
 # }}}
 
 def save_all(): # {{{

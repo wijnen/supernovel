@@ -153,12 +153,44 @@ def run(index): # {{{
 def update_responses(): # {{{
 	for a in user.admins:
 		user.admins[a]._update_responses()
+	beamerserver.broadcast.refresh(refresh_beamer())
 # }}}
 
 blocked = set()
 def update_blocks():
 	for a in user.admins:
 		user.admins[a]._update_blocks()
+
+def refresh_beamer(): # {{{
+	p = program[current] if current < len(program) else {'arg': '-', 'option': []}
+	if not show_answers or not current < len(program):
+		return p, False, sum(a is not None for a in responses), len(responses), {}, []
+	num_ans = 0
+	answers = {}
+	opts = []
+	for u in all_users:
+		a = responses[u]
+		if a is not None:
+			num_ans += 1
+			if program[current]['cmd'] not in ('choices', 'words', 'terms'):
+				a = [a]
+			for opt in a:
+				if opt in blocked:
+					continue
+				if opt not in answers:
+					answers[opt] = 0
+					opts.append(opt)
+				answers[opt] += 1
+	opts.sort(key = lambda a, b: answers[a] - answers[b])
+	return p, True, num_ans, len(responses), answers, opts
+# }}}
+
+class Beamer_Connection: # {{{
+	def __init__(self, remote): # {{{
+		self.remote = remote
+		self.refresh.event(refresh_beamer())
+	# }}}
+# }}}
 
 class Admin_Connection: # {{{
 	def __init__(self, remote): # {{{
@@ -256,6 +288,11 @@ class Admin_Connection: # {{{
 			if option in blocked:
 				blocked.remove(option)
 		update_blocks()
+	# }}}
+	def show_answers(show = True): # {{{
+		global show_answers
+		show_answers = show
+		beamerserver.broadcast.refresh(refresh_beamer())
 	# }}}
 # }}}
 
@@ -362,7 +399,7 @@ class Connection: # {{{
 server = websocketd.RPChttpd(config['port'], Connection, httpdirs = [os.path.join('les-html', 'main')], tls = False)
 adminserver = websocketd.RPChttpd(config['admin-port'], Admin_Connection, httpdirs = [os.path.join('les-html', 'admin')], tls = False)
 # The beamer is the same in terms of handling, but it uses different html.
-beamerserver = websocketd.RPChttpd(config['beamer-port'], Admin_Connection, httpdirs = [os.path.join('les-html', 'beamer')], tls = False)
+beamerserver = websocketd.RPChttpd(config['beamer-port'], Beamer_Connection, httpdirs = [os.path.join('les-html', 'beamer')], tls = False)
 print('servers are running')
 websocketd.fgloop()
 # }}}

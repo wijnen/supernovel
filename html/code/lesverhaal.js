@@ -1,4 +1,5 @@
 var error, login, videodiv, video, contents, contentslist, question, navigation, spritebox, speechbox, speaker, photo, speech;
+var is_replaced;
 var server;
 var kinetic_script = null;
 var kinetic_pos = 0;
@@ -11,7 +12,9 @@ var show_question = false;
 
 var Connection = {
 	replaced: function() {
+		is_replaced = true;
 		alert('De verbinding is overgenomen door een nieuwe login');
+		is_replaced = false;
 		init();
 	},
 	login: function() {
@@ -114,9 +117,9 @@ var Connection = {
 					for (var o = 0; o < options.length; ++o) {
 						var button = div.AddElement('button', 'choicebutton').AddText(options[o]);
 						button.type = 'button';
-						button.value = options[o];
+						button.value = o;
 						button.AddEvent('click', function() {
-							server.call('answer', [[this.value, l.value]]);
+							server.call('answer', [[Number(this.value), l.value]]);
 						});
 					}
 					if (last_answer != null) {
@@ -124,7 +127,7 @@ var Connection = {
 						var button = div.AddElement('button', 'choicebutton').AddText('Herhaal laatste antwoord: ' + last_answer[1] + ': ' + options[last_answer[0]]);
 						button.type = 'button';
 						button.AddEvent('click', function() {
-							server.call('answer', [[options[last_answer[0]], last_answer[1]]]);
+							server.call('answer', [last_answer]);
 						});
 					}
 					return;
@@ -159,14 +162,14 @@ var Connection = {
 					for (var o = 0; o < options.length; ++o) {
 						var button = div.AddElement('button', 'choicebutton').AddText(options[o]);
 						button.type = 'button';
-						button.value = options[o];
+						button.value = o;
 						button.AddEvent('click', function() {
-							server.call('answer', [this.value]);
+							server.call('answer', [Number(this.value)]);
 						});
 					}
 					if (last_answer != null) {
 						div.AddElement('hr');
-						var button = div.AddElement('button', 'choicebutton').AddText('Herhaal laatste antwoord: ' + options[last_answer[0]]);
+						var button = div.AddElement('button', 'choicebutton').AddText('Herhaal laatste antwoord: ' + options[last_answer]);
 						button.type = 'button';
 						button.AddEvent('click', function() {
 							server.call('answer', [last_answer]);
@@ -503,6 +506,8 @@ function keypress(event) {
 }
 
 function connection_lost() {
+	if (is_replaced)
+		return;
 	try {
 		error.style.display = 'block';
 		login.style.display = 'none';

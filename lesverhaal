@@ -331,6 +331,12 @@ class Connection: # {{{
 	def _question(self, qtype, last_answer = None, params = ()): # {{{
 		if qtype == 'unit':
 			qtype = 'short'
+			if last_answer is not None:
+				last_answer = ''.join(str(x) for x in last_answer)
+		if qtype == 'longunit':
+			qtype = 'longshort'
+			if last_answer is not None:
+				last_answer = (''.join(str(x) for x in last_answer[0]), last_answer[1])
 		self._handle_story(qtype, self.user['text_buffer'], last_answer, params)
 		self.breaking = True
 		return True
@@ -476,18 +482,14 @@ class Connection: # {{{
 			debug(3, 'unit-split answer: {}'.format(answer))
 			return answer
 		if current[0] == 'choice':
-			try:
-				answer = current.index(answer) - 3
-			except:
-				# Leave answer string as is (but force str); this only happens when users are messing with the js.
-				debug(2, 'unparsable choice answer: {}'.format(answer))
-				answer = str(answer).strip()
+			if not 0 <= answer < len(current) - 3:
+				answer = None
 			if len(current) == 3:
 				store = False
 		elif current[0] == 'longchoice':
-			try:
-				answer = (current.index(answer[0]) - 3, str(answer[1]).strip())
-			except:
+			if 0 <= answer[0] < len(current) - 3:
+				answer = (answer[0], str(answer[1]).strip())
+			else:
 				# Leave answer string as is (but force str); this only happens when users are messing with the js.
 				debug(2, 'unparsable longchoice answer: {}'.format(answer))
 				answer = (None, str(answer).strip())
