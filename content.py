@@ -384,6 +384,13 @@ def get(group, section): # {{{
 				finish_story_item()
 				stack[-1].append([r.group(1), None, r.group(3)] + r.group(5).split(r.group(4)))
 				continue
+			r = re.match(r'hidden\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+(.*)$', ln)
+			if r:
+				if len(stack[-1]) > 0 and len(stack[-1][-1]) > 0 and stack[-1][-1][0] == 'story':
+					debug(1, '{}: hidden answer must not appear in the middle of a story'.format(nr))
+					continue
+				stack[-1].append(['hidden', None, r.group(1), r.group(2)])
+				continue
 			r = re.match(r'(.*?)(?:\s+(.*?))?\s*:\s*(.*?)\s*$', ln)
 			if r and r.group(1) in characters:
 				name, imgs, ext = characters[r.group(1)]

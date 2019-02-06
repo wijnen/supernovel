@@ -137,6 +137,8 @@ class Admin_Connection: # {{{
 						add_block(p[-1])
 				elif p[0] == 'video':
 					questions.append((p[1], os.path.splitext(p[2])[0], 'video', p[0]))
+				elif p[0] == 'hidden':
+					questions.append((p[1], p[2], p[3], p[0]))
 				elif p[0] in ('unit', 'number', 'short', 'long', 'choice', 'longunit', 'longnumber', 'longshort', 'longchoice'):
 					questions.append((p[1], p[2], prev[0], p[0]))
 					prev[0] = ''
@@ -433,6 +435,8 @@ class Connection: # {{{
 			else:
 				self.remote.video.event(config['content'] + '/' + self.user['group'].lower() + '/' + self.user['section'][0] + '/' + self.user['section'][1] + '/' + code[2])
 			return True
+		elif code[0] == 'hidden':
+			self.store_answer(code[2], eval(code[3], self.user['variables']))
 		else:
 			# Question.
 			if self.user['section'] in self.user['answers'] and code[2] in self.user['answers'][self.user['section']]:
@@ -459,6 +463,20 @@ class Connection: # {{{
 			return item
 		self.remote.story.event(q, [handle(x) for x in text_buffer], last_answer, *args)
 	# }}}
+	def store_answer(self, question, answer, store = True):
+		self.user['variables'][question] = answer
+		if store:
+			if self.user['section'] not in self.user['answers']:
+				self.user['answers'][self.user['section']] = {}
+			if question not in self.user['answers'][self.user['section']]:
+				self.user['answers'][self.user['section']][question] = []
+			if len(self.user['answers'][self.user['section']][question]) == 0 or answer != self.user['answers'][self.user['section']][question][-1]:
+				self.user['answers'][self.user['section']][question].append((answer, []))
+			self.user['last_path'] = question
+			if not config['lazysave']:
+				user.save(self.user)
+		else:
+			self.user['last_path'] = None
 	def answer(self, answer): # {{{
 		debug(3, '{}:{} answers {}'.format(self.user['name'], self.user['group'], answer))
 		if self.user['run_stack'][-1][1] >= len(self.user['run_stack'][-1][0]):
@@ -509,20 +527,7 @@ class Connection: # {{{
 				# Leave answer string as is (but force str); this only happens when users are messing with the js.
 				debug(2, 'unparsable long* answer: {}'.format(answer))
 				answer = ('', str(answer).strip())
-		self.user['variables'][current[2]] = answer
-		if store:
-			if self.user['section'] not in self.user['answers']:
-				self.user['answers'][self.user['section']] = {}
-			question = current[2]
-			if question not in self.user['answers'][self.user['section']]:
-				self.user['answers'][self.user['section']][question] = []
-			if len(self.user['answers'][self.user['section']][question]) == 0 or answer != self.user['answers'][self.user['section']][question][-1]:
-				self.user['answers'][self.user['section']][question].append((answer, []))
-			self.user['last_path'] = question
-			if not config['lazysave']:
-				user.save(self.user)
-		else:
-			self.user['last_path'] = None
+		self.store_answer(current[2], answer, store)
 		self.user['run_stack'][-1][1] += 1
 		self._run()
 	# }}}
