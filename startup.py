@@ -1,4 +1,6 @@
+import re
 import math
+import random
 
 def test(value, target, error = 1e-3):
 	return value is not None and abs(value - target) < target * error
@@ -11,4 +13,8 @@ def get_num_answers(question):
 	return len(user['answers'][user['section']][question])
 
 def get_answer(question, index = -1):
-	return user['answers'][user['section']][question][index][0]
+	# If the requested answer doesn't exist, return None.
+	try:
+		return user['answers'][user['section']][question][index][0]
+	except:
+		return None

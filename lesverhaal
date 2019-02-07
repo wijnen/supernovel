@@ -339,7 +339,7 @@ class Connection: # {{{
 			qtype = 'longshort'
 			if last_answer is not None:
 				last_answer = (''.join(str(x) for x in last_answer[0]), last_answer[1])
-		self._handle_story(qtype, self.user['text_buffer'], last_answer, params)
+		self._handle_story(qtype, self.user['text_buffer'], last_answer, [self._parse_text(x) for x in params])
 		self.breaking = True
 		return True
 	# }}}

@@ -372,17 +372,24 @@ def get(group, section): # {{{
 			r = re.match(r'video\s+(.+)$', ln)
 			if r:
 				finish_story_item()
-				stack[-1].append(['video', None, r.group(1)])
+				stack[-1].append(['video', None, r.group(1).strip()])
 				continue
-			r = re.match(r'(number|unit|short|long|longnumber|longunit|longshort)\s+([a-zA-Z_][a-zA-Z0-9_]*)$', ln)
+			r = re.match(r'(number|unit|short|long|longnumber|longunit|longshort)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*$', ln)
 			if r:
 				finish_story_item()
 				stack[-1].append([r.group(1), None, r.group(2)])
 				continue
-			r = re.match(r'((long)?choice)\s+([a-zA-Z_][a-zA-Z0-9_]*)(.)(.+)$', ln)
+			r = re.match(r'((long)?choice)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*$', ln)
 			if r:
 				finish_story_item()
-				stack[-1].append([r.group(1), None, r.group(3)] + r.group(5).split(r.group(4)))
+				stack[-1].append([r.group(1), None, r.group(3)])
+				continue
+			r = re.match(r'option\s+(.*)$', ln)
+			if r:
+				if len(stack[-1]) < 1 or len(stack[-1][-1]) < 1 or stack[-1][-1][0] not in ('choice', 'longchoice'):
+					debug(1, '{}: option must immediately follow choice or longchoice'.format(nr))
+					continue
+				stack[-1][-1].append(r.group(1).strip())
 				continue
 			r = re.match(r'hidden\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+(.*)$', ln)
 			if r:
