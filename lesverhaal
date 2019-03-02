@@ -204,15 +204,18 @@ class Connection: # {{{
 				return
 		self.remote.login.event()
 	# }}}
+	def _safe_eval(self, expr, as_str): # {{{
+		try:
+			ret = eval(expr, self.user['variables'])
+		except:
+			debug(1, 'error evaluating expression {}'.format(expr))
+			traceback.print_exc()
+			return '[fout]' if as_str else False
+		return str(ret) if as_str else ret
+	# }}}
 	def _parse_text(self, text): # {{{
 		def subst(obj):
-			try:
-				ret = eval(obj.group(1), self.user['variables'])
-				return str(ret)
-			except:
-				debug(1, 'error evaluating expression substitution {}'.format(obj.group(0)))
-				traceback.print_exc()
-				return '[fout]'
+			return self._safe_eval(obj.group(1), as_str = True)
 		return re.sub('\${(.*?)}', subst, text).replace('FILE://common/', config['content'] + 'common/').replace('FILE://', config['content'] + '/' + self.user['group'].lower() + '/' + self.user['section'][0] + '/' + self.user['section'][1] + '/')
 	# }}}
 	def _add_text(self, text): # {{{
@@ -325,7 +328,11 @@ class Connection: # {{{
 				}
 		startup = fhs.read_data('startup.py')
 		if startup is not None:
-			exec(startup.read(), self.user['variables'])
+			try:
+				exec(startup.read(), self.user['variables'])
+			except:
+				debug(1, 'Error in startup script')
+				traceback.print_exc()
 		for c in characters:
 			self._add_character(c, *characters[c])
 		self._run()
@@ -358,7 +365,16 @@ class Connection: # {{{
 	# }}}
 	def _run(self): # {{{
 		self.user['text_buffer'] = []
+		watchdog = 0
 		while len(self.user['run_stack']) > 0:
+			watchdog += 1
+			if watchdog > 1000:
+				debug(1, 'hanging script detected: {}; killing it'.format(self.user['section']))
+				self._handle_story('text', 'Het verhaal bevat helaas een fout en is gestopt.')
+				self.user['text_buffer'] = []
+				self.user['run_stack'] = [[self.user['full_section'], len(self.user['full_section'])]]
+				user.refresh_admins()
+				return
 			# Pop off stack levels until there's an instruction.
 			while len(self.user['run_stack'][-1][0]) <= self.user['run_stack'][-1][1]:
 				self.user['run_stack'].pop()
@@ -390,7 +406,7 @@ class Connection: # {{{
 		elif code[0] == 'if':
 			self.user['run_stack'][-1][1] += 1
 			for expr, target in code[2:-1]:
-				if eval(expr, self.user['variables']):
+				if self._safe_eval(expr, as_str = False):
 					self.user['run_stack'].append([target, 0])
 					break
 			else:
@@ -399,7 +415,7 @@ class Connection: # {{{
 			return False
 		elif code[0] == 'while':
 			# Don't increment instruction pointer, so the loop restarts.
-			if eval(code[2]):
+			if self._safe_eval(code[2], as_str = False):
 				self.user['run_stack'].append([code[3], 0])
 			else:
 				self.user['run_stack'][-1][1] += 1
@@ -436,7 +452,7 @@ class Connection: # {{{
 				self.remote.video.event(config['content'] + '/' + self.user['group'].lower() + '/' + self.user['section'][0] + '/' + self.user['section'][1] + '/' + code[2])
 			return True
 		elif code[0] == 'hidden':
-			self.store_answer(code[2], eval(code[3], self.user['variables']))
+			self.store_answer(code[2], self._safe_eval(code[3], as_str = True))
 		else:
 			# Question.
 			if self.user['section'] in self.user['answers'] and code[2] in self.user['answers'][self.user['section']]:

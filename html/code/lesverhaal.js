@@ -96,24 +96,34 @@ var Connection = {
 			speech.innerHTML = '';
 			var get_value;
 			var button_text = 'Antwoord';
+			var send_answer = function() {
+				var answer = get_value();
+				if (answer === null)
+					return;
+				server.call('answer', [answer]);
+			}
+			var form = question.AddElement('form');
+			form.onsubmit = function() {
+				send_answer();
+				return false;
+			}
 			switch (type) {
 				case 'longnumber':
-					var l = question.AddElement('textarea');
-					question.AddElement('br');
-					var e = question.AddElement('input');
-					e.type = 'number';
-					if (options.length > 0)
-						e.step = options[0];
+					var l = form.AddElement('textarea');
+					form.AddElement('br');
+					var e = form.AddElement('input');
+					e.type = 'text';
+					l.focus();
 					get_value = function() {
-						var ret = Number(e.value);
+						var ret = Number(e.value.replace(',', '.'));
 						if (isNaN(ret))
-							return [[null, null], null];
+							return [null, l.value];
 						return [ret, l.value];
 					};
 					break;
 				case 'longchoice':
-					var l = question.AddElement('textarea');
-					var div = question.AddElement('div');
+					var l = form.AddElement('textarea');
+					var div = form.AddElement('div');
 					for (var o = 0; o < options.length; ++o) {
 						var button = div.AddElement('button', 'choicebutton').AddText(options[o]);
 						button.type = 'button';
@@ -130,13 +140,15 @@ var Connection = {
 							server.call('answer', [last_answer]);
 						});
 					}
+					l.focus();
 					return;
 				case 'longshort':
 				case 'longunit':
-					var l = question.AddElement('textarea');
-					question.AddElement('br');
-					var e = question.AddElement('input');
+					var l = form.AddElement('textarea');
+					form.AddElement('br');
+					var e = form.AddElement('input');
 					e.type = 'text';
+					l.focus();
 					get_value = function() {
 						var ret = e.value;
 						if (ret == '')
@@ -146,19 +158,18 @@ var Connection = {
 					};
 					break;
 				case 'number':
-					var e = question.AddElement('input');
-					e.type = 'number';
-					if (options.length > 0)
-						e.step = options[0];
+					var e = form.AddElement('input');
+					e.type = 'text';
+					e.focus();
 					get_value = function() {
-						var ret = Number(e.value);
+						var ret = Number(e.value.replace(',', '.'));
 						if (isNaN(ret))
 							return null;
 						return ret;
 					};
 					break;
 				case 'choice':
-					var div = question.AddElement('div');
+					var div = form.AddElement('div');
 					for (var o = 0; o < options.length; ++o) {
 						var button = div.AddElement('button', 'choicebutton').AddText(options[o]);
 						button.type = 'button';
@@ -178,8 +189,9 @@ var Connection = {
 					return;
 				case 'short':
 				case 'unit':
-					var e = question.AddElement('input');
+					var e = form.AddElement('input');
 					e.type = 'text';
+					e.focus();
 					get_value = function() {
 						var ret = e.value;
 						if (ret == '')
@@ -189,7 +201,8 @@ var Connection = {
 					};
 					break;
 				case 'long': // <textarea>
-					var e = question.AddElement('textarea');
+					var e = form.AddElement('textarea');
+					e.focus();
 					get_value = function() {
 						var ret = e.value;
 						if (ret == '')
@@ -199,22 +212,19 @@ var Connection = {
 					};
 					break;
 				case 'text': // Not a real question, just continue.
-					question.AddElement('br');
-					question.AddElement('button').AddText('Ga Verder').AddEvent('click', function() {
+					form.AddElement('br');
+					form.AddElement('button').AddText('Ga Verder').AddEvent('click', function() {
 						server.call('text_done', []);
 					}).type = 'button';
 					return;
 				default:
 					console.error('invalid question type', type);
 			}
-			question.AddElement('button').AddText(button_text).AddEvent('click', function() {
-				var answer = get_value();
-				if (answer === null)
-					return;
-				server.call('answer', [answer]);
+			form.AddElement('button').AddText(button_text).AddEvent('click', function() {
+				send_answer();
 			}).type = 'button';
 			if (last_answer != null) {
-				question.AddElement('button').AddText('Herhaal vorige antwoord: ' + last_answer).AddEvent('click', function() {
+				form.AddElement('button').AddText('Herhaal vorige antwoord: ' + last_answer).AddEvent('click', function() {
 					server.call('answer', [last_answer]);
 				}).type = 'button';
 			}
