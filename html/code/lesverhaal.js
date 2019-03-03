@@ -1,4 +1,4 @@
-var error, login, videodiv, video, contents, contentslist, question, navigation, spritebox, speechbox, speaker, photo, speech;
+var error, login, videodiv, video, contents, contentslist, question, navigation, spritebox, sandbox, speechbox, speaker, photo, speech;
 var is_replaced;
 var server;
 var kinetic_script = null;
@@ -27,10 +27,10 @@ var Connection = {
 		speechbox.style.display = 'none';
 		navigation.style.display = 'none';
 		spritebox.style.display = 'none';
+		sandbox.style.display = 'none';
 		video.pause();
 	},
 	contents: function(data) {
-		kinetic_script = null;
 		chapters.ClearAll();
 		sections.ClearAll();
 		var chapterlist = [];
@@ -69,6 +69,7 @@ var Connection = {
 		speechbox.style.display = 'none';
 		navigation.style.display = 'none';
 		spritebox.style.display = 'none';
+		sandbox.style.display = 'none';
 		video.pause();
 		for (var s in question.style)
 			delete question.style[s];
@@ -83,6 +84,7 @@ var Connection = {
 		speechbox.style.display = 'block';
 		navigation.style.display = 'block';
 		spritebox.style.display = 'block';
+		sandbox.style.display = 'none';
 		question.innerHTML = '';
 		video.pause();
 		kinetic_end = function() {
@@ -246,6 +248,7 @@ var Connection = {
 		speechbox.style.display = 'none';
 		navigation.style.display = 'none';
 		spritebox.style.display = 'none';
+		sandbox.style.display = 'none';
 		speed(); // Set playback speed.
 		video.play();
 	},
@@ -473,6 +476,7 @@ function init() {
 	speechbox = document.getElementById('speechbox');
 	navigation = document.getElementById('navigation');
 	spritebox = document.getElementById('spritebox');
+	sandbox = document.getElementById('sandbox');
 	speaker = document.getElementById('speaker');
 	photo = document.getElementById('photo');
 	speech = document.getElementById('speech');
@@ -489,6 +493,7 @@ function init() {
 	speechbox.style.display = 'none';
 	navigation.style.display = 'none';
 	spritebox.style.display = 'none';
+	sandbox.style.display = 'none';
 	speaker.style.display = 'none';
 
 	spritebox.AddEvent('click', function(event) {
@@ -527,6 +532,7 @@ function connection_lost() {
 		speechbox.style.display = 'none';
 		navigation.style.display = 'none';
 		spritebox.style.display = 'none';
+		sandbox.style.display = 'none';
 		video.pause();
 		server = Rpc(Connection, null, connection_lost);
 	}

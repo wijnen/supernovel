@@ -12,7 +12,17 @@ import fhs
 import websocketd
 from markdown import markdown
 from websocketd import log
-config = fhs.init({'data': '.', 'port': '8000', 'admin-port': '8001', 'loglimit': 1, 'content': 'content', 'lazysave': False, 'secret': '', 'logfile': ''})
+config = fhs.init({
+	'data': '.',
+	'port': '8000',
+	'admin-port': '8001',
+	'sandbox-port': '8002',
+	'loglimit': 1,
+	'content': 'content',
+	'sandbox': 'sandbox',
+	'lazysave': False,
+	'secret': '',
+	'logfile': ''})
 from debug import debug
 import content
 import user
@@ -204,33 +214,6 @@ class Connection: # {{{
 				return
 		self.remote.login.event()
 	# }}}
-	def _safe_eval(self, expr, as_str): # {{{
-		try:
-			ret = eval(expr, self.user['variables'])
-		except:
-			debug(1, 'error evaluating expression {}'.format(expr))
-			traceback.print_exc()
-			return '[fout]' if as_str else False
-		return str(ret) if as_str else ret
-	# }}}
-	def _parse_text(self, text): # {{{
-		def subst(obj):
-			return self._safe_eval(obj.group(1), as_str = True)
-		return re.sub('\${(.*?)}', subst, text).replace('FILE://common/', config['content'] + 'common/').replace('FILE://', config['content'] + '/' + self.user['group'].lower() + '/' + self.user['section'][0] + '/' + self.user['section'][1] + '/')
-	# }}}
-	def _add_text(self, text): # {{{
-		'''Prepare text for displaying.'''
-		if not isinstance(text, str):
-			if text[0] == 'text':
-				self.user['text_buffer'].append((text[0], '' if text[1] is None else self._parse_text(text[1]), self._parse_text(text[2]), text[3]))
-			else:
-				self.user['text_buffer'].append(text)
-			return
-		if len(self.user['text_buffer']) > 0 and isinstance(self.user['text_buffer'][-1], str):
-			self.user['text_buffer'][-1] += '\n' + self._parse_text(text)
-		else:
-			self.user['text_buffer'].append(self._parse_text(text))
-	# }}}
 	def login(self, name, group, password): # {{{
 		u, answers = user.load(name.strip(), group.strip())
 		if u is None:
@@ -242,7 +225,8 @@ class Connection: # {{{
 			return 'dit wachtwoord is onjuist'
 		u = self._login(name.strip(), group.strip())
 		# In case the password is new, it needs to be stored.
-		u['password'] = crypted
+		if u:
+			u['password'] = crypted
 		return None
 	# }}}
 	def _login(self, name, group): # {{{
@@ -282,6 +266,44 @@ class Connection: # {{{
 		user.refresh_admins()
 		return u
 	# }}}
+	def _closed(self): # {{{
+		self.remote.close()
+		if not hasattr(self, 'user'):
+			debug(2, 'connection to {}:{} lost before logging in'.format(*self.remote.socket.remote))
+			return
+		debug(1, 'disconnecting {}:{}'.format(self.user['name'], self.user['group']))
+		user.save(self.user)
+		self.user['connection'] = None
+		# TODO: schedule a timeout for discarding user data from memory.
+		user.refresh_admins()
+	# }}}
+	def _safe_eval(self, expr, as_str): # {{{
+		try:
+			ret = eval(expr, self.user['variables'])
+		except:
+			debug(1, 'error evaluating expression {}'.format(expr))
+			traceback.print_exc()
+			return '[fout]' if as_str else False
+		return str(ret) if as_str else ret
+	# }}}
+	def _parse_text(self, text): # {{{
+		def subst(obj):
+			return self._safe_eval(obj.group(1), as_str = True)
+		return re.sub('\${(.*?)}', subst, text).replace('FILE://common/', config['content'] + 'common/').replace('FILE://', config['content'] + '/' + self.user['group'].lower() + '/' + self.user['section'][0] + '/' + self.user['section'][1] + '/')
+	# }}}
+	def _add_text(self, text): # {{{
+		'''Prepare text for displaying.'''
+		if not isinstance(text, str):
+			if text[0] == 'text':
+				self.user['text_buffer'].append((text[0], '' if text[1] is None else self._parse_text(text[1]), self._parse_text(text[2]), text[3]))
+			else:
+				self.user['text_buffer'].append(text)
+			return
+		if len(self.user['text_buffer']) > 0 and isinstance(self.user['text_buffer'][-1], str):
+			self.user['text_buffer'][-1] += '\n' + self._parse_text(text)
+		else:
+			self.user['text_buffer'].append(self._parse_text(text))
+	# }}}
 	def _answer(self, key, value = None): # {{{
 		'''Set style for last answer.
 		With only one argument, the style of the background is set.'''
@@ -304,7 +326,9 @@ class Connection: # {{{
 	# }}}
 	def start(self, section): # {{{
 		self.user['section'] = tuple(section)
-		self.user['full_section'], self.index, characters = content.get(self.user['group'], self.user['section'])
+		self._start(section, content.get(self.user['group'], self.user['section']))
+	def _start(self, section, section_content):
+		self.user['full_section'], self.index, characters = section_content
 		self.user['run_stack'] = [[self.user['full_section'], 0]]
 		self.user['characters'] = {}
 		self.user['last_path'] = None
@@ -479,7 +503,7 @@ class Connection: # {{{
 			return item
 		self.remote.story.event(q, [handle(x) for x in text_buffer], last_answer, *args)
 	# }}}
-	def store_answer(self, question, answer, store = True):
+	def store_answer(self, question, answer, store = True): # {{{
 		self.user['variables'][question] = answer
 		if store:
 			if self.user['section'] not in self.user['answers']:
@@ -493,6 +517,7 @@ class Connection: # {{{
 				user.save(self.user)
 		else:
 			self.user['last_path'] = None
+	# }}}
 	def answer(self, answer): # {{{
 		debug(3, '{}:{} answers {}'.format(self.user['name'], self.user['group'], answer))
 		if self.user['run_stack'][-1][1] >= len(self.user['run_stack'][-1][0]):
@@ -565,22 +590,92 @@ class Connection: # {{{
 			self.user['run_stack'][-1][1] += 1
 		self._run()
 	# }}}
-	def _closed(self): # {{{
-		self.remote.close()
-		if not hasattr(self, 'user'):
-			debug(2, 'connection to {}:{} lost before logging in'.format(*self.remote.socket.remote))
-			return
-		debug(1, 'disconnecting {}:{}'.format(self.user['name'], self.user['group']))
-		user.save(self.user)
-		self.user['connection'] = None
-		# TODO: schedule a timeout for discarding user data from memory.
-		user.refresh_admins()
+	def sandbox_list(self): # {{{
+		if not self.user['sandbox']:
+			debug(1, 'User is not allowed to use sandbox')
+			raise PermissionError('User is not allowed to use sandbox')
+		basedir = os.path.join(config['data'], 'sandbox_html', config['sandbox'], self.user['group'].lower(), self.user['name'].lower())
+		if not os.path.exists(basedir):
+			return []
+		def make_list(base, current):
+			ret = []
+			for f in os.listdir(os.path.join(base, current)):
+				filename = os.path.join(base, current, f)
+				if os.path.isdir(filename):
+					if f[0] == '.':
+						continue
+					ret.extend(make_list(base, os.path.join(current, f)))
+				else:
+					ret.append(os.path.join(current, f))
+			return ret
+		return make_list(basedir, '')
 	# }}}
+	def sandbox_remove(self, name): # {{{
+		if not self.user['sandbox']:
+			debug(1, 'User is not allowed to use sandbox')
+			raise PermissionError('User is not allowed to use sandbox')
+		basedir = os.path.join(config['data'], 'sandbox_html', config['sandbox'], self.user['group'].lower(), self.user['name'].lower())
+		d = os.path.dirname(name)
+		assert '.' not in d and os.path.exists(os.path.join(basedir, name))
+		os.unlink(os.path.join(basedir, name))
+	# }}}
+	def sandbox_play(self, scriptname): # {{{
+		if not self.user['sandbox']:
+			debug(1, 'User is not allowed to use sandbox')
+			raise PermissionError('User is not allowed to use sandbox')
+		basedir = os.path.join(config['data'], 'sandbox_html', config['sandbox'], self.user['group'].lower(), self.user['name'].lower())
+		d = os.path.dirname(scriptname)
+		assert '.' not in d and os.path.exists(os.path.join(basedir, scriptname))
+		self.user['section'] = ('sandbox', scriptname)
+		self._start(self.user['section'], content.get_file(os.path.join(basedir, scriptname)))
+	# }}}
+
+def sandbox_post(connection): # {{{
+	'''Upload a new file for the sandbox.
+	Credentials must be provided in the cookie. User must be allowed to use the sandbox.
+	'''
+	if 'cookie' not in connection.headers or 'file' not in connection.post[1]:
+		debug(1, 'ignoring invalid POST request')
+		sandboxserver.reply(connection, 404, 'invalid POST request', 'text/plain;charset=utf-8')
+		return False
+	c = connection.headers['cookie']
+	kv = [chunk.strip().split('=', 1) for chunk in c.split(';')]
+	kv = {x[0]: x[1] for x in kv}
+	if 'name' not in kv or 'group' not in kv or 'key' not in kv or (kv['name'], kv['group']) not in user.users or user.users[(kv['name'], kv['group'])]['cookie'] != kv['key']:
+		debug(1, 'invalid cookie for POST')
+		sandboxserver.reply(connection, 403, 'invalid cookie for POST request', 'text/plain;charset=utf-8')
+		return False
+	u = user.users[(kv['name'], kv['group'])]
+	if not u['sandbox']:
+		debug(1, 'User is not allowed to use sandbox')
+		sandboxserver.reply(connection, 403, 'User is not allowed to use sandbox', 'text/plain;charset=utf-8')
+		return False
+	# Credentials are good, save the files.
+	basedir = os.path.join(config['data'], 'sandbox_html', config['sandbox'], kv['group'].lower(), kv['name'].lower())
+	for f in connection.post[1]['file']:
+		basename = os.path.basename(f[1]).split('.')
+		if len(basename) > 1:
+			basename[-2:] = [basename[-2] + '.' + basename[-1]]
+		filename = os.path.join(basedir, *basename)
+		os.makedirs(os.path.join(basedir, *basename[:-1]), exist_ok = True)
+		# Copy the file.
+		try:
+			with open(filename, 'wb') as w:
+				with open(f[0], 'rb') as r:
+					w.write(r.read())
+		except:
+			log('unable to copy file')
+			traceback.print_exc()
+	sandboxserver.page(connection)
+	return False
+# }}}
 # }}}
 
 # Main program {{{
 server = websocketd.RPChttpd(config['port'], Connection, httpdirs = ['html'], tls = False)
 adminserver = websocketd.RPChttpd(config['admin-port'], Admin_Connection, httpdirs = ['admin_html'], tls = False)
+sandboxserver = websocketd.RPChttpd(config['sandbox-port'], Connection, httpdirs = ['sandbox_html'], tls = False)
+sandboxserver.post = sandbox_post
 print('servers are running')
 websocketd.fgloop()
 # }}}

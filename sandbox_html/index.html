@@ -2,10 +2,11 @@
 <html>
 	<head>
 		<meta charset='utf-8'/>
-		<title>Lesverhaal</title>
+		<title>Lesverhaal zandbak</title>
 		<script src='code/builders.js'></script>
 		<script src='code/rpc.js'></script>
 		<script src='code/lesverhaal.js'></script>
+		<script src='code/sandbox.js'></script>
 		<link rel='stylesheet' href='code/style.css'/>
 	</head>
 	<body onkeypress='keypress(event)'>
@@ -49,6 +50,11 @@
 			<div id='speech'></div>
 		</div>
 		<div id='question'></div>
-		<div id='sandbox'></div>
+		<div id='sandbox'>
+			<form enctype='multipart/form-data' method='post'>
+				<ul id='files'></ul>
+				<p>Nieuw bestand: <input type='file' name='file'/> <input type='submit' name='new' value='Uploaden'/></p>
+			</form>
+		</div>
 	</body>
 </html>

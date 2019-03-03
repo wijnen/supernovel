@@ -108,13 +108,7 @@ def showhide(show, tag, mod, at, transition, characters, in_with, after, hiders,
 	return ret
 # }}}
 
-def get(group, section): # {{{
-	'''Get the program for a section.'''
-	content_dir = os.path.join(config['data'], 'users', group.lower(), 'Content')
-	filename = os.path.join(content_dir, section[0], section[1] + '.script')
-	if not os.path.exists(filename):
-		debug(1, 'Error: file {} does not exist'.format(filename))
-		return [], {}
+def get_file(filename): # {{{
 	with open(filename) as f:
 		parts = []
 		stack = [parts]
@@ -425,6 +419,16 @@ def get(group, section): # {{{
 					make_paths(path + (i, len(item) - 2), item[-1])
 	make_paths((), parts)
 	return parts, index, characters
+# }}}
+
+def get(group, section): # {{{
+	'''Get the program for a section.'''
+	content_dir = os.path.join(config['data'], 'users', group.lower(), 'Content')
+	filename = os.path.join(content_dir, section[0], section[1] + '.script')
+	if not os.path.exists(filename):
+		debug(1, 'Error: file {} does not exist'.format(filename))
+		return [], {}
+	return get_file(filename)
 # }}}
 
 # vim: set foldmethod=marker :

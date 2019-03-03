@@ -1,6 +1,7 @@
 builders.js
 rpc.js
 html/content/
+sandbox_html/sandbox/
 lessen/
 users/
 __pycache__/

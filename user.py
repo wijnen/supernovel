@@ -107,20 +107,20 @@ def load(name, group): # {{{
 	if (name.lower(), group.lower()) in users:
 		ret = users[(name.lower(), group.lower())]
 	else:
-		ret = {'filename': name.lower(), 'name': name, 'group': group.lower(), 'connection': None, 'password': None, 'nosave': False}
+		ret = {'filename': name.lower(), 'name': name, 'group': group.lower(), 'connection': None, 'password': None, 'nosave': False, 'sandbox': False}
 	answers = {}
 	for ln in open(os.path.join(config['data'], 'users', group.lower(), name.lower()), errors = 'replace'):
 		if ln.strip() == '':
 			continue
 		try:
-			key, value = ln.split('=', 1)
+			key, value = ln.strip().split('=', 1)
 		except ValueError:
 			log('Failed to parse line from user config for %s:%s: %s' % (name, group, ln.strip()))
 			continue
 		if key in unsaved:
 			# This key should not have been in the file.
 			continue
-		if key == 'nosave':
+		if key in ('nosave', 'sandbox'):
 			ret[key] = value == 'True'
 			continue
 		if key.startswith('answer:'):
