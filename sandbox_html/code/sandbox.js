@@ -29,11 +29,13 @@ function get_sandbox_list() {
 			button.filename = file;
 			button.type = 'button';
 			li.AddText(file);
-			button = li.AddElement('button').AddText('Spelen').AddEvent('click', function() {
-				server.call('sandbox_play', [this.filename]);
-			});
-			button.filename = file;
-			button.type = 'button';
+			if (file.substr(-7) == '.script') {
+				button = li.AddElement('button').AddText('Spelen').AddEvent('click', function() {
+					server.call('sandbox_play', [this.filename]);
+				});
+				button.filename = file;
+				button.type = 'button';
+			}
 		}
 	});
 }

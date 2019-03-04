@@ -289,7 +289,11 @@ class Connection: # {{{
 	def _parse_text(self, text): # {{{
 		def subst(obj):
 			return self._safe_eval(obj.group(1), as_str = True)
-		return re.sub('\${(.*?)}', subst, text).replace('FILE://common/', config['content'] + 'common/').replace('FILE://', config['content'] + '/' + self.user['group'].lower() + '/' + self.user['section'][0] + '/' + self.user['section'][1] + '/')
+		if self.user['section'] is not None and self.user['section'][0] == 'sandbox':
+			filetarget = config['sandbox'] + '/' + self.user['group'].lower() + '/' + self.user['name'].lower() + '/'
+		else:
+			filetarget = config['content'] + '/' + self.user['group'].lower() + '/' + self.user['section'][0] + '/' + self.user['section'][1] + '/'
+		return re.sub('\${(.*?)}', subst, text).replace('FILE://common/', config['content'] + 'common/').replace('FILE://', filetarget)
 	# }}}
 	def _add_text(self, text): # {{{
 		'''Prepare text for displaying.'''
@@ -626,8 +630,8 @@ class Connection: # {{{
 		basedir = os.path.join(config['data'], 'sandbox_html', config['sandbox'], self.user['group'].lower(), self.user['name'].lower())
 		d = os.path.dirname(scriptname)
 		assert '.' not in d and os.path.exists(os.path.join(basedir, scriptname))
-		self.user['section'] = ('sandbox', scriptname)
-		self._start(self.user['section'], content.get_file(os.path.join(basedir, scriptname)))
+		self.user['section'] = ('sandbox', self.user['name'].lower())
+		self._start(self.user['section'], content.get_file(self.user['group'], self.user['section'], os.path.join(basedir, scriptname)))
 	# }}}
 
 def sandbox_post(connection): # {{{
@@ -663,8 +667,9 @@ def sandbox_post(connection): # {{{
 			with open(filename, 'wb') as w:
 				with open(f[0], 'rb') as r:
 					w.write(r.read())
+			debug(1, 'copied {} to {}'.format(f[0], filename))
 		except:
-			log('unable to copy file')
+			debug(1, 'unable to copy file')
 			traceback.print_exc()
 	sandboxserver.page(connection)
 	return False

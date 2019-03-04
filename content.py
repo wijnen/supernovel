@@ -108,7 +108,7 @@ def showhide(show, tag, mod, at, transition, characters, in_with, after, hiders,
 	return ret
 # }}}
 
-def get_file(filename): # {{{
+def get_file(group, section, filename): # {{{
 	with open(filename) as f:
 		parts = []
 		stack = [parts]
@@ -311,6 +311,8 @@ def get_file(filename): # {{{
 					imgdir, ext = os.path.splitext(url)
 					if imgdir.startswith('common/'):
 						fulldir = config['content'] + '/' + imgdir + '/'
+					elif section[0] == 'sandbox':
+						fulldir = config['sandbox'] + '/' + group.lower() + '/' + section[1] + '/' + imgdir + '/'
 					else:
 						fulldir = config['content'] + '/' + group.lower() + '/' + section[0] + '/' + section[1] + '/' + imgdir + '/'
 				characters[tag] = (name, fulldir, ext)
@@ -320,6 +322,8 @@ def get_file(filename): # {{{
 				if r.group(2):
 					if r.group(2).startswith('common/'):
 						url = config['content'] + '/' + r.group(2)
+					elif section[0] == 'sandbox':
+						fulldir = config['sandbox'] + '/' + group.lower() + '/' + section[1] + '/' + r.group(2)
 					else:
 						url = config['content'] + '/' + group.lower() + '/' + section[0] + '/' + section[1] + '/' + r.group(2)
 				else:
@@ -428,7 +432,7 @@ def get(group, section): # {{{
 	if not os.path.exists(filename):
 		debug(1, 'Error: file {} does not exist'.format(filename))
 		return [], {}
-	return get_file(filename)
+	return get_file(group, section, filename)
 # }}}
 
 # vim: set foldmethod=marker :
