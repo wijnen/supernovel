@@ -1,0 +1,463 @@
+\documentclass{article}
+\usepackage{hyperref}
+\begin{document}
+\noindent\textbf{\Large Lesverhaal Script Syntax Reference}
+
+\tableofcontents
+
+\tableofcontents
+
+\section{About This Document}
+This document describes the syntax of scripts written for Lesverhaal.
+Lesverhaal is a visual novel engine that is designed to be used in a classroom
+setting. For the player it is similar to RenPy (although it is limited in terms
+of presentation). The features that make it useful for teaching, are that
+besides multiple choice it supports open questions, and that there is a teacher
+interface which allows the teacher to review the student's answers.
+
+\section{Directory Structure}
+When starting lesverhaal, there are three locations that are defined using
+commandline arguments.
+\begin{enumerate}
+	\item The data location where lesverhaal reads all the information
+		from, by default the current directory. 
+
+	\item The content directory, where image and sound files are stored.
+		These are never read by lesverhaal, but only by the player's
+		browser. As such, this is not a path from the current
+		directory, but an internet address. By default this is
+		``content'', which means that if lesverhaal is accessed at
+		http://example.com/lesverhaal, the content is searched at
+		http://example.com/lesverhaal/content/. It is possible to place
+		the content on a different server.
+
+	\item The sandbox directory. This is similar to the content directory,
+		but for files uploaded by players using the sandbox interface.
+		However, these cannot be at a different server, because
+		lesverhaal needs to be able to access those files.
+\end{enumerate}
+
+\subsection{The Data Structure}
+The data directory contains:
+\begin{enumerate}
+	\item The startup.py script, which is run to initialize the environment
+		of any game.
+
+	\item A users directory. This directory contains one subdirectory per
+		group of students, and a directory named ``admin''. All those
+		directories contain files with player information. Those files
+		have names which are the username of the player converted to
+		lowercase.
+
+		To create a new user, it is enough to simply create an empty
+		file with the correct name. At login, all information will be
+		filled in. This information can later be edited. In particular,
+		the password can be removed if it was forgotten.  When there is
+		not password in the file, whatever the player enters as the
+		password will be accepted and recorded.
+
+		All group directories except admin contain a directory named
+		Content (the uppercase C ensures it cannot be mistaken for a
+		player). The Content directory contains chapter subdirectories,
+		which contain the scripts that this document is mostly about.
+		All script files must have the extension ``.script''.
+\end{enumerate}
+
+\subsection{The Content Directory}
+The content directory contains a subdirectory named ``common'', which contains
+common resources to all games, and one subdirectory per chapter, with the same
+name as the chapter subdirectory in the group's Content directory. In that
+chapter directory, there is a subdirectory for each script, with the same name
+as the script file, but without the ``.script'' extension. The content files
+for that game are in that subdirectory.
+
+\subsection{The Sandbox Directory}
+In the sandbox content directory is a subdirectory for each group and a user
+directory under each group directory, with the same name as the group and the
+user respectively. All sandbox files are located in that directory, there is no
+separate directory for each script. The sandbox scripts are also in that same
+directory.
+
+\subsection{Common Resources}
+Normally, there is some common world where all (or at least most) games take
+place. It would be wrong to place a copy of the resources for those games in
+every game directory. Instead, they should be placed in the common directory.
+When a script references a file and the address starts with ``common/'', it
+will produce a link to the common resources directory. Otherwise, it will
+produce a link to the game's data directory (regular or sandbox).
+
+\subsection{Character Data}
+Most images in the game are character images. Those are stored in a directory
+per character. In that directory are two or more files. When the character is
+shown, the ``default'' image is used. When they talk, the ``side'' image is
+used beside the text. When they talk with an emotion, the name of the emotion
+is used as the filename for the image that is shown. The side image cannot
+change.
+
+\section{File Syntax}
+The script consists of lines with one command each. Some commands require more
+than one line. There are two situations where this occurs:
+\begin{enumerate}
+	\item Commands which contain sub-commands, such as if and while. Those
+		commands end with a colon (:) and the subcommands are indented
+		with whitespace. The amount and type of whitespace that is used
+		for the indentation is up to the author of the game, but it is
+		required to remain the same for the entire block of
+		subcommands.
+
+	\item Multi-line strings. These are started with triple quotes, and
+		they also end with triple quotes. If the quotes are indented,
+		the content must also be indented and the indentation is not
+		part of the string. Any extra indentation \textit{is} part of
+		the string.
+\end{enumerate}
+
+\subsection{Regular Commands}
+Empty lines and lines containing only whitespace are ignored.
+
+\subsubsection{\#}
+A line starting with \verb-#- is treated as a comment and is ignored.
+
+\subsubsection{\#\#\#}
+A line starting with \verb-###- starts a block comment. This extends until a
+line that ends with the same marker.
+
+\subsubsection{Quoted Text}
+A line of text in quotes is used to define a question to the user. It is
+normally followed by a command to define the question type. If multiple lines
+of text are given in sequence, they are concatenated and treated as a single
+text block.
+
+Some replacements are done on the text. See the section about text for more
+information.
+
+\subsubsection{Quoted Text Blocks}
+A multi-line block of text can be enclosed in triple quotes. Its meaning is
+identical to multiple single lines of text. Both three single and three double
+quotes are allowed. The quotes at the start and at the end of the block must be
+the same.
+
+\subsubsection{\$}
+Run a Python command. If multiple \$-commands are given in sequence, they are
+combined to a single Python statement. See the section about Python for more
+information.
+
+\subsubsection{id emotion: text}
+Using the id of a previously defined character, make the character say
+something. If an emotion is specified and the character is currently shown, the
+image is changed to that emotion. At the next command, the image is changed
+back to the emotion that was last specified in show, or ``default'' if none was
+specified.
+
+If the text is omitted, an indented multi-line text block is expected to follow
+this command. If the text is omitted and there is no indented block, the
+character will say an empty message.
+
+Text replacement is performed on the text. See the section about text for more
+information.
+
+\subsubsection{answer type value}
+This sets the style for the last answer in the teacher's interface. The type
+must be a css attribute. If it is omitted the default is ``background''. Note
+that in that case the value cannot contain whitespace.
+
+The value is the value for the css attribute. This is usually a color, which
+can be the result of a Python expression.
+
+\subsubsection{break}
+This command is only allowed inside a while command. It will cause execution to
+ignore the rest of the while loop and immediately continue execution at the
+command following the while command.
+
+\subsubsection{character id resource name}
+This defines a new character. The id must not be used for any other character.
+The resource is the name of the content directory which contains the images for
+the character, plus the extension that the image files have. For example, if
+``Anja.svg'' is given as the resource for the character, the files that are
+used are ``Anja/default.svg'' and ``Anja/side.svg'' (and similarly for the
+emotion files).
+
+The name may contain spaces. Also, text replacement is performed on the name.
+For example, a name of \verb-${name}- creates a character with the player's
+name. See the section about text for more information.
+
+\subsubsection{continue}
+This command is only allowed inside a while command. It will cause execution to
+ignore the rest of the while loop and immediately retry the while expression.
+If it passes, the loop restarts. If it doesn't, the loop ends and execution
+resumes at the command following the wile command.
+
+\subsubsection{goto id}
+Jump to a label defined elsewhere in the file. If the id starts with a ``.'',
+the last defined regular label's name is prefixed to it. See the label command
+for more information about goto.
+
+\subsubsection{hide id with transition}
+Remove a character's image from screen. If a transition is given, it is used.
+The only transitions that are allowed for hide are ``moveoutleft'' and
+``moveoutright''.
+
+\subsubsection{if expression:, elif: expression and else:}
+Run the indented block that follows if the Python expression evaluates to a
+True value.
+
+If present, the elif command must be the first command at the same indentation
+level after the if (or other elif) command. Its meaning is identical to the if
+command, but it will only run if all previous expressions did not evaluate to a
+True value.
+
+If present, the else command must be the first command at the same indentation
+level after the if or last elif command. The indented block that follows will
+only run if all previous expressions did not evaluate to a True value.
+
+See the section about Python for more information about the expression
+evaluation.
+
+\subsubsection{label id}
+Defines a label with the given id at this point in the file. Labels can be used
+to jump to with goto.
+
+Using labels and goto is only recommended for very simple flow control. In most
+cases, it is better to use if and while statements.
+
+Labels are only allowed at top level; they must not occur inside indented
+blocks.
+
+If a label name starts with ``.'', it prefixes it with the last defined regular
+label. This allows labels that are only used within a limited block to have
+names that are not unique throughout the file. For example, if a label named
+``.leave'' is defined after a label named ``home'', the new label is actually
+named ``home.leave''.
+
+\subsubsection{music filename}
+Start playing music, or if the filename is omitted, stop playing music.
+
+When the file finishes playing, it is automatically restarted.
+
+\subsubsection{say name: text}
+Present speech to the player.
+
+This is similar to a character talking. However, the name does not need to be
+defined for a character. Because there is no link to a character, it is not
+possible to implicitly change the emotion of a character with this command. Use
+show before and after say for that. There is also no side image for the speech.
+To get a side image, use the say function from a Python command. See the
+section about Python for more information.
+
+Similar to a talking character, if the text is omitted and a multi-line block
+follows this command, it is used as the text.
+
+Text replacement is performed both on the name and on the text. See the section
+about text for more information.
+
+\subsubsection{scene image}
+Set the background of the screen to the given image.
+
+\subsubsection{show id emotion at position with transition}
+Show a character on screen, or change the position or emotion of a character
+that is already on screen.
+
+If an emotion is given, it is used for the character's image.
+
+If a position is not given, it is not changed if the character is already on
+screen, otherwise ``center'' is used.
+
+If a transition is given, it is used. Options are:
+\begin{enumerate}
+	\item move: this moves the character from one place to another. The
+		character must already be on the screen.
+	\item dissolve: the character appears in place by increasing opacity.
+		The character must not be on screen yet.
+	\item moveinleft: the character is moved into the screen from the left
+		side.  The character must not be on screen yet.
+	\item moveinright: the character is moved into the screen from the
+		right side.  The character must not be on screen yet.
+	\item moveoutleft: the character is moved out of the screen to the left
+		side.  The character must already be on screen.
+	\item moveoutright: the character is moved out of the screen to the
+		right side.  The character must already be on screen.
+\end{enumerate}
+
+\subsubsection{sound filename}
+Play a sound. When the file finishes playing, it is not restarted. If no
+filename is given, stop playing the current sound.
+
+\subsubsection{video filename}
+Show a video.
+
+\subsubsection{while expression:}
+Run the indented block that follows zero or more times. If the Python
+expression evaluates to a True value, the block is executed and the expression
+is evaluated again. This repeats until the expression does not evaluate to a
+True value.
+
+The break and continue commands manipulate the flow in a while loop.
+
+See the section about Python for more information about the expression.
+
+\subsubsection{with transition:}
+Move multile characters at the same time.
+
+This command is followed by a block of show and hide commands. The transition
+(see the show command for details) is used for all of them, and they are all
+moving at the same time. If a transition is specified for a show or hide
+command, it takes precedence. It does not change the fact that the characters
+move simultaneously.
+
+\subsection{Question Commands}
+There are may ways to ask a question in lesverhaal. Some look different to the
+player. All are different for the script author.
+
+All question commands can be preceded by a text. This text is shown to the
+player, so they know what they should be answering.
+
+Every question gets an id. These ids must be unique in the script file.
+Internally the id is used to store the answers. A duplicate id will allow the
+player to repeat an answer to a different question, for example.
+
+If the id starts with an underscore (\_), the answer is not saved. Because of
+this, those ids do not need to be unique.
+
+In all cases, a Python variable is created with the id as its name and the
+answer as its value. How the answer is encoded depends on the question type.
+
+The different question types and their properties are described below.
+
+\subsubsection{number id}
+The player inputs a single line of text. It is converted to a number. If the
+player did not enter a number, the value is NaN.
+
+Both a decimal point and a decimal comma are accepted as decimal separator.
+Thousands separators are not allowed.
+
+\subsubsection{unit id}
+The player inputs a single line of text, which is interpreted as a number and a
+unit. The value is a sequence of two values. If there is no number, the first
+value is None and the second value is the entered answer. Otherwise, the first
+value is the number and the second value is the unit.
+
+\subsubsection{short id}
+The player inputs a single line of text, which is stored as a string.
+
+\subsubsection{long id}
+The player inputs a block of text, which is stored as a string.
+
+\subsubsection{longnumber id, longunit id and longshort id}
+The player inputs a block of text and an additional single line. The single
+line is parsed as a number, a number with a unit or a short string
+respectively. The value is stored as a sequence of two items, the first being
+the parsed value and the second a string from the block of text.
+
+Note that a longunit contains a sequence in a sequence, for example:
+\verb-[[10,'kg'], '5+5=10']-
+
+\subsubsection{choice id and option text}
+The players is presented with multiple buttons, and clicks one.
+
+The choice command must be followed by one or more options. Text replacement is
+performed on the option text, see the section about text for more information.
+
+The value that is stored is the index of the selected option. Note that
+counting starts at 0.
+
+\subsubsection{longchoice id}
+Similar to the other long questions, this is a choice question plus a block of
+text. The stored value is a sequence of the index of the selected option and
+the text as a string.
+
+Like with the choice command, the options must be given immediately after the
+longchoice command and text replacement is performed on the option texts. See
+the section about text for more information.
+
+\subsubsection{hidden id expression}
+Special question type that does not ask a question to the user. Instead it
+evaluates the expression and stores the value with the given id as if the
+player gave that answer.  This is useful for the teacher interface. For
+example, the game can keep a score and use a hidden question to store the
+player's result.
+
+\section{Text Replacement}
+There are many texts in the script where text replacement is performed. This
+consists of two things:
+\begin{enumerate}
+	\item If ``FILE://'' appears in the text, it is replaced with a link to
+		the game's content directory. So ``FILE://image.png'' will
+		point to the image in the game's content. ``FILE://common/'' is
+		instead replaced with a link to the common resources.
+
+		Note that this must not be used when filenames are expected,
+		such as the argument to the scene command, or a character
+		resource definition. No text replacement is performed on those
+		fields, and they are automatically converted into links.
+
+	\item A Python expression enclosed in ``\verb-${...}-'' is evaluated
+		and replaced with the result. Note that the expression cannot
+		contain the ``\verb-}-'' character. If this is needed, use the
+		\$ command to evaluate the expression beforehand, then use the
+		variable name to get its value.
+
+		See the section about Python for more information about Python
+		expressions.
+\end{enumerate}
+
+Furthermore, for speech and questions (but not for names), the text is passed
+through markdown. This allows the author a lot of freedom to create the look
+that they want.
+
+\section{Python}
+Every game that is started contains a Python environment. This environment is
+used when running Python statements and when evaluating expressions, including
+text replacements. When characters are created, a variable with their id as its
+name is created. This variable can be used to manipulate the character from the
+script. When questions are answered, the answers are stored in a variable as
+well.
+
+The initial variables in the Python environment are:
+\begin{enumerate}
+	\item answer(key, value): similar to the answer command. Also, with
+		only one argument given, the key defaults to ``background''.
+	\item goto(label): similar to using the goto command.
+	\item text(message): similar to using a quoted string as a command.
+	\item character(tag, name, url): similar to the character command. Note
+		that the arguments are in a different order. Also, a character
+		created like this can only speak from Python due to parsing
+		limitations.
+	\item say(name, text, image = None): similar to the say command, but
+		with the option to use a side image.
+	\item show(tag, mod = None, at = None, transition = None): similar to
+		the show command. tag is the character's id, mod is the
+		emotion, at is the location and transition is the transition.
+	\item hide(tag, at = 'center', transition = None): similar to the hide
+		command.
+	\item question(qtype, last\_answer = None, params = ()): Ask a
+		question. last\_answer is given to the player as an option to
+		repeat it. params is a sequence of options for a choice or
+		longchoice question.
+	\item user: a dict with user information, including name and group.
+		This is not used much, because those two are the most useful
+		and they are also stored in their own variable.
+	\item name: the player's name.
+	\item group: the player's group.
+	\item self: the Connection object. This is mostly for internal use. It
+		has one useful member: answers, which contains previous answers
+		by the player.
+\end{enumerate}
+
+\section{Security Considerations}
+Lesverhaal runs scripts in a relatively closed environment, which makes it near
+impossible that a malfunctioning script will cause damage to the system.
+However, there is no protection against malicious scripts. The script can
+execute any code on the system that the user running lesverhaal can. Because of
+this, access to the sandbox must be explicitly enabled in the user's file, and
+this should only be done for trusted users.
+
+If scripts should be written by untrusted users, the entire program must be run
+in a protected environment, such as a virtual server.
+
+\section{Moving Images}
+Lesverhaal does not support images that keep moving while waiting for user
+input. However, it does support svg images, and the svg format supports simple
+animations. When an svg file which includes an animation is displayed, the
+animation is shown.
+
+\end{document}

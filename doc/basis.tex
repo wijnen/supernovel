@@ -1,0 +1,167 @@
+\documentclass{article}
+\newcommand\code[1]{\par\noindent\begin{texttt}#1\end{texttt}\par}
+\begin{document}
+\noindent\textbf{\Large Lesverhaal scripts schrijven --- de basis}
+
+\tableofcontents
+
+\section{Inleiding}
+Lesverhaal is een programma waarin verhalen kunnen worden gespeeld met vragen
+ertussen. Hieronder staat uitgelegd hoe je zelf zo'n verhaal kunt maken.
+
+Het verhaal bestaat uit plaatjes en mogelijk geluiden, en een script waarin
+beschreven wordt wat er allemaal gebeurt. Dat script is een tekst
+(.txt)-bestand.
+
+De meeste regels in dat bestand zijn commando's voor de computer. Als je er
+opmerkingen bij wilt zetten waar de computer niks mee moet doen, zet je een
+\verb-#- als eerste teken op de regel.
+
+\section{De achtergrond}
+Meestal wil je een achtergrond in beeld zetten tijdens het verhaal. Dat kan met
+het commando ``scene''. Je kunt zelf een achtergrond maken, of een van de
+standaard-achtergronden kiezen.
+\code{scene common/binnen.png\\
+scene common/buiten.svg}
+
+Je kan een nieuwe achtergrond instellen tijdens het verhaal. Als je dat doet,
+worden alle personen weggehaald.
+
+\section{Gesprekken}
+Het belangrijkste onderdeel van het verhaal zijn pratende personen. In het
+begin van het script moet je daarom de personen benoemen. Elke persoon heeft
+een code die je in het script gebruikt om iets met de persoon te doen, een plek
+waar de plaatjes te vinden zijn en een naam die in beeld komt als de persoon
+praat. Alleen die naam mag spaties bevatten, de rest niet. Als je voor Anja de
+code ``a'' gebruikt, krijg je dan:
+\code{character a common/Anja.svg Anja}
+
+\noindent Als je de characters gemaakt hebt, kan je ze in beeld zetten:
+\code{\# Zet Anja in beeld, in het midden.\\
+show a\\
+\# Zet Anja in beeld aan de linkerkant.\\
+show a at left\\
+\# Zet Anja in beeld aan de rechterkant.\\
+show a at right\\
+\# Haal Anja weer weg.\\
+hide a}
+
+\noindent Om iemand te laten praten, gebruik je de code en een dubbele punt, en
+dan de tekst:
+\code{a: Hallo, welkom bij dit verhaal!}
+
+\section{Vragen}
+Je kan gewoon een verhaal vertellen, maar het is meestal leuker om af en toe
+een vraag te stellen die de speler moet beantwoorden. Er zijn een heleboel
+soorten vragen, hier worden er twee beschreven.
+
+De vraag zelf stel je altijd op dezelfde manier: door een stuk tekst tussen
+aanhalingstekens. Dat mogen zowel dubbele als enkele aanhalingstekens zijn, als
+je maar dezelfde voor en na de vraag gebruikt. Als je een lange vraag hebt, wil
+je die meestal op meerdere regels intypen. Dat kan door te beginnen en eindigen
+met een regel met daarop drie aanhalingsteken (enkel of dubbel) en verder niks.
+Dit zijn wat voorbeelden:
+\code{'Wat is 1+1?'\\
+\\
+"Wat is 1-1?"\\
+\\
+'''\\
+Anja stapt op maandag in de bus. Ze heeft een groene jas aan.\\
+\\
+Hoe heet de buschauffeur?\\
+'''}
+
+Je kan opmaak gebruiken in de vraag (en trouwens ook in de gesproken tekst).
+Als je wilt weten hoe dat werkt, zoek dan op internet naar \verb-markdown-.
+
+Nadat je de vraag gesteld hebt, wil je er natuurlijk ook antwoord op krijgen.
+Elke vraag moet een code hebben. Net als bij de personen ziet de speler daar
+niks van; de codes zitten alleen in het script. Je mag elke code maar een keer
+gebruiken.
+
+Om een meerkeuzevraag te maken, gebruik je het commando \verb-choice-. Op de
+regels daarna moet je de mogelijke antwoorden opgeven, met het commando
+\verb-option-. Bijvoorbeeld:
+\code{choice richting\\
+option rechts\\
+option links}
+
+Hier is de code \verb-richting-. Er zijn twee keuzes.
+
+Over het algemeen zal je het verhaal willen aanpassen aan het antwoord van de
+speler. Dat kan met het commando \verb-goto-. Je kan daarmee direct verder gaan
+naar een ander stuk van het script. De plek waar je heen wilt springen moet je
+een label geven. Bijvoorbeeld:
+\code{a: Ik ga nu een stukje overslaan.\\
+goto verder\\
+a: Dit ga ik dus nooit zeggen.\\
+label verder\\
+a: Dit ga ik wel zeggen.}
+
+Het overslaan van een stuk script is natuurlijk niet zo interessant; dan kan je
+het beter niet in je script zetten. Je hebt er pas wat aan als je het
+combineert met \verb-if-.
+
+De code van de vraag (\verb-richting- in het voorbeeld hierboven) is het nummer
+van het gekozen antwoord. De nummers beginnen bij 0. (Dus hierboven is rechts 0
+en links is 1.) Met \verb-if- kan je een \verb-goto- doen, alleen als een
+bepaald antwoord gegeven is. (Je kan \verb-if- ook met andere commando's
+gebruiken.)
+\code{'Waar wil je heen?'\\
+choice richting\\
+option rechts\\
+option links\\
+\\
+if richting == 0:\\
+  goto rechts\\
+\\
+a: Je bent naar links gegaan!\\
+goto eind\\
+\\
+label rechts\\
+a: Je bent naar rechts gegaan!\\
+\\
+label eind\\
+a: Dit ga ik altijd zeggen.}
+
+De andere soort vraag is er een waar een getal als antwoord op gegeven moet worden.
+Die heet \verb-number-. De waarde daarvan is het getal dat is ingetypt. Je kan
+meestal het best een gebied aangeven om te controleren of het antwoord goed is:
+\code{'Wat is 1/3?'\\
+number eenderde\\
+if 0.332 < eenderde < 0.334:\\
+  a: Dat klopt!\\
+else:\\
+  a: Helaas, dat klopt niet.}
+
+Je ziet hier ook het commando \verb-else-. Dat kan je gebruiken om iets te doen
+als de \verb-if- juist niet wordt gedaan. Let op: zowel bij \verb-if- als bij
+\verb-else- moeten de commando's erna ingesprongen zijn.
+
+Je ziet ook dat kommagetallen in Engelse notatie moeten worden geschreven, dus
+met een punt in plaats van een komma.
+
+\section{Geluid}
+Je kan muziek en geluidseffecten afspelen tijdens het verhaal. Je gebruikt
+daarvoor de commando's \verb-music- en \verb-sound-. Als je muziek afspeelt,
+begint die vanzelf weer opnieuw aan het eind. Als je geen bestandsnaam opgeeft,
+stopt de muziek juist met afspelen.
+\code{music elvis.mp3\\
+a: Oh leuk, ik houd van Elvis Presley!\\
+sound kreun.mp3\\
+a: Maar nu heb ik er wel weer genoeg van...\\
+a: Ik zet hem weer uit.\\
+music\\
+a: Zo, die stilte is ook lekker.}
+
+\section{Beweging}
+Wanneer characters ergens heen gaan, kan dat met een beweging. Anders staan ze
+plotseling op hun plaats. Als je een character op het scherm zet, kan je
+daarbij \verb-with moveinleft- of \verb-with moveinright- gebruiken om het een
+beweging vanaf links of rechts te maken. Als je juist van het scherm af wilt
+bewegen, gebruik je \verb-with moveoutleft- of \verb-with moveoutright-. Bij
+een beweging van de ene naar de andere plaats gebruik je \verb-with move-.
+\code{show a at left with moveinright\\
+show a at right with move\\
+hide a with moveoutleft}
+\end{document}

@@ -5,3 +5,8 @@ sandbox_html/sandbox/
 lessen/
 users/
 __pycache__/
+doc/*.aux
+doc/*.log
+doc/*.pdf
+doc/*.toc
+doc/*.out
