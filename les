@@ -11,7 +11,7 @@ import time
 import fhs
 import websocketd
 from markdown import markdown
-config = fhs.init({'data': '.', 'port': '8002', 'admin-port': '8003', 'beamer-port': '8004', 'loglimit': 1, 'content': 'les-content', 'lazysave': False, 'secret': '', 'logfile': '', 'group': None})
+config = fhs.init({'data': '.', 'port': '8010', 'admin-port': '8011', 'beamer-port': '8012', 'loglimit': 1, 'content': 'les-content', 'lazysave': False, 'secret': '', 'logfile': '', 'group': None})
 from debug import debug
 import user
 # }}}

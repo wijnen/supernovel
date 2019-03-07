@@ -1,4 +1,5 @@
 var error, login, videodiv, video, contents, contentslist, question, navigation, spritebox, sandbox, speechbox, speaker, photo, speech;
+var music, sound;
 var is_replaced;
 var server;
 var kinetic_script = null;
@@ -363,6 +364,20 @@ function next_kinetic(force) {
 					next_kinetic(true);
 				}, cmd[1] * 1000);
 				return;
+			case 'music':
+				music.pause();
+				if (cmd[1] !== null) {
+					music.src = cmd[1];
+					music.play();
+				}
+				break;
+			case 'sound':
+				sound.pause();
+				if (cmd[1]) {
+					sound.src = cmd[1];
+					sound.play();
+				}
+				break;
 			default:
 				console.error('invalid kinetic command', cmd);
 		}
@@ -480,6 +495,8 @@ function init() {
 	speaker = document.getElementById('speaker');
 	photo = document.getElementById('photo');
 	speech = document.getElementById('speech');
+	music = document.getElementById('music');
+	sound = document.getElementById('sound');
 	server = Rpc(Connection, null, connection_lost);
 	kinetic_script = null;
 	kinetic_pos = 0;

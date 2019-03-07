@@ -633,6 +633,24 @@ class Connection: # {{{
 		self.user['section'] = ('sandbox', self.user['name'].lower())
 		self._start(self.user['section'], content.get_file(self.user['group'], self.user['section'], os.path.join(basedir, scriptname)))
 	# }}}
+	def sandbox_get(self, name): # {{{
+		if not self.user['sandbox']:
+			debug(1, 'User is not allowed to use sandbox')
+			raise PermissionError('User is not allowed to use sandbox')
+		basedir = os.path.join(config['data'], 'sandbox_html', config['sandbox'], self.user['group'].lower(), self.user['name'].lower())
+		d = os.path.dirname(name)
+		assert '.' not in d and os.path.exists(os.path.join(basedir, name))
+		return open(os.path.join(basedir, name)).read()
+	# }}}
+	def sandbox_put(self, name, contents): # {{{
+		if not self.user['sandbox']:
+			debug(1, 'User is not allowed to use sandbox')
+			raise PermissionError('User is not allowed to use sandbox')
+		basedir = os.path.join(config['data'], 'sandbox_html', config['sandbox'], self.user['group'].lower(), self.user['name'].lower())
+		d = os.path.dirname(name)
+		assert '.' not in d
+		open(os.path.join(basedir, name), 'w').write(contents)
+	# }}}
 
 def sandbox_post(connection): # {{{
 	'''Upload a new file for the sandbox.

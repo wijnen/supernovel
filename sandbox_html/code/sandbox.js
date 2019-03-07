@@ -30,6 +30,15 @@ function get_sandbox_list() {
 			button.type = 'button';
 			li.AddText(file);
 			if (file.substr(-7) == '.script') {
+				button = li.AddElement('button').AddText('Laden').AddEvent('click', function() {
+					var filename = this.filename;
+					server.call('sandbox_get', [filename], {}, function(data) {
+						document.getElementById('scriptname').value = filename.substr(0, filename.length - 7);
+						document.getElementById('script').value = data;
+					});
+				});
+				button.filename = file;
+				button.type = 'button';
 				button = li.AddElement('button').AddText('Spelen').AddEvent('click', function() {
 					server.call('sandbox_play', [this.filename]);
 				});
@@ -38,4 +47,10 @@ function get_sandbox_list() {
 			}
 		}
 	});
+}
+
+function put_script() {
+	var name = document.getElementById('scriptname').value + '.script';
+	var data = document.getElementById('script').value;
+	server.call('sandbox_put', [name, data], {}, get_sandbox_list);
 }

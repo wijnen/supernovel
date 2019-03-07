@@ -10,6 +10,8 @@
 		<link rel='stylesheet' href='code/style.css'/>
 	</head>
 	<body onkeypress='keypress(event)'>
+		<audio id='music' loop='loop'></audio>
+		<audio id='sound'></audio>
 		<div id='error'>
 			<h1>Een moment geduld</h1>
 			<p>De verbinding met de server wordt gemaakt.</p>
@@ -54,6 +56,8 @@
 			<form enctype='multipart/form-data' method='post'>
 				<ul id='files'></ul>
 				<p>Nieuw bestand: <input type='file' name='file'/> <input type='submit' name='new' value='Uploaden'/></p>
+				<p>Scriptnaam: <input id='scriptname' name='scriptname'/><button type='button' onclick='put_script()'>Opslaan</button></p>
+				<textarea name='script' id='script'></textarea>
 			</form>
 		</div>
 	</body>

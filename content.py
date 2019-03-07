@@ -317,18 +317,18 @@ def get_file(group, section, filename): # {{{
 						fulldir = config['content'] + '/' + group.lower() + '/' + section[0] + '/' + section[1] + '/' + imgdir + '/'
 				characters[tag] = (name, fulldir, ext)
 				continue
-			r = re.match(r'scene(\s+(.*?))?$', ln)
+			r = re.match(r'(scene|music|sound)(\s+(.*?))?\s*$', ln)
 			if r:
-				if r.group(2):
-					if r.group(2).startswith('common/'):
-						url = config['content'] + '/' + r.group(2)
+				if r.group(3):
+					if r.group(3).startswith('common/'):
+						url = config['content'] + '/' + r.group(3)
 					elif section[0] == 'sandbox':
-						fulldir = config['sandbox'] + '/' + group.lower() + '/' + section[1] + '/' + r.group(2)
+						url = config['sandbox'] + '/' + group.lower() + '/' + section[1] + '/' + r.group(3)
 					else:
-						url = config['content'] + '/' + group.lower() + '/' + section[0] + '/' + section[1] + '/' + r.group(2)
+						url = config['content'] + '/' + group.lower() + '/' + section[0] + '/' + section[1] + '/' + r.group(3)
 				else:
 					url = None
-				add_story_item(['scene', url])
+				add_story_item([r.group(1), url])
 				continue
 			r = re.match(r'(show|hide)\s+(\S+)(\s+(\S*))?(\s+at\s+(.*?))?(\s+with\s+(.*?))?$', ln)
 			if r:
