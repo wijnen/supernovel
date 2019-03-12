@@ -16,6 +16,7 @@ var Connection = {
 		is_replaced = true;
 		alert('De verbinding is overgenomen door een nieuwe login');
 		is_replaced = false;
+		Connection.cookie('', '', '');
 		init();
 	},
 	login: function() {
