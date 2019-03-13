@@ -698,7 +698,7 @@ def sandbox_post(connection): # {{{
 # Main program {{{
 server = websocketd.RPChttpd(config['port'], Connection, httpdirs = ['html'], tls = False)
 adminserver = websocketd.RPChttpd(config['admin-port'], Admin_Connection, httpdirs = ['admin_html'], tls = False)
-sandboxserver = websocketd.RPChttpd(config['sandbox-port'], Connection, httpdirs = ['sandbox_html'], tls = False, proxy = config['proxy'] or None)
+sandboxserver = websocketd.RPChttpd(config['sandbox-port'], Connection, httpdirs = ['sandbox_html'], tls = False, proxy = config['proxy'] or ())
 sandboxserver.post = sandbox_post
 print('servers are running')
 websocketd.fgloop()

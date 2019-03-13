@@ -16,6 +16,10 @@ body {
 	margin: 1em 1em;
 }
 
+#login {
+	text-align: center;
+}
+
 button.not(#navbutton) {
 	margin: 2em;
 }

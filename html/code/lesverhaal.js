@@ -480,6 +480,10 @@ function finish_moves() {
 	in_kinetic = false;
 }
 
+function strip(str) {
+	return str.replace(/^\s*|\s*$/g, '');
+}
+
 function init() {
 	error = document.getElementById('error');
 	login = document.getElementById('login');
@@ -522,6 +526,21 @@ function init() {
 		event.preventDefault();
 		next_kinetic(false);
 	});
+	
+	var c = document.cookie.split(';');
+	var crumbs = {};
+	for (var i = 0; i < c.length; ++i) {
+		var item = c[i].split('=');
+		for (var j = 0; j < item.length; ++j)
+			item[j] = strip(item[j]);
+		crumbs[item[0]] = item[1];
+	}
+	var loginname = document.getElementById('loginname');
+	var group = document.getElementById('class');
+	if ('name' in crumbs && loginname.value == '')
+		loginname.value = crumbs['name'];
+	if ('group' in crumbs && group.value == '')
+		group.value = crumbs['group'];
 }
 window.AddEvent('load', init);
 
