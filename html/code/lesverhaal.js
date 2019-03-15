@@ -31,6 +31,8 @@ var Connection = {
 		spritebox.style.display = 'none';
 		sandbox.style.display = 'none';
 		video.pause();
+		music.pause();
+		sound.pause();
 	},
 	contents: function(data) {
 		chapters.ClearAll();
@@ -72,7 +74,11 @@ var Connection = {
 		navigation.style.display = 'none';
 		spritebox.style.display = 'none';
 		sandbox.style.display = 'none';
+		console.info('pre-pause', video, music, sound);
 		video.pause();
+		music.pause();
+		sound.pause();
+		console.info('post-pause');
 		for (var s in question.style)
 			delete question.style[s];
 	},
@@ -241,6 +247,8 @@ var Connection = {
 		next_kinetic(true);
 	},
 	video: function(file) {
+		music.pause();
+		sound.pause();
 		kinetic_script = null;
 		video.src = file;
 		video.load();
@@ -502,6 +510,9 @@ function init() {
 	speech = document.getElementById('speech');
 	music = document.getElementById('music');
 	sound = document.getElementById('sound');
+	video.pause();
+	music.pause();
+	sound.pause();
 	server = Rpc(Connection, null, connection_lost);
 	kinetic_script = null;
 	kinetic_pos = 0;
@@ -571,6 +582,8 @@ function connection_lost() {
 		spritebox.style.display = 'none';
 		sandbox.style.display = 'none';
 		video.pause();
+		music.pause();
+		sound.pause();
 		server = Rpc(Connection, null, connection_lost);
 	}
 	catch (err) {

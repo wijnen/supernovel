@@ -12,6 +12,8 @@ Connection.main = function() {
 	spritebox.style.display = 'none';
 	sandbox.style.display = 'block';
 	video.pause();
+	music.pause();
+	sound.pause();
 	for (var s in question.style)
 		delete question.style[s];
 	get_sandbox_list();
