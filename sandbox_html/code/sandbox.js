@@ -19,6 +19,12 @@ Connection.main = function() {
 	get_sandbox_list();
 };
 
+Connection.error = function(msg) {
+	document.getElementById('sandbox-error').innerHTML = msg;
+	if (msg.length > 0)
+		alert('Let op: er zaten fouten in het script!');
+}
+
 function get_sandbox_list() {
 	server.call('sandbox_list', [], {}, function(file_list) {
 		files = document.getElementById('files').ClearAll();

@@ -331,9 +331,15 @@ class Connection: # {{{
 	# }}}
 	def start(self, section): # {{{
 		self.user['section'] = tuple(section)
-		self._start(section, content.get(self.user['group'], self.user['section']))
-	def _start(self, section, section_content):
-		self.user['full_section'], self.index, characters = section_content
+		self._start(section, content.get(self.user['group'], self.user['section']), False)
+	def _start(self, section, section_content, send_errors):
+		self.user['full_section'], self.index, characters, errors = section_content
+		if send_errors:
+			if len(errors) > 0:
+				errors = markdown('#Fouten\n' + '\n\n'.join(errors))
+			else:
+				errors = ''
+			self.remote.error.event(errors)
 		self.user['run_stack'] = [[self.user['full_section'], 0]]
 		self.user['characters'] = {}
 		self.user['last_path'] = None
@@ -632,7 +638,7 @@ class Connection: # {{{
 		d = os.path.dirname(scriptname)
 		assert '.' not in d and os.path.exists(os.path.join(basedir, scriptname))
 		self.user['section'] = ('sandbox', self.user['name'].lower())
-		self._start(self.user['section'], content.get_file(self.user['group'], self.user['section'], os.path.join(basedir, scriptname)))
+		self._start(self.user['section'], content.get_file(self.user['group'], self.user['section'], os.path.join(basedir, scriptname)), True)
 	# }}}
 	def sandbox_get(self, name): # {{{
 		if not self.user['sandbox']:

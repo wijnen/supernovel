@@ -31,7 +31,12 @@ def list(group): # {{{
 	return ret
 # }}}
 
-def parse_transition(transition, at): # {{{
+errors = []
+def parse_error(line, message):
+	errors.append('{}: {}'.format(line + 1, message))
+	debug(1, '{}: parse error: {}'.format(line + 1, message))
+
+def parse_transition(transition, at, line): # {{{
 	'''Parse a transition that was specified by "with".
 	Returns: (csskey, seconds, from, to)
 	'''
@@ -51,7 +56,7 @@ def parse_transition(transition, at): # {{{
 	elif transition == 'dissolve':
 		return ('opacity', timing, '0%', '100%')
 	else:
-		debug(1, 'unknown transition: {}'.format(repr(transition)))
+		parse_erorr(line, 'unknown transition: {}'.format(repr(transition)))
 		return ('left', 0, '', at)
 # }}}
 
@@ -66,11 +71,11 @@ def showhide(show, tag, mod, at, transition, characters, in_with, after, hiders,
 	if at in names:
 		at = names[at]
 	if tag not in characters:
-		debug(1, '{}: error: unknown character tag {}'.format(nr, tag))
+		parse_error(nr, 'onbekende character code {}'.format(tag))
 		return []
 	name, imgs, ext = characters[tag]
 	if transition:
-		transition = parse_transition(transition, at)
+		transition = parse_transition(transition, at, nr)
 	if in_with:
 		if not transition:
 			transition = in_with
@@ -78,7 +83,7 @@ def showhide(show, tag, mod, at, transition, characters, in_with, after, hiders,
 			transition = transition[:3] + (at,)
 		transition = (transition[0], in_with[1]) + transition[2:]
 	elif not transition:
-		transition = parse_transition(None, at)
+		transition = parse_transition(None, at, nr)
 	if show:
 		# When showing, define the image first.
 		url = imgs + (mod if mod else 'default') + ext
@@ -109,6 +114,8 @@ def showhide(show, tag, mod, at, transition, characters, in_with, after, hiders,
 # }}}
 
 def get_file(group, section, filename): # {{{
+	global errors
+	errors = []
 	with open(filename) as f:
 		parts = []
 		stack = [parts]
@@ -161,7 +168,7 @@ def get_file(group, section, filename): # {{{
 			ln = ln.rstrip()
 			if in_string:
 				if ln.strip() != '' and ln[:istack[-1]].strip() != '':
-					debug(1, '{}: indentation error in block string'.format(nr))
+					parse_error(nr, 'fout met inspringen in lange tekst')
 				ln = ln[istack[-1]:]
 				if ln.endswith(in_string):
 					ln = ln[:-len(in_string)].rstrip()
@@ -173,7 +180,7 @@ def get_file(group, section, filename): # {{{
 				continue
 			if in_comment:
 				if ln.strip() != '' and ln[:istack[-1]].strip() != '':
-					debug(1, '{}: indentation error in block comment'.format(nr))
+					parse_error(nr, 'fout met inspringen in lang commentaar')
 				if ln.endswith('###'):
 					in_comment = False
 				continue
@@ -194,7 +201,7 @@ def get_file(group, section, filename): # {{{
 				continue
 			if istack[-1] is None:
 				if len(istack) > 1 and ilevel <= istack[-2]:
-					debug(1, '{}: indented block expected'.format(nr))
+					parse_error(nr, 'regel moet ingesprongen zijn')
 					istack[-1] = istack[-2]
 				else:
 					istack[-1] = ilevel
@@ -210,7 +217,7 @@ def get_file(group, section, filename): # {{{
 				else:
 					stack.pop()
 			if ilevel != istack[-1]:
-				debug(1, '{}: unexpected indentation'.format(nr))
+				parse_error(nr, 'regel mag niet ingesprongen zijn')
 			if len(istack) >= 2 and istack[-2] is None:
 				istack[-2] = istack[-1]
 			if ln.strip().startswith("'''") or ln.strip().startswith('"""'):
@@ -238,7 +245,7 @@ def get_file(group, section, filename): # {{{
 			if r:
 				# Labels are only allowed at top level.
 				if len(stack) != 1:
-					debug(1, '{}: labels are only allowed at top level'.format(nr))
+					parse_error(nr, 'labels mogen niet ingesprongen zijn')
 					continue
 				name = r.group(1)
 				if name.startswith('.'):
@@ -267,10 +274,10 @@ def get_file(group, section, filename): # {{{
 			r = re.match(r'elif\s+(.+):$', ln)
 			if r:
 				if stack[-1][-1][0] != 'if':
-					debug(1, '{}: elif without if'.format(nr))
+					parse_error(nr, 'elif zonder if')
 					continue
 				if stack[-1][-1][-1] is not None:
-					debug(1, '{}: elif after else'.format(nr))
+					parse_error(nr, 'elif na else')
 					continue
 				stack[-1][-1].insert(-1, [r.group(1), []])
 				stack.append(stack[-1][-1][-2][1])
@@ -279,10 +286,10 @@ def get_file(group, section, filename): # {{{
 			r = re.match(r'else\s*:$', ln)
 			if r:
 				if stack[-1][-1][0] != 'if':
-					debug(1, '{}: else without if'.format(nr))
+					parse_error(nr, 'else zonder if')
 					continue
 				if stack[-1][-1][-1] is not None:
-					debug(1, '{}: else after else'.format(nr))
+					parse_erorr(nr, 'else na else')
 					continue
 				stack[-1][-1][-1] = []
 				stack.append(stack[-1][-1][-1])
@@ -343,8 +350,8 @@ def get_file(group, section, filename): # {{{
 			r = re.match(r'with\s+(\S+)\s*:$', ln)
 			if r:
 				if in_with:
-					debug(1, '{}: error: nested with blocks'.format(nr))
-				in_with = parse_transition(r.group(1), None)
+					parse_error(nr, 'with in with')
+				in_with = parse_transition(r.group(1), None, nr)
 				after = []
 				hiders = []
 				istack.append(None)
@@ -359,7 +366,7 @@ def get_file(group, section, filename): # {{{
 			if ln.startswith('$'):
 				if len(stack[-1]) > 0 and stack[-1][-1][0] == 'python':
 					if ln[1:1 + indent].strip() != '':
-						debug(1, '{}: python indentation must be at least the initial indentation'.format(nr))
+						parse_error(nr, 'het hele Python-blok moet minstens zover ingesprongen zijn als de eerste regel ervan')
 						continue
 				else:
 					indent = len(ln) - len(ln[1:].strip()) - 1
@@ -385,14 +392,14 @@ def get_file(group, section, filename): # {{{
 			r = re.match(r'option\s+(.*)$', ln)
 			if r:
 				if len(stack[-1]) < 1 or len(stack[-1][-1]) < 1 or stack[-1][-1][0] not in ('choice', 'longchoice'):
-					debug(1, '{}: option must immediately follow choice or longchoice'.format(nr))
+					parse_error(nr, 'option moet direct achter choice of longchoice komen')
 					continue
 				stack[-1][-1].append(r.group(1).strip())
 				continue
 			r = re.match(r'hidden\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+(.*)$', ln)
 			if r:
 				if len(stack[-1]) > 0 and len(stack[-1][-1]) > 0 and stack[-1][-1][0] == 'story':
-					debug(1, '{}: hidden answer must not appear in the middle of a story'.format(nr))
+					parse_error(nr, 'hidden mag niet in een tekstblok staan')
 					continue
 				stack[-1].append(['hidden', None, r.group(1), r.group(2)])
 				continue
@@ -407,7 +414,7 @@ def get_file(group, section, filename): # {{{
 					in_speech = True
 					istack.append(None)
 				continue
-			debug(1, 'invalid line: ' + ln)
+			parse_error(nr, 'onbegrijpelijke regel: ' + ln)
 		for label, src in labels:
 			src[2] = index[label]
 	# Create all paths.
@@ -422,7 +429,7 @@ def get_file(group, section, filename): # {{{
 				if item[-1] is not None:
 					make_paths(path + (i, len(item) - 2), item[-1])
 	make_paths((), parts)
-	return parts, index, characters
+	return parts, index, characters, errors
 # }}}
 
 def get(group, section): # {{{
