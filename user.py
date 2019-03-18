@@ -160,6 +160,8 @@ def save(user): # {{{
 		# Record answers.
 		if not user['nosave'] and 'answers' in user:
 			for s in user['answers']:
+				if s[0] == 'sandbox':
+					continue
 				section = user['answers'][s]
 				for q in section:
 					question = section[q]
