@@ -134,7 +134,7 @@ class Admin_Connection: # {{{
 		'''Show questions for one section.'''
 		section = tuple(section)
 		self.refresh = lambda: self.show_section(group, section)
-		parts, index, characters = content.get(group, section)
+		parts, index, characters, errors = content.get(group, section)
 		questions = []
 		prev = ['']
 		def add_block(block):
@@ -332,7 +332,8 @@ class Connection: # {{{
 	def start(self, section): # {{{
 		self.user['section'] = tuple(section)
 		self._start(section, content.get(self.user['group'], self.user['section']), False)
-	def _start(self, section, section_content, send_errors):
+	# }}}
+	def _start(self, section, section_content, send_errors): # {{{
 		self.user['full_section'], self.index, characters, errors = section_content
 		if send_errors:
 			if len(errors) > 0:
@@ -386,7 +387,7 @@ class Connection: # {{{
 		return True
 	# }}}
 	def _add_character(self, code, name, imgs, ext): # {{{
-		self.user['characters'][code] = [name, imgs, ext]
+		self.user['characters'][code] = [name, imgs, ext, 'default']
 		self.user['variables'][code] = lambda text: self._say(self.user['characters'][code][0], text, image = self.user['characters'][code][1] + 'side' + self.user['characters'][code][2] if self.user['characters'][code][2] else None)
 	# }}}
 	def _say(self, name, text, image = None): # {{{
@@ -508,6 +509,15 @@ class Connection: # {{{
 			# ('style', tag, key, value)
 			if item[0] == 'style':
 				return (item[0], item[1], item[2], self._parse_text(item[3]))
+			if item[0].endswith('image'):
+				name, imgs, ext, current = self.user['characters'][item[1]]
+			if item[0] == 'temp-image':
+				return ('image', item[1], item[2] and imgs + item[2] + ext)
+			elif item[0] == 'image':
+				self.user['characters'][item[1]][3] = item[2]
+				return ('image', item[1], item[2] and imgs + item[2] + ext)
+			elif item[0] == 'restore-image':
+				return ('image', item[1], current and imgs + current + ext)
 			# ('scene', url)
 			# ('image', tag, url)
 			# ('wait', seconds)
@@ -603,7 +613,7 @@ class Connection: # {{{
 	# }}}
 	def sandbox_list(self): # {{{
 		if not self.user['sandbox']:
-			debug(1, 'User is not allowed to use sandbox')
+			debug(1, 'User {}:{} is not allowed to use sandbox'.format(self.user['name'], self.user['group']))
 			raise PermissionError('User is not allowed to use sandbox')
 		basedir = os.path.join(config['data'], 'sandbox_html', config['sandbox'], self.user['group'].lower(), self.user['name'].lower())
 		if not os.path.exists(basedir):
@@ -656,6 +666,7 @@ class Connection: # {{{
 		basedir = os.path.join(config['data'], 'sandbox_html', config['sandbox'], self.user['group'].lower(), self.user['name'].lower())
 		d = os.path.dirname(name)
 		assert '.' not in d
+		os.makedirs(basedir, exist_ok = True)
 		open(os.path.join(basedir, name), 'w').write(contents)
 	# }}}
 
@@ -677,7 +688,7 @@ def sandbox_post(connection): # {{{
 	u = user.users[(kv['name'], kv['group'])]
 	if not u['sandbox']:
 		debug(1, 'User is not allowed to use sandbox')
-		sandboxserver.reply(connection, 403, 'User is not allowed to use sandbox', 'text/plain;charset=utf-8')
+		sandboxserver.reply(connection, 403, b'User is not allowed to use sandbox', 'text/plain;charset=utf-8')
 		return False
 	# Credentials are good, save the files.
 	basedir = os.path.join(config['data'], 'sandbox_html', config['sandbox'], kv['group'].lower(), kv['name'].lower())

@@ -11,6 +11,8 @@ from debug import debug
 def list(group): # {{{
 	'''Get a list of available sections.'''
 	content_dir = os.path.join(config['data'], 'users', group.lower(), 'Content')
+	if not os.path.exists(content_dir):
+		return {}
 	ret = {}
 	for chapter in os.listdir(content_dir):
 		cpath = os.path.join(content_dir, chapter)
@@ -36,7 +38,7 @@ def parse_error(line, message):
 	errors.append('{}: {}'.format(line + 1, message))
 	debug(1, '{}: parse error: {}'.format(line + 1, message))
 
-def parse_transition(transition, at, line): # {{{
+def parse_transition(show, transition, at, line): # {{{
 	'''Parse a transition that was specified by "with".
 	Returns: (csskey, seconds, from, to)
 	'''
@@ -46,17 +48,28 @@ def parse_transition(transition, at, line): # {{{
 	if transition == 'move':
 		return ('left', timing, '', at)
 	elif transition == 'moveinleft':
+		if not show:
+			parse_error(line, 'moveinleft is only allowed with show')
 		return ('left', timing, '-20%', at)
 	elif transition == 'moveinright':
+		if not show:
+			parse_error(line, 'moveinright is only allowed with show')
 		return ('left', timing, '120%', at)
 	elif transition == 'moveoutleft':
+		if not show:
+			parse_error(line, 'moveoutleft is only allowed with hide')
 		return ('left', timing, '', '-20%')
 	elif transition == 'moveoutright':
+		if not show:
+			parse_error(line, 'moveoutright is only allowed with hide')
 		return ('left', timing, '', '120%')
 	elif transition == 'dissolve':
-		return ('opacity', timing, '0%', '100%')
+		if show:
+			return ('opacity', timing, '0%', '100%')
+		else:
+			return ('opacity', timing, '100%', '0%')
 	else:
-		parse_erorr(line, 'unknown transition: {}'.format(repr(transition)))
+		parse_error(line, 'unknown transition: {}'.format(repr(transition)))
 		return ('left', 0, '', at)
 # }}}
 
@@ -75,18 +88,15 @@ def showhide(show, tag, mod, at, transition, characters, in_with, after, hiders,
 		return []
 	name, imgs, ext = characters[tag]
 	if transition:
-		transition = parse_transition(transition, at, nr)
+		transition = parse_transition(show, transition, at, nr)
 	if in_with:
 		if not transition:
-			transition = in_with
-		if transition[3] is None:
-			transition = transition[:3] + (at,)
-		transition = (transition[0], in_with[1]) + transition[2:]
+			transition = parse_transition(show, in_with[0], at, in_with[1])
 	elif not transition:
-		transition = parse_transition(None, at, nr)
+		transition = parse_transition(show, None, at, nr)
 	if show:
 		# When showing, define the image first.
-		url = imgs + (mod if mod else 'default') + ext
+		url = mod if mod else 'default'
 		ret.append(['image', tag, url])
 	if transition[2]:
 		# There is a from position specified.  Place the image there without a transition.
@@ -148,10 +158,7 @@ def get_file(group, section, filename): # {{{
 			if pending_emote[0] is None:
 				return
 			p = pending_emote[0]
-			# If the new item is a question, don't bother restoring the image.
-			if isinstance(item, str):
-				pass
-			elif item is not None and item[0] == 'image':
+			if item is not None and item[0] == 'image':
 				if item[1] == p:
 					# My image is set. Don't change to pending.
 					pending_emote[0] = None
@@ -163,7 +170,7 @@ def get_file(group, section, filename): # {{{
 				pending_emote[0] = None
 				name, imgs, ext = characters[p]
 				if imgs and ext:
-					add_story_item(['image', p, imgs + 'default' + ext])
+					add_story_item(['restore-image', p])
 		for nr, ln in enumerate(f):
 			ln = ln.rstrip()
 			if in_string:
@@ -351,7 +358,7 @@ def get_file(group, section, filename): # {{{
 			if r:
 				if in_with:
 					parse_error(nr, 'with in with')
-				in_with = parse_transition(r.group(1), None, nr)
+				in_with = (r.group(1), nr)
 				after = []
 				hiders = []
 				istack.append(None)
@@ -407,9 +414,10 @@ def get_file(group, section, filename): # {{{
 			if r and r.group(1) in characters:
 				name, imgs, ext = characters[r.group(1)]
 				if r.group(2) is not None:
-					add_story_item(['image', r.group(1), imgs + r.group(2) + ext])
+					add_story_item(['temp-image', r.group(1), r.group(2)])
 				add_story_item(['text', name, r.group(3), imgs + 'side' + ext if imgs else None])
-				pending_emote[0] = r.group(1)
+				if r.group(2) is not None:
+					pending_emote[0] = r.group(1)
 				if not r.group(3):
 					in_speech = True
 					istack.append(None)

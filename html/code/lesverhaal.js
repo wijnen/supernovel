@@ -322,7 +322,7 @@ function next_kinetic(force) {
 				for (var i = 0; i < sprites.length; ++i)
 					kill_sprite(sprites[i]);
 				//console.info('scene', cmd[1]);
-				document.getElementsByTagName('body')[0].style.backgroundImage = 'url(' + encodeURI(cmd[1]) + ')';
+				document.getElementsByTagName('body')[0].style.backgroundImage = cmd[1] === null ? '' : 'url(' + encodeURI(cmd[1]) + ')';
 				break;
 			case 'style':
 				//console.info(preparing_animation, 'style', cmd[1], cmd[2], cmd[3]);
