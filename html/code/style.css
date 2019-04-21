@@ -45,7 +45,7 @@ button.not(#navbutton) {
 	position: fixed;
 	left: 0px;
 	right: 0px;
-	bottom: 0px;
+	bottom: 9em;
 	top: 2em;
 }
 
@@ -82,8 +82,8 @@ button.not(#navbutton) {
 }
 
 .sprite {
-	position: fixed;
-	bottom: 9em;
+	position: absolute;
+	bottom: 0%;
 }
 
 #question {

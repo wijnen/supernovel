@@ -387,17 +387,18 @@ class Connection: # {{{
 		return True
 	# }}}
 	def _add_character(self, code, name, imgs, ext): # {{{
-		self.user['characters'][code] = [name, imgs, ext, 'default']
-		self.user['variables'][code] = lambda text: self._say(self.user['characters'][code][0], text, image = self.user['characters'][code][1] + 'side' + self.user['characters'][code][2] if self.user['characters'][code][2] else None)
+		self.user['characters'][code] = {'name': name, 'imgs': imgs, 'ext': ext, 'mood': 'default', 'x': 0, 'y': 0}
+		c = self.user['characters'][code]
+		self.user['variables'][code] = lambda text: self._say(c['name'], text, image = c['imgs'] + 'side' + c['ext'] if c['ext'] else None)
 	# }}}
 	def _say(self, name, text, image = None): # {{{
 		self.user['text_buffer'].append(('text', name, self._parse_text(text), image))
 	# }}}
-	def _show(self, tag, mod = None, at = 'center', transition = None): # {{{
-		self._run_item(['story', None, content.showhide(True, tag, mod, at, transition, self.user['characters'], None, None)])
+	def _show(self, tag, mood = None, at = 'center', transition = None, timing = None): # {{{
+		self._run_item(['story', None, content.showhide(True, tag, mood, at, transition, timing, False, None)])
 	# }}}
-	def _hide(self, tag, at = 'center', transition = None): # {{{
-		self._run_item(['story', None, content.showhide(False, tag, None, at, transition, self.user['characters'], None, None)])
+	def _hide(self, tag, at = 'center', transition = None, timing = None): # {{{
+		self._run_item(['story', None, content.showhide(False, tag, None, at, transition, timing, False, None)])
 	# }}}
 	def _run(self): # {{{
 		self.user['text_buffer'] = []
@@ -499,27 +500,37 @@ class Connection: # {{{
 		self.user['run_stack'][-1][1] += 1
 		return False
 	# }}}
+	def _update_sprite(self, tag, data): # {{{
+		for item in ('x', 'y', 'mood'):
+			if item in data:
+				self.user['characters'][tag][item] = data[item]
+		if 'mood' in data:
+			c = self.user['characters'][tag]
+			data['url'] = c['imgs'] + data.pop('mood') + c['ext']
+	# }}}
 	def _handle_story(self, q, text_buffer, last_answer = None, *args): # {{{
 		def handle(item):
 			if isinstance(item, str):
 				return markdown(item)
+
 			# ('text', text, image_url)
 			if item[0] == 'text':
 				return (item[0], item[1], markdown(item[2]), item[3])
-			# ('style', tag, key, value)
-			if item[0] == 'style':
-				return (item[0], item[1], item[2], self._parse_text(item[3]))
+
+			# ('sprite', tag, {x, y, rotation, scale, mood, animation})
+			if item[0] == 'sprite':
+				data = item[2].copy()
+				self._update_sprite(item[1], data)
+				return (item[0], item[1], data)
 			if item[0].endswith('image'):
-				name, imgs, ext, current = self.user['characters'][item[1]]
-			if item[0] == 'temp-image':
-				return ('image', item[1], item[2] and imgs + item[2] + ext)
-			elif item[0] == 'image':
-				self.user['characters'][item[1]][3] = item[2]
-				return ('image', item[1], item[2] and imgs + item[2] + ext)
-			elif item[0] == 'restore-image':
-				return ('image', item[1], current and imgs + current + ext)
+				c = self.user['characters'][item[1]]
+				if item[0] == 'temp-image':
+					return ('sprite', item[1], {'url': item[2] and c['imgs'] + item[2] + c['ext']})
+				elif item[0] == 'restore-image':
+					return ('sprite', item[1], {'url': current and c['imgs'] + current + c['ext']})
+
 			# ('scene', url)
-			# ('image', tag, url)
+			# ('animation', tag, anim)
 			# ('wait', seconds)
 			return item
 		self.remote.story.event(q, [handle(x) for x in text_buffer], last_answer, *args)

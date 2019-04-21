@@ -7,9 +7,10 @@ var kinetic_pos = 0;
 var kinetic_sprites = {};
 var kinetic_end = null;
 var kinetic_history = [];
-var classes = {};
 var preparing_animation;
 var show_question = false;
+var doing_animation;
+var animations = {};
 
 var Connection = {
 	replaced: function() {
@@ -64,6 +65,7 @@ var Connection = {
 		}
 	},
 	main: function() {
+		animations = {};
 		kinetic_script = null;
 		error.style.display = 'none';
 		login.style.display = 'none';
@@ -74,11 +76,9 @@ var Connection = {
 		navigation.style.display = 'none';
 		spritebox.style.display = 'none';
 		sandbox.style.display = 'none';
-		console.info('pre-pause', video, music, sound);
 		video.pause();
 		music.pause();
 		sound.pause();
-		console.info('post-pause');
 		for (var s in question.style)
 			delete question.style[s];
 	},
@@ -270,11 +270,12 @@ var Connection = {
 };
 
 // Script is a list of instructions:
+// 'text': question text.
 // ['text', speaker, text, image]: speech. with empty speaker, hide speaker box; empty image, hide photo; empty all, hide all.
 // ['scene', url]: set new background and remove all sprites. With no url, clear all.
-// ['style', tag, css_tag, value]: set sprite style.
-// ['image', tag, url]: set sprite image.
-// ['pre-wait']: wait for next animation frame, to make sure all prepared style attributes are applied.
+// ['sprite', tag, null]: hide sprite.
+// ['sprite', tag, {position, rotation, scale, url, animation}]: set sprite properties and optionally start animation.
+// ['animation', tag, [{initial}, {time, position, rotation, scale, url}, ..., next]]: define canned animation.
 // ['wait', seconds]: wait specified time before next step.
 
 function home() {
@@ -299,7 +300,6 @@ function next_kinetic(force) {
 		question.style.display = 'none';
 		switch (cmd[0]) {
 			case 'text':
-				finish_moves();
 				speaker.innerHTML = cmd[1];
 				speaker.style.display = (cmd[1] ? 'inline' : 'none');
 				speech.innerHTML = cmd[2];
@@ -324,52 +324,29 @@ function next_kinetic(force) {
 				//console.info('scene', cmd[1]);
 				document.getElementsByTagName('body')[0].style.backgroundImage = cmd[1] === null ? '' : 'url(' + encodeURI(cmd[1]) + ')';
 				break;
-			case 'style':
-				//console.info(preparing_animation, 'style', cmd[1], cmd[2], cmd[3]);
-				if (cmd[2] == 'transition') {
-					kinetic_sprites[cmd[1]].style.transition = cmd[3];
+			case 'sprite':
+				var d = new Date();
+				var n = d.getTime();
+				if (cmd[2] === null) {
+					// Hide sprite.
+					kill_sprite(kinetic_sprites[cmd[1]]);
 					break;
 				}
-				classes[cmd[1]][0].style[cmd[2]] = (preparing_animation ? classes[cmd[1]][1].style[cmd[2]] : cmd[3]);
-				kinetic_sprites[cmd[1]].RemoveClass('moved-' + cmd[1]);
-				classes[cmd[1]][1].style[cmd[2]] = cmd[3];
+				cmd[2].time = 0;
+				var anim = null;
+				if (cmd[2].animation !== undefined)
+					anim = cmd[2].animation;
+				delete cmd[2].animation;
+				console.info(cmd[1], kinetic_sprites);
+				kinetic_sprites[cmd[1]].anim = [{time: n}, cmd[2], anim];
+				if (!doing_animation)
+					screen_update();
 				break;
-			case 'image':
-				//console.info('image', cmd[1], cmd[2]);
-				if (!(cmd[1] in kinetic_sprites))
-					new_sprite(cmd[1]);
-				if (cmd[2]) {
-					kinetic_sprites[cmd[1]].src = cmd[2];
-					classes[cmd[1]][0].style.marginLeft = '-' + (kinetic_sprites[cmd[1]].width / 2) + 'px';
-				}
-				else
-					kill_sprite(cmd[1]);
-				break;
-			case 'pre-wait':
-				//console.info('pre-wait');
-				preparing_animation = true;
-				if (force != 'finish') {
-					// Wait two animation frames, just to be sure.
-					requestAnimationFrame(function() {
-						requestAnimationFrame(function() {
-							next_kinetic(true);
-						});
-					});
-					return;
-				}
+			case 'animation':
+				animations[cmd[1]] = cmd[2];
 				break;
 			case 'wait':
-				//console.info('wait');
-				for (var s in kinetic_sprites) {
-					kinetic_sprites[s].AddClass('moved-' + s);
-				}
-				preparing_animation = false;
-				if (force == 'finish') {
-					finish_moves();
-					break;
-				}
 				setTimeout(function() {
-					finish_moves();
 					next_kinetic(true);
 				}, cmd[1] * 1000);
 				return;
@@ -428,15 +405,8 @@ function prev_kinetic(full) {
 	for (var spr in data[1]) {
 		new_sprite(spr);
 		kinetic_sprites[spr].src = data[1][spr][0];
-		var s = classes[spr];
-		for (var i = 0; i < 2; ++i) {
-			s[i].style.left = data[1][spr][1];
-			s[i].style.top = data[1][spr][2];
-			s[i].style.right = data[1][spr][3];
-			s[i].style.bottom = data[1][spr][4];
-			s[i].style.width = data[1][spr][5];
-			s[i].style.height = data[1][spr][6];
-		}
+		kinetic_sprites[spr].style.left = data[1][spr][1];
+		kinetic_sprites[spr].style.bottom = data[1][spr][2];
 	}
 	// Set story position.
 	kinetic_pos = data[2];
@@ -444,21 +414,11 @@ function prev_kinetic(full) {
 }
 
 function new_sprite(tag) {
-	kinetic_sprites[tag] = spritebox.AddElement('img', 'sprite ' + 'base-' + tag);
+	kinetic_sprites[tag] = spritebox.AddElement('img', 'sprite');
 	kinetic_sprites[tag].AddEvent('load', function() {
-		if (kinetic_sprites[tag] !== undefined)
-			classes[tag][0].style.marginLeft = '-' + (kinetic_sprites[tag].width / 2) + 'px';
+		console.info('load', tag);
+		kinetic_sprites[tag].style.marginLeft = '-' + (kinetic_sprites[tag].width / 2) + 'px';
 	});
-	// If classes are already created, we're done.
-	if (tag in classes)
-		return;
-	// Create two classes for transitions.
-	var names = ['.base-' + tag, '.base-' + tag + '.moved-' + tag];
-	classes[tag] = [];
-	for (var i = 0; i < names.length; ++i) {
-		document.styleSheets[0].insertRule(names[i] + ' {}', i);
-		classes[tag].push(document.styleSheets[0].cssRules[i]);
-	}
 }
 
 function kill_sprite(tag) {
@@ -467,25 +427,8 @@ function kill_sprite(tag) {
 }
 
 function store_sprite(tag) {
-	var s = classes[tag][0].style;
-	return [kinetic_sprites[tag].src, s.left, s.top, s.right, s.bottom, s.width, s.height];
-}
-
-function finish_moves() {
-	for (var s in kinetic_sprites) {
-		for (var st in classes[s][1].style) {
-			try {
-				classes[s][0].style[st] = classes[s][1].style[st];
-			}
-			catch(e) {
-				//console.warn('error finishing move:', s, st, e, classes[s][0].style);
-			}
-		}
-		// restore margin-left.
-		classes[s][0].style.marginLeft = '-' + (kinetic_sprites[s].width / 2) + 'px';
-		kinetic_sprites[s].RemoveClass('moved-' + s);
-	}
-	in_kinetic = false;
+	var s = kinetic_sprites[tag].style;
+	return [kinetic_sprites[tag].src, s.left, s.bottom];
 }
 
 function strip(str) {
@@ -620,6 +563,95 @@ function speed() {
 function video_done() {
 	video.pause();
 	server.call('video_done', []);
+}
+
+function Anim(sprite, time, tag) {
+	var anim = animations[tag];
+	if (anim === undefined) {
+		console.error('using undefined animation', anim);
+		return null;
+	}
+	var ret = [{time: time}];
+	for (var a = 0; a < anim.length - 1; ++a) {
+		var segment = {};
+		for (var i in anim[a])
+			segment[i] = anim[a][i];
+		ret.push(segment);
+	}
+	ret.push(anim[anim.length - 1]);
+	return ret;
+}
+
+function screen_update() {
+	var d = new Date();
+	var n = d.getTime();
+	doing_animation = false;
+	for (var s in kinetic_sprites) {
+		var sprite = kinetic_sprites[s];
+		if (sprite.anim === null)
+			continue;
+		// s = sprite tag; sprite.anim = [{initial}, {time, url, position, rotation, scale}, ..., next_animation]
+		// time is the duration of this segment.
+		while (sprite.anim.length > 2 && sprite.anim[0]['time'] + sprite.anim[1]['time'] <= n) {
+			sprite.anim[1]['time'] += sprite.anim[0]['time'];
+			var old = sprite.anim[0];
+			var current = sprite.anim[1];
+			if (old.position === undefined && current.position !== undefined) {
+				sprite.style.left = current.position[0] + '%';
+				sprite.style.bottom = current.position[1] + '%';
+			}
+			var transform = '';
+			if (old.rotation === undefined && current.rotation !== undefined) {
+				transform += 'rotate(' + current.rotation + 'deg) ';
+			}
+			if (old.scale === undefined && current.scale !== undefined) {
+				transform += 'scale(' + current.scale + ')';
+			}
+			if (transform != '')
+				sprite.style.transform = transform;
+			if (old.url === undefined && current.url !== undefined) {
+				sprite.src = current.url;
+			}
+			sprite.anim.splice(0, 1);
+		}
+		if (sprite.anim.length > 2) {
+			doing_animation = true;
+			var old = sprite.anim[0];
+			var current = sprite.anim[1];
+			var f = (n - old['time']) / current['time'];
+			if (old.position !== undefined && current.position !== undefined) {
+				// pos = old + f * (current - old).
+				sprite.style.left = old_position[0] + (current_position[0] - old_position[0]) * f + '%';
+				sprite.style.bottom = old_position[1] + (current_position[1] - old_position[1]) * f + '%';
+			}
+			var transform = '';
+			if (old.rotation !== undefined && current.rotation !== undefined) {
+				// rot = old + f * (current - old).
+				transform += 'rotate(' + (old.rotation + (current.rotation - old.rotation) * f) + 'deg) ';
+			}
+			if (old.scale !== undefined && current.scale !== undefined) {
+				// scale = old + f * (current - old).
+				transform += 'scale(' + (old.scale + (current.scale - old.scale) * f) + ')';
+			}
+			if (transform != '')
+				sprite.style.transform = transform;
+			if (old.url !== undefined && current.url !== undefined) {
+				// Handle dissolve transform.
+			}
+		}
+		else {
+			var next = sprite.anim[1];
+			if (next === null) {
+				sprite.anim = null;
+				continue;
+			}
+			sprite.anim = Anim(sprite, n, next);
+			if (sprite.anim !== null)
+				doing_animation = true;
+		}
+	}
+	if (doing_animation)
+		requestAnimationFrame(screen_update);
 }
 
 // vim: set foldmethod=marker foldmarker={,} :

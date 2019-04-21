@@ -35,91 +35,105 @@ def list(group): # {{{
 
 errors = []
 def parse_error(line, message):
-	errors.append('{}: {}'.format(line + 1, message))
+	errors.append('{}: {}'.format(line + 1 if line is not None else '(from code)', message))
 	debug(1, '{}: parse error: {}'.format(line + 1, message))
 
-def parse_transition(show, transition, at, line): # {{{
+def parse_transition(show, transition, timing, in_in, mood, hat, vat, line): # {{{
 	'''Parse a transition that was specified by "with".
-	Returns: (csskey, seconds, from, to)
+	Returns: animation for the transition:
+	[{time: 0}, {time, x, y, rotation, scale, mood}, ...]
 	'''
-	timing = .5
+	if timing is None:
+		if in_in:
+			timing = in_in[0]
+		else:
+			timing = .5
+	ret = [{'time': 0}, {'time': timing}]
+	if hat is not None:
+		ret[-1]['x'] = hat
+	if vat is not None:
+		ret[-1]['y'] = vat
+	if mood is not None:
+		ret[-1]['mood'] = mood
 	if not transition:
-		return ('left', 0, '', at)
+		ret[-1]['time'] = 0
+		return ret
 	if transition == 'move':
-		return ('left', timing, '', at)
+		return ret
 	elif transition == 'moveinleft':
 		if not show:
 			parse_error(line, 'moveinleft is only allowed with show')
-		return ('left', timing, '-20%', at)
+		ret.append({'time': timing})
+		ret[-1]['x'] = ret[-2]['x'] if 'x' in ret[-2] else 50
+		ret[-2]['x'] = -20
+		return ret
 	elif transition == 'moveinright':
 		if not show:
 			parse_error(line, 'moveinright is only allowed with show')
-		return ('left', timing, '120%', at)
+		ret.append({'time': timing})
+		ret[-1]['x'] = ret[-2]['x'] if 'x' in ret[-2] else 50
+		ret[-2]['x'] = 120
+		return ret
 	elif transition == 'moveoutleft':
 		if not show:
 			parse_error(line, 'moveoutleft is only allowed with hide')
-		return ('left', timing, '', '-20%')
+		ret[-1][x] = 120
+		return ret
 	elif transition == 'moveoutright':
 		if not show:
 			parse_error(line, 'moveoutright is only allowed with hide')
-		return ('left', timing, '', '120%')
-	elif transition == 'dissolve':
-		if show:
-			return ('opacity', timing, '0%', '100%')
-		else:
-			return ('opacity', timing, '100%', '0%')
+		ret[-1][x] = -20
+		return ret
 	else:
 		parse_error(line, 'unknown transition: {}'.format(repr(transition)))
-		return ('left', 0, '', at)
+		ret[-1]['time'] = 0
+		return ret
 # }}}
 
-def showhide(show, tag, mod, at, transition, characters, in_with, after, hiders, nr): # {{{
+def showhide(show, tag, mood, at, transition, timing, in_in, nr): # {{{
 	'''Create event list for showing or hiding a character.'''
 	ret = []
-	if not in_with:
-		after = []
 	if not at:
 		at = 'center'
-	names = {'left': '30%', 'right': '70%', 'center': '50%'}
-	if at in names:
-		at = names[at]
-	if tag not in characters:
-		parse_error(nr, 'onbekende character code {}'.format(tag))
-		return []
-	name, imgs, ext = characters[tag]
+	if ',' in at:
+		hat, vat = at.split(',', 1)
+	else:
+		hat = at
+		vat = 'bottom'
+	hnames = {'left': 30, 'right': 70, 'center': 50}
+	if hat in hnames:
+		hat = hnames[hat]
+	else:
+		try:
+			assert hat[-1] == '%'
+			hat = float(hat[:-1])
+		except:
+			parse_error(nr, 'foute horizontale positie: {}'.format(hat))
+			hat = 50
+	vnames = {'top': 70, 'bottom': 0}
+	if vat in vnames:
+		vat = vnames[vat]
+	else:
+		try:
+			assert vat[-1] == '%'
+			vat = float(vat[:-1])
+		except:
+			parse_error(nr, 'foute vertikale positie: {}'.format(vat))
+			vat = 0
 	if transition:
-		transition = parse_transition(show, transition, at, nr)
-	if in_with:
-		if not transition:
-			transition = parse_transition(show, in_with[0], at, in_with[1])
-	elif not transition:
-		transition = parse_transition(show, None, at, nr)
-	if show:
-		# When showing, define the image first.
-		url = mod if mod else 'default'
-		ret.append(['image', tag, url])
-	if transition[2]:
-		# There is a from position specified.  Place the image there without a transition.
-		ret.append(['style', tag, 'transition', ''])
-		ret.append(['style', tag, transition[0], transition[2]])
-	if transition[1]:
-		# Timing is specified.  Apply it.
-		after.append(['style', tag, 'transition', transition[0] + ' ' + str(transition[1]) + 's'])
-	if show or transition[1]:
-		# This is not an instantaneous hide.  Set the position.
-		after.append(['style', tag, transition[0], transition[3]])
-	if transition[1] and not in_with:
-		# Timing is specified.  Wait for it.
-		after.append(['wait', transition[1]])
+		transition = parse_transition(show, transition, timing, in_in, mood, hat, vat, nr)
+	if show and not transition:
+		t = parse_transition(show, None, 0, False, mood, hat, vat, nr)
+		ret.append(['sprite', tag, t[-1]])
+		del t[-1]['time']
+		return ret
+	if transition:
+		ret.append(['animation', '', transition])
+		ret.append(['sprite', tag, {'animation': ''}])
+		if not in_in:
+			ret.append(['wait', transition[-1]['time']])
 	if not show:
-		# When hiding, (un)define the image last.
-		if in_with:
-			hiders.append(['image', tag, ''])
-		else:
-			after.append(['image', tag, ''])
-	if not in_with:
-		ret.append(['pre-wait'])
-		ret.extend(after)
+		ret.append(['sprite', tag, None])
 	return ret
 # }}}
 
@@ -137,9 +151,7 @@ def get_file(group, section, filename): # {{{
 		in_string = False
 		in_comment = False
 		in_speech = False
-		in_with = False
-		after = []
-		hiders = []
+		in_in = False
 		pending_emote = [None]
 		def add_story_item(item = None):
 			finish_story_item(item)
@@ -158,7 +170,7 @@ def get_file(group, section, filename): # {{{
 			if pending_emote[0] is None:
 				return
 			p = pending_emote[0]
-			if item is not None and item[0] == 'image':
+			if item is not None and item[0] == 'sprite' and 'mood' in item[2]:
 				if item[1] == p:
 					# My image is set. Don't change to pending.
 					pending_emote[0] = None
@@ -214,13 +226,10 @@ def get_file(group, section, filename): # {{{
 					istack[-1] = ilevel
 			while ilevel < istack[-1]:
 				istack.pop()
-				if in_with:
+				if in_in:
 					# Finish animation.
-					stack[-1][-1][2].append(['pre-wait'])
-					stack[-1][-1][2].extend(after)
-					stack[-1][-1][2].append(['wait', in_with[1]])
-					stack[-1][-1][2].extend(hiders)
-					in_with = False
+					stack[-1][-1][2].append(['wait', in_in[0]])
+					in_in = False
 				else:
 					stack.pop()
 			if ilevel != istack[-1]:
@@ -344,31 +353,39 @@ def get_file(group, section, filename): # {{{
 					url = None
 				add_story_item([r.group(1), url])
 				continue
-			r = re.match(r'(show|hide)\s+(\S+)(\s+(\S*))?(\s+at\s+(.*?))?(\s+with\s+(.*?))?$', ln)
+			r = re.match(r'(show|hide)\s+(\S+)(\s+(\S*))?(\s+at\s+(.*?))?(\s+with\s+(.*?))?(\s+in\s+(\S*?)(m)?s)?$', ln)
 			if r:
 				show = r.group(1) == 'show'
 				tag = r.group(2)
-				mod = r.group(4)
+				mood = r.group(4)
 				at = r.group(6)
 				transition = r.group(8)
+				if r.group(10) is None:
+					timing = None
+				else:
+					try:
+						timing = float(r.group(10))
+						if r.group(11):
+							timing /= 1000
+					except:
+						timing = None
+						parse_error(nr, 'achter in moet een getal staan')
 				add_story_item()
-				stack[-1][-1][2].extend(showhide(show, tag, mod, at, transition, characters, in_with, after, hiders, nr))
+				stack[-1][-1][2].extend(showhide(show, tag, mood, at, transition, timing, in_in, nr))
 				continue
-			r = re.match(r'with\s+(\S+)\s*:$', ln)
+			r = re.match(r'in\s+(\S*?)(m)?s\s*:\s*$', ln)
 			if r:
-				if in_with:
-					parse_error(nr, 'with in with')
-				in_with = (r.group(1), nr)
-				after = []
-				hiders = []
+				if in_in:
+					parse_error(nr, 'genest in-blok')
+				try:
+					timing = float(r.group(1))
+					if r.group(2):
+						timing /= 1000
+				except:
+					parse_error(nr, 'achter in moet een tijd staan')
+					timing = 0
+				in_in = (timing, nr)
 				istack.append(None)
-				continue
-			r = re.match(r'say\s+(.)(.*?)\1:\s+(.*)$', ln)
-			if r:
-				add_story_item(['text', r.group(2), r.group(3), None])
-				if r.group(3) == '':
-					in_speech = True
-					istack.append(None)
 				continue
 			if ln.startswith('$'):
 				if len(stack[-1]) > 0 and stack[-1][-1][0] == 'python':
