@@ -1,6 +1,7 @@
 // Most code is identical to the regular login. This file contains only overrides.
 
 Connection.main = function() {
+	document.getElementsByTagName('body')[0].style.backgroundImage = '';
 	kinetic_script = null;
 	error.style.display = 'none';
 	login.style.display = 'none';

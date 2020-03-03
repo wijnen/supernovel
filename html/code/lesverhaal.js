@@ -11,6 +11,7 @@ var preparing_animation;
 var show_question = false;
 var doing_animation;
 var animations = {};
+var defaults = {x: 0, y: 0, rotation: 0, scale: 1, url: ''};
 
 var Connection = {
 	replaced: function() {
@@ -18,6 +19,7 @@ var Connection = {
 		alert('De verbinding is overgenomen door een nieuwe login');
 		is_replaced = false;
 		Connection.cookie('', '', '');
+		server.close();
 		init();
 	},
 	login: function() {
@@ -65,6 +67,7 @@ var Connection = {
 		}
 	},
 	main: function() {
+		document.getElementsByTagName('body')[0].style.backgroundImage = '';
 		animations = {};
 		kinetic_script = null;
 		error.style.display = 'none';
@@ -98,6 +101,7 @@ var Connection = {
 		kinetic_end = function() {
 			if (show_question)
 				return;
+			//console.info('kinetic end');
 			show_question = true;
 			speechbox.style.display = 'none';
 			question.style.display = 'block';
@@ -274,8 +278,8 @@ var Connection = {
 // ['text', speaker, text, image]: speech. with empty speaker, hide speaker box; empty image, hide photo; empty all, hide all.
 // ['scene', url]: set new background and remove all sprites. With no url, clear all.
 // ['sprite', tag, null]: hide sprite.
-// ['sprite', tag, {position, rotation, scale, url, animation}]: set sprite properties and optionally start animation.
-// ['animation', tag, [{initial}, {time, position, rotation, scale, url}, ..., next]]: define canned animation.
+// ['sprite', tag, {x, y, rotation, scale, url, animation}]: set sprite properties and optionally start animation.
+// ['animation', tag, [{initial}, {time, x, y, rotation, scale, url}, ..., next]]: define canned animation.
 // ['wait', seconds]: wait specified time before next step.
 
 function home() {
@@ -326,19 +330,25 @@ function next_kinetic(force) {
 				break;
 			case 'sprite':
 				var d = new Date();
-				var n = d.getTime();
+				var n = d.getTime() / 1000;
+				//console.info('changing sprite', cmd[1], 'to', cmd[2]);
 				if (cmd[2] === null) {
 					// Hide sprite.
-					kill_sprite(kinetic_sprites[cmd[1]]);
+					kill_sprite(cmd[1]);
 					break;
 				}
+				if (kinetic_sprites[cmd[1]] === undefined)
+					new_sprite(cmd[1]);
 				cmd[2].time = 0;
 				var anim = null;
 				if (cmd[2].animation !== undefined)
 					anim = cmd[2].animation;
 				delete cmd[2].animation;
-				console.info(cmd[1], kinetic_sprites);
-				kinetic_sprites[cmd[1]].anim = [{time: n}, cmd[2], anim];
+				var initial = {time: n};
+				for (var p in defaults) {
+					initial[p] = kinetic_sprites[cmd[1]].props[p];
+				}
+				kinetic_sprites[cmd[1]].anim = [initial, cmd[2], anim];
 				if (!doing_animation)
 					screen_update();
 				break;
@@ -414,14 +424,19 @@ function prev_kinetic(full) {
 }
 
 function new_sprite(tag) {
+	//console.info('new sprite', tag);
 	kinetic_sprites[tag] = spritebox.AddElement('img', 'sprite');
+	kinetic_sprites[tag].props = {};
+	for (var p in defaults) {
+		kinetic_sprites[tag].props[p] = defaults[p];
+	}
 	kinetic_sprites[tag].AddEvent('load', function() {
-		console.info('load', tag);
 		kinetic_sprites[tag].style.marginLeft = '-' + (kinetic_sprites[tag].width / 2) + 'px';
 	});
 }
 
 function kill_sprite(tag) {
+	//console.info('killing', tag, kinetic_sprites);
 	spritebox.removeChild(kinetic_sprites[tag]);
 	delete kinetic_sprites[tag];
 }
@@ -492,9 +507,9 @@ function init() {
 	var loginname = document.getElementById('loginname');
 	var group = document.getElementById('class');
 	if ('name' in crumbs && loginname.value == '')
-		loginname.value = crumbs['name'];
+		loginname.value = crumbs.name;
 	if ('group' in crumbs && group.value == '')
-		group.value = crumbs['group'];
+		group.value = crumbs.group;
 }
 window.AddEvent('load', init);
 
@@ -566,51 +581,70 @@ function video_done() {
 }
 
 function Anim(sprite, time, tag) {
+	//console.info('new animation', tag, 'for sprite', sprite);
 	var anim = animations[tag];
 	if (anim === undefined) {
 		console.error('using undefined animation', anim);
 		return null;
 	}
-	var ret = [{time: time}];
+	var ret = [{}];
+	for (var p in defaults) {
+		ret[0][p] = sprite.props[p];
+		//console.info('set', p, 'to', sprite.props[p]);
+	}
 	for (var a = 0; a < anim.length - 1; ++a) {
 		var segment = {};
-		for (var i in anim[a])
+		for (var i in anim[a]) {
 			segment[i] = anim[a][i];
+			//console.info('segment', i, 'anim', a, 'value', segment[i]);
+		}
 		ret.push(segment);
 	}
+	ret[0].time = time;
 	ret.push(anim[anim.length - 1]);
 	return ret;
 }
 
 function screen_update() {
 	var d = new Date();
-	var n = d.getTime();
+	var n = d.getTime() / 1000;
 	doing_animation = false;
 	for (var s in kinetic_sprites) {
 		var sprite = kinetic_sprites[s];
 		if (sprite.anim === null)
 			continue;
-		// s = sprite tag; sprite.anim = [{initial}, {time, url, position, rotation, scale}, ..., next_animation]
+		//console.info(s, sprite.anim[0], sprite.anim[1], sprite.anim[2]);
+		// s = sprite tag; sprite.anim = [{initial}, {time, url, x, y, rotation, scale}, ..., next_animation]
 		// time is the duration of this segment.
-		while (sprite.anim.length > 2 && sprite.anim[0]['time'] + sprite.anim[1]['time'] <= n) {
-			sprite.anim[1]['time'] += sprite.anim[0]['time'];
+		while (sprite.anim.length > 2 && sprite.anim[0].time + sprite.anim[1].time <= n) {
+			// Go to next animation segment.
+			// First set sprite to the end values of this segment.
 			var old = sprite.anim[0];
 			var current = sprite.anim[1];
-			if (old.position === undefined && current.position !== undefined) {
-				sprite.style.left = current.position[0] + '%';
-				sprite.style.bottom = current.position[1] + '%';
+			//console.info(s, 'frame done, move to next', current, sprite.anim[0].time, sprite.anim[1].time, n);
+			current.time += old.time;
+			if (current.x !== undefined) {
+				sprite.style.left = current.x + '%';
+			}
+			if (current.y !== undefined) {
+				sprite.style.bottom = current.y + '%';
 			}
 			var transform = '';
-			if (old.rotation === undefined && current.rotation !== undefined) {
+			if (current.rotation !== undefined) {
 				transform += 'rotate(' + current.rotation + 'deg) ';
 			}
-			if (old.scale === undefined && current.scale !== undefined) {
+			if (current.scale !== undefined) {
 				transform += 'scale(' + current.scale + ')';
 			}
 			if (transform != '')
 				sprite.style.transform = transform;
-			if (old.url === undefined && current.url !== undefined) {
+			if (current.url !== undefined) {
 				sprite.src = current.url;
+			}
+			for (var p in defaults) {
+				if (current[p] === undefined)
+					current[p] = old[p];
+				sprite.props[p] = current[p];
 			}
 			sprite.anim.splice(0, 1);
 		}
@@ -618,25 +652,54 @@ function screen_update() {
 			doing_animation = true;
 			var old = sprite.anim[0];
 			var current = sprite.anim[1];
-			var f = (n - old['time']) / current['time'];
-			if (old.position !== undefined && current.position !== undefined) {
-				// pos = old + f * (current - old).
-				sprite.style.left = old_position[0] + (current_position[0] - old_position[0]) * f + '%';
-				sprite.style.bottom = old_position[1] + (current_position[1] - old_position[1]) * f + '%';
+			var f = (n - old.time) / current.time;
+			//console.info(f, old.x, current.x, old.x + (current.x - old.x) * f + '%');
+			if (current.x !== undefined) {
+				if (old.x !== undefined) {
+					// x = old + f * (current - old).
+					sprite.style.left = old.x + (current.x - old.x) * f + '%';
+				}
+				else {
+					sprite.style.left = current.x + '%';
+				}
+			}
+			if (current.y !== undefined) {
+				if (old.y !== undefined) {
+					// y = old + f * (current - old).
+					sprite.style.bottom = old.y + (current.y - old.y) * f + '%';
+				}
+				else {
+					sprite.style.bottom = current.y + '%';
+				}
 			}
 			var transform = '';
-			if (old.rotation !== undefined && current.rotation !== undefined) {
-				// rot = old + f * (current - old).
-				transform += 'rotate(' + (old.rotation + (current.rotation - old.rotation) * f) + 'deg) ';
+			if ( current.rotation !== undefined) {
+				if (old.rotation !== undefined) {
+					// rot = old + f * (current - old).
+					transform += 'rotate(' + (old.rotation + (current.rotation - old.rotation) * f) + 'deg) ';
+				}
+				else {
+					transform += 'rotate(' + current.rotation + 'deg) ';
+				}
 			}
-			if (old.scale !== undefined && current.scale !== undefined) {
-				// scale = old + f * (current - old).
-				transform += 'scale(' + (old.scale + (current.scale - old.scale) * f) + ')';
+			if (current.scale !== undefined) {
+				if (old.scale !== undefined) {
+					// scale = old + f * (current - old).
+					transform += 'scale(' + (old.scale + (current.scale - old.scale) * f) + ')';
+				}
+				else {
+					transform += 'scale(' + current.scale + ')';
+				}
 			}
 			if (transform != '')
 				sprite.style.transform = transform;
-			if (old.url !== undefined && current.url !== undefined) {
-				// Handle dissolve transform.
+			if (current.url !== undefined) {
+				if (old.url !== undefined) {
+					// Handle dissolve transform.
+				}
+				else {
+					sprite.src = current.url;
+				}
 			}
 		}
 		else {

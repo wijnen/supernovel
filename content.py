@@ -64,6 +64,7 @@ def parse_transition(show, transition, timing, in_in, mood, hat, vat, line): # {
 		if not show:
 			parse_error(line, 'moveinleft is only allowed with show')
 		ret.append({'time': timing})
+		ret[-2]['time'] = 0
 		ret[-1]['x'] = ret[-2]['x'] if 'x' in ret[-2] else 50
 		ret[-2]['x'] = -20
 		return ret
@@ -71,18 +72,19 @@ def parse_transition(show, transition, timing, in_in, mood, hat, vat, line): # {
 		if not show:
 			parse_error(line, 'moveinright is only allowed with show')
 		ret.append({'time': timing})
+		ret[-2]['time'] = 0
 		ret[-1]['x'] = ret[-2]['x'] if 'x' in ret[-2] else 50
 		ret[-2]['x'] = 120
 		return ret
 	elif transition == 'moveoutleft':
-		if not show:
+		if show:
 			parse_error(line, 'moveoutleft is only allowed with hide')
-		ret[-1][x] = 120
+		ret[-1]['x'] = 120
 		return ret
 	elif transition == 'moveoutright':
-		if not show:
+		if show:
 			parse_error(line, 'moveoutright is only allowed with hide')
-		ret[-1][x] = -20
+		ret[-1]['x'] = -20
 		return ret
 	else:
 		parse_error(line, 'unknown transition: {}'.format(repr(transition)))
@@ -128,10 +130,11 @@ def showhide(show, tag, mood, at, transition, timing, in_in, nr): # {{{
 		del t[-1]['time']
 		return ret
 	if transition:
+		transition.append(None)
 		ret.append(['animation', '', transition])
 		ret.append(['sprite', tag, {'animation': ''}])
 		if not in_in:
-			ret.append(['wait', transition[-1]['time']])
+			ret.append(['wait', transition[-2]['time']])
 	if not show:
 		ret.append(['sprite', tag, None])
 	return ret

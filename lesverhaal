@@ -12,18 +12,18 @@ import fhs
 import websocketd
 from markdown import markdown
 from websocketd import log
-config = fhs.init({
-	'data': '.',
-	'port': '8000',
-	'admin-port': '8001',
-	'sandbox-port': '8002',
-	'loglimit': 1,
-	'content': 'content',
-	'sandbox': 'sandbox',
-	'lazysave': False,
-	'secret': '',
-	'logfile': '',
-	'proxy': ''})
+fhs.option('data', 'path to user and game data', default = '.')
+fhs.option('port', 'network port to listen for players', default = '8000')
+fhs.option('admin-port', 'network port to listen for admin', default = '8001')
+fhs.option('sandbox-port', 'network port to listen for sandbox', default = '8002')
+fhs.option('content', 'url to regular content', default = 'content')
+fhs.option('sandbox', 'path to sandbox content, relative to <data path>/sandbox_html/', default = 'sandbox')
+fhs.option('lazysave', 'Only save when user logs out (default is on every change)', default = False)
+fhs.option('secret', 'If set, key to log in as any user (including admin) without cookie', default = '')
+fhs.option('proxy', 'virtual proxy directory', default = '')
+fhs.option('logfile', 'file for logging events', default = '')
+fhs.option('loglimit', 'maximum loglevel that is written to screen', default = 1)
+config = fhs.init(help = 'Visual novel style tool for students to learn with teacher monitoring options', contact = 'Bas Wijnen <wijnen@debian.org>', version = '0.1')
 from debug import debug
 import content
 import user
@@ -504,9 +504,8 @@ class Connection: # {{{
 		for item in ('x', 'y', 'mood'):
 			if item in data:
 				self.user['characters'][tag][item] = data[item]
-		if 'mood' in data:
-			c = self.user['characters'][tag]
-			data['url'] = c['imgs'] + data.pop('mood') + c['ext']
+		c = self.user['characters'][tag]
+		data['url'] = c['imgs'] + (data.pop('mood') if 'mood' in data else 'default') + c['ext']
 	# }}}
 	def _handle_story(self, q, text_buffer, last_answer = None, *args): # {{{
 		def handle(item):
@@ -519,8 +518,11 @@ class Connection: # {{{
 
 			# ('sprite', tag, {x, y, rotation, scale, mood, animation})
 			if item[0] == 'sprite':
-				data = item[2].copy()
-				self._update_sprite(item[1], data)
+				if item[2] is None:
+					data = None
+				else:
+					data = item[2].copy()
+					self._update_sprite(item[1], data)
 				return (item[0], item[1], data)
 			if item[0].endswith('image'):
 				c = self.user['characters'][item[1]]
