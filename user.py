@@ -98,16 +98,20 @@ def unmangle(src): # {{{
 # }}}
 
 def load(name, group): # {{{
+	# Set default user data; can be replaced (or not returned) below.
+	ret = {'filename': name.lower(), 'name': name, 'group': group.lower(), 'connection': None, 'password': None, 'nosave': False, 'sandbox': False}
 	if not os.path.exists(os.path.join(config['data'], 'users', group.lower())):
 		debug(0, 'user.load called for nonexistent group {}:{}'.format(name, group))
 		return None, {}
 	if not os.path.exists(os.path.join(config['data'], 'users', group.lower(), name.lower())):
-		debug(0, 'user.load called for nonexistent user {}:{}'.format(name, group))
-		return None, {}
+		if os.path.exists(os.path.join(config['data'], 'users', group.lower(), 'Open')):
+			# Create new user.
+			save(ret)
+		else:
+			debug(0, 'user.load called for nonexistent user {}:{}'.format(name, group))
+			return None, {}
 	if (name.lower(), group.lower()) in users:
 		ret = users[(name.lower(), group.lower())]
-	else:
-		ret = {'filename': name.lower(), 'name': name, 'group': group.lower(), 'connection': None, 'password': None, 'nosave': False, 'sandbox': False}
 	answers = {}
 	for ln in open(os.path.join(config['data'], 'users', group.lower(), name.lower()), errors = 'replace'):
 		if ln.strip() == '':
@@ -154,7 +158,7 @@ def save(user): # {{{
 	'''Save user information to disk.'''
 	with open(os.path.join(config['data'], 'users', user['group'].lower(), user['filename']), 'w', errors = 'replace') as f:
 		for key in user:
-			if key in unsaved:
+			if user[key] is None or key in unsaved:
 				continue
 			f.write('{}={}\n'.format(key, user[key]))
 		# Record answers.

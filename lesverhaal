@@ -13,14 +13,15 @@ import websocketd
 from markdown import markdown
 from websocketd import log
 fhs.option('data', 'path to user and game data', default = '.')
-fhs.option('port', 'network port to listen for players', default = '8000')
-fhs.option('admin-port', 'network port to listen for admin', default = '8001')
-fhs.option('sandbox-port', 'network port to listen for sandbox', default = '8002')
+fhs.option('port', 'network port to listen for players', default = '7000')
+fhs.option('admin-port', 'network port to listen for admin', default = '7001')
+fhs.option('sandbox-port', 'network port to listen for sandbox', default = '7002')
 fhs.option('content', 'url to regular content', default = 'content')
 fhs.option('sandbox', 'path to sandbox content, relative to <data path>/sandbox_html/', default = 'sandbox')
 fhs.option('lazysave', 'Only save when user logs out (default is on every change)', default = False)
 fhs.option('secret', 'If set, key to log in as any user (including admin) without cookie', default = '')
-fhs.option('proxy', 'virtual proxy directory', default = '')
+fhs.option('proxy', 'virtual proxy directory', default = 'lesverhaal')
+fhs.option('proxy-sandbox', 'virtual proxy directory for sandbox', default = 'lesverhaal-sandbox')
 fhs.option('logfile', 'file for logging events', default = '')
 fhs.option('loglimit', 'maximum loglevel that is written to screen', default = 1)
 config = fhs.init(help = 'Visual novel style tool for students to learn with teacher monitoring options', contact = 'Bas Wijnen <wijnen@debian.org>', version = '0.1')
@@ -228,6 +229,7 @@ class Connection: # {{{
 		# In case the password is new, it needs to be stored.
 		if u:
 			u['password'] = crypted
+			user.save(u)
 		return None
 	# }}}
 	def _login(self, name, group): # {{{
@@ -261,7 +263,7 @@ class Connection: # {{{
 		self.remote.contents.event(content.list(group))
 		self.remote.main.event()
 		if u['section'] is not None:
-			if not self._run_item(self.user['run_stack'][-1][0][self.user['run_stack'][-1][1]]):
+			if len(self.user['run_stack']) > 0 and len(self.user['run_stack'][-1]) > 1 and not self._run_item(self.user['run_stack'][-1][0][self.user['run_stack'][-1][1]]):
 				debug(0, 'Bug: saved state of user {}:{} was not a waiting state'.format(name, group))
 				self._run()
 		user.refresh_admins()
@@ -529,7 +531,7 @@ class Connection: # {{{
 				if item[0] == 'temp-image':
 					return ('sprite', item[1], {'url': item[2] and c['imgs'] + item[2] + c['ext']})
 				elif item[0] == 'restore-image':
-					return ('sprite', item[1], {'url': current and c['imgs'] + current + c['ext']})
+					return ('sprite', item[1], {'url': 'default' and c['imgs'] + 'default' + c['ext']})
 
 			# ('scene', url)
 			# ('animation', tag, anim)
@@ -696,7 +698,7 @@ def sandbox_post(connection): # {{{
 	kv = {x[0]: x[1] for x in kv}
 	if 'name' not in kv or 'group' not in kv or 'key' not in kv or (kv['name'], kv['group']) not in user.users or user.users[(kv['name'], kv['group'])]['cookie'] != kv['key']:
 		debug(1, 'invalid cookie for POST')
-		sandboxserver.reply(connection, 403, 'invalid cookie for POST request', 'text/plain;charset=utf-8')
+		sandboxserver.reply(connection, 403, b'invalid cookie for POST request', 'text/plain;charset=utf-8')
 		return False
 	u = user.users[(kv['name'], kv['group'])]
 	if not u['sandbox']:
@@ -726,9 +728,9 @@ def sandbox_post(connection): # {{{
 # }}}
 
 # Main program {{{
-server = websocketd.RPChttpd(config['port'], Connection, httpdirs = ['html'], tls = False)
+server = websocketd.RPChttpd(config['port'], Connection, httpdirs = ['html'], tls = False, proxy = config['proxy'])
 adminserver = websocketd.RPChttpd(config['admin-port'], Admin_Connection, httpdirs = ['admin_html'], tls = False)
-sandboxserver = websocketd.RPChttpd(config['sandbox-port'], Connection, httpdirs = ['sandbox_html'], tls = False, proxy = config['proxy'] or ())
+sandboxserver = websocketd.RPChttpd(config['sandbox-port'], Connection, httpdirs = ['sandbox_html'], tls = False, proxy = config['proxy-sandbox'] or ())
 sandboxserver.post = sandbox_post
 print('servers are running')
 websocketd.fgloop()
