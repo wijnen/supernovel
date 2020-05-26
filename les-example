@@ -1,0 +1,44 @@
+python:
+	# Using this block you can prepare the Python environment
+	# For example, by defining a function for pretty printing.
+	def pr(number):
+		return 'ZERO!' if number == 0 else '%d' % number
+
+title: This is a title, with {print('a Python substitution')}!
+
+Title: There is {pr(0)} difference between 'title' and 'Title'.
+
+term: Answer this question with a single term.
+	Equal answers are grouped together, case is ignored.
+	If a filter is defined, it is run before checking for equality.
+	if a score is defined, it is computed after the filter.
+filter: response.lower()
+score: len(response)
+
+Term: Same as above, but case differences are not ignored.
+
+terms: Answer this question with one or more terms, separated by newline.
+	Equal answers are grouped together, case is ignored.
+
+Terms: Same as above, but case differences are not ignored.
+
+word: Answer this question with one or more words, separated by space.
+	Equal words are grouped together, case is ignored.
+
+Words: Same as above, but case differences are not ignored.
+
+choice: Answer this question by choosing one of the following:
+option: First post!
+option: Answer C is always right!
+option: I don't understand the question.
+
+Choice: This is identical to the above, case is irrelevant for choice.
+option: Ok.
+
+choices: Same as above, but multiple choices are allowed.
+option: John is right.
+option: Paul is wrong.
+
+Choices: This is identical to the above, case is irrelevant for choices.
+option: George is a dragon slayer.
+option: Who is this Ringo guy?

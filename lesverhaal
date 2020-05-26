@@ -10,6 +10,9 @@ import time
 import random
 import fhs
 import websocketd
+import json
+import subprocess
+import shlex
 from markdown import markdown
 from websocketd import log
 fhs.option('data', 'path to user and game data', default = '.')
@@ -18,12 +21,14 @@ fhs.option('admin-port', 'network port to listen for admin', default = '7001')
 fhs.option('sandbox-port', 'network port to listen for sandbox', default = '7002')
 fhs.option('content', 'url to regular content', default = 'content')
 fhs.option('sandbox', 'path to sandbox content, relative to <data path>/sandbox_html/', default = 'sandbox')
-fhs.option('lazysave', 'Only save when user logs out (default is on every change)', default = False)
+fhs.option('lazysave', 'Only save when user logs out (default is on every change)', argtype = bool)
 fhs.option('secret', 'If set, key to log in as any user (including admin) without cookie', default = '')
 fhs.option('proxy', 'virtual proxy directory', default = 'lesverhaal')
 fhs.option('proxy-sandbox', 'virtual proxy directory for sandbox', default = 'lesverhaal-sandbox')
 fhs.option('logfile', 'file for logging events', default = '')
 fhs.option('loglimit', 'maximum loglevel that is written to screen', default = 1)
+fhs.option('jail', 'command to run a worker jail', default = 'firejail --chroot=chroot --net=none --noprofile /worker')
+fhs.option('insecure', 'force the use of insecure Python handling (internal instead of chroot)', argtype = bool)
 config = fhs.init(help = 'Visual novel style tool for students to learn with teacher monitoring options', contact = 'Bas Wijnen <wijnen@debian.org>', version = '0.1')
 from debug import debug
 import content
@@ -194,6 +199,58 @@ class Admin_Connection: # {{{
 # }}}
 
 #'''
+
+class Python_local: # {{{
+	'''This class handles the userspace python environment.
+	This runs within this program and is therefore not suitable for untrusted code.
+	'''
+	def __init__(self):
+		self.variables = {}
+	def set(self, key, value):
+		self.variables[key] = value
+	def compute(self, expr, as_str):
+		ret = eval(expr, self.variables)
+		return str(ret) if as_str else bool(ret)
+	def run(self, script):
+		exec(script, self.variables)
+# }}}
+
+class Python_secure: # {{{
+	'''This class handles the userspace python environment.
+	This should run a separate process in a firejail chroot without network access.
+	That needs to be set up externally. This class just runs a program that should do that.
+	'''
+	def __init__(self):
+		self.worker = subprocess.Popen(shlex.split(config['jail']), stdin = subprocess.PIPE, stdout = subprocess.PIPE, close_fds = True, encoding = 'utf-8')
+	def set(self, key, value):
+		v = json.dumps(value)
+		log('setting %s to %s' % (key, v))
+		self.worker.stdin.write(('set\t%s\t%s\n' % (key, v)))
+		self.worker.stdin.flush()
+	def compute(self, expr, as_str):
+		e = json.dumps(expr)
+		log('computing expr %s' % e)
+		self.worker.stdin.write((('str\t%s\n' if as_str else 'bool\t%s') % e))
+		self.worker.stdin.flush()
+		ret = self.worker.stdout.readline()
+		if as_str:
+			return json.loads(ret)
+		else:
+			return ret == 'True\n'
+	def run(self, script):
+		s = json.dumps(script)
+		log('running script %s' % s)
+		self.worker.stdin.write(('run\t%s\n' % s))
+		self.worker.stdin.flush()
+# }}}
+
+def Python():
+	if config['insecure'] or not os.path.exists('chroot'):
+		return Python_local()
+	else:
+		return Python_secure()
+
+#'''
 class Connection: # {{{
 	def __init__(self, remote): # {{{
 		debug(2, 'New connection from {}:{}'.format(*remote.socket.remote))
@@ -257,7 +314,6 @@ class Connection: # {{{
 			u['full_section'] = []
 			u['run_stack'] = []
 			u['section'] = None	# Current section.
-			u['variables'] = {}
 			u['last_path'] = None
 		self.remote.cookie.event(u['filename'], group.lower(), u['cookie'])
 		self.remote.contents.event(content.list(group))
@@ -282,7 +338,7 @@ class Connection: # {{{
 	# }}}
 	def _safe_eval(self, expr, as_str): # {{{
 		try:
-			ret = eval(expr, self.user['variables'])
+			ret = self.user['python'].compute(expr, as_str)
 		except:
 			debug(1, 'error evaluating expression {}'.format(expr))
 			traceback.print_exc()
@@ -350,24 +406,29 @@ class Connection: # {{{
 			while len(self.user['run_stack']) > 1:
 				self.user['run_stack'].pop()
 			self.user['run_stack'][-1][1] = self.index(label)
-		self.user['variables'] = {
-				'answer': self._answer,
-				'goto': goto,
-				'text': self._add_text,
-				'character': lambda tag, name, url: self._add_character(tag, name, config['content'] + '/' + self.user['group'].lower() + '/' + section[0] + '/' + section[1] + '/' + os.path.splitext(url)[0] + '/', os.path.splitext(url)[1]),
-				'say': self._say,
-				'show': self._show,
-				'hide': self._hide,
-				'question': self._question,
-				'user': self.user,
+		self.user['python'] = Python()
+		self.user['python'].set('name', self.user['name'])
+		self.user['python'].set('group', self.user['group'])
+		'''self.user['variables'] = {
+				# act as if the user has answered a question.
+				#'answer': self._answer,
+				# act as if those commands were in the script.
+				#'text': self._add_text,
+				#'say': self._say,
+				#'show': self._show,
+				#'hide': self._hide,
+				#'question': self._question,
+				# useful variable access
+				#'user': self.user,
 				'name': self.user['name'],
 				'group': self.user['group'],
-				'self': self,
-				}
+				#'self': self,
+				# TODO: provide access to answers, persistent local and persistent global data.
+				}'''
 		startup = fhs.read_data('startup.py')
 		if startup is not None:
 			try:
-				exec(startup.read(), self.user['variables'])
+				self.user['python'].run(startup.read())
 			except:
 				debug(1, 'Error in startup script')
 				traceback.print_exc()
@@ -391,7 +452,6 @@ class Connection: # {{{
 	def _add_character(self, code, name, imgs, ext): # {{{
 		self.user['characters'][code] = {'name': name, 'imgs': imgs, 'ext': ext, 'mood': 'default', 'x': 0, 'y': 0}
 		c = self.user['characters'][code]
-		self.user['variables'][code] = lambda text: self._say(c['name'], text, image = c['imgs'] + 'side' + c['ext'] if c['ext'] else None)
 	# }}}
 	def _say(self, name, text, image = None): # {{{
 		self.user['text_buffer'].append(('text', name, self._parse_text(text), image))
@@ -478,7 +538,7 @@ class Connection: # {{{
 			self.breaking = False
 			self.user['run_stack'][-1][1] += 1	# Do this before running the code, so goto works.
 			try:
-				exec('\n'.join(code[2]), self.user['variables'])
+				self.user['python'].run('\n'.join(code[2]))
 			except:
 				debug(0, 'Error in script: {}'.format(code[2]))
 				traceback.print_exc()
@@ -540,7 +600,7 @@ class Connection: # {{{
 		self.remote.story.event(q, [handle(x) for x in text_buffer], last_answer, *args)
 	# }}}
 	def store_answer(self, question, answer, store = True): # {{{
-		self.user['variables'][question] = answer
+		self.user['python'].set(question, answer)
 		if store:
 			if self.user['section'] not in self.user['answers']:
 				self.user['answers'][self.user['section']] = {}
