@@ -35,8 +35,9 @@ make symlinks to the installed versions in /usr/share/python3-websocketd/. They
 need to go in html/code, admin\_html/code and sandbox\_html/code.
 
 If you want to use the sandbox, or run untrusted scripts, you should use the
-safe system. For this, you will need to set up a chroot. I will not explain
-here how to do that.
+safe system. For this, you will need to set up a chroot in the directory
+*chroot* and have firejail installed. The *worker* script needs to be copied
+(not symlinked) to the root directory of the chroot.
 
 Create a directory named *users*. In there, create a directory named *admin*
 and one named *test*. The latter directory is the first group you will use. It

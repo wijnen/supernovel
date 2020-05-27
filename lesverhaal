@@ -27,7 +27,7 @@ fhs.option('proxy', 'virtual proxy directory', default = 'lesverhaal')
 fhs.option('proxy-sandbox', 'virtual proxy directory for sandbox', default = 'lesverhaal-sandbox')
 fhs.option('logfile', 'file for logging events', default = '')
 fhs.option('loglimit', 'maximum loglevel that is written to screen', default = 1)
-fhs.option('jail', 'command to run a worker jail', default = 'firejail --chroot=chroot --net=none --noprofile /worker')
+fhs.option('jail', 'command to run a worker jail', default = 'firejail --quiet --nonewprivs --chroot=chroot --net=none --noprofile /worker')
 fhs.option('insecure', 'force the use of insecure Python handling (internal instead of chroot)', argtype = bool)
 config = fhs.init(help = 'Visual novel style tool for students to learn with teacher monitoring options', contact = 'Bas Wijnen <wijnen@debian.org>', version = '0.1')
 from debug import debug
@@ -200,19 +200,41 @@ class Admin_Connection: # {{{
 
 #'''
 
+# Class for handling Python commands. {{{
 class Python_local: # {{{
 	'''This class handles the userspace python environment.
 	This runs within this program and is therefore not suitable for untrusted code.
 	'''
+	def add_to_pending(self, item):
+		if self.pending is None:
+			raise ValueError('cannot use ui commands in this context')
+		self.pending.append(item)
 	def __init__(self):
-		self.variables = {}
+		self.pending = None
+		self.variables = {
+			'answer': lambda key, value = None: self.add_to_pending(['answer', key, value]),
+			}
 	def set(self, key, value):
 		self.variables[key] = value
 	def compute(self, expr, as_str):
-		ret = eval(expr, self.variables)
+		try:
+			ret = eval(expr, self.variables)
+		except:
+			error_text = str(sys.exc_info()[1])
+			log('Error in expression %s: %s' % (expr, error_text))
+			ret = '[%s]' % error_text if as_str else False
 		return str(ret) if as_str else bool(ret)
-	def run(self, script):
+	def run(self, script, allow_ui = True):
+		if allow_ui:
+			self.pending = []
 		exec(script, self.variables)
+		if allow_ui:
+			ret = self.pending
+			self.pending = None
+			return ret
+		return []
+	def finish(self):
+		pass
 # }}}
 
 class Python_secure: # {{{
@@ -224,31 +246,63 @@ class Python_secure: # {{{
 		self.worker = subprocess.Popen(shlex.split(config['jail']), stdin = subprocess.PIPE, stdout = subprocess.PIPE, close_fds = True, encoding = 'utf-8')
 	def set(self, key, value):
 		v = json.dumps(value)
-		log('setting %s to %s' % (key, v))
 		self.worker.stdin.write(('set\t%s\t%s\n' % (key, v)))
 		self.worker.stdin.flush()
 	def compute(self, expr, as_str):
 		e = json.dumps(expr)
-		log('computing expr %s' % e)
-		self.worker.stdin.write((('str\t%s\n' if as_str else 'bool\t%s') % e))
-		self.worker.stdin.flush()
-		ret = self.worker.stdout.readline()
+		try:
+			self.worker.stdin.write((('str\t%s\n' if as_str else 'bool\t%s') % e))
+			self.worker.stdin.flush()
+			ret = self.worker.stdout.readline()
+			err, ret = json.loads(ret.strip())
+		except:
+			ret = False if as_str else ''
+			err = 'Failed to parse result from worker'
 		if as_str:
-			return json.loads(ret)
+			ret = str(ret)
 		else:
-			return ret == 'True\n'
-	def run(self, script):
+			ret = bool(ret)
+		if err is not None:
+			log('error in compute: %s' % err)
+		return ret
+	def run(self, script, allow_pending = True):
 		s = json.dumps(script)
-		log('running script %s' % s)
-		self.worker.stdin.write(('run\t%s\n' % s))
-		self.worker.stdin.flush()
+		try:
+			if allow_pending:
+				self.worker.stdin.write(('run\t%s\n' % s))
+			else:
+				self.worker.stdin.write(('init\t%s\n' % s))
+			self.worker.stdin.flush()
+			err, ret = json.loads(self.worker.stdout.readline())
+			ret = [self.make_cmd(x) for x in ret]
+		except:
+			ret = []
+			err = 'Failed to parse result from worker'
+		if err is not None:
+			log('error in script: %s' % err)
+		return ret
+	def finish(self):
+		try:
+			self.worker.stdin.close()
+			self.worker.wait()
+		except:
+			pass
+	def make_cmd(self, x):
+		if x[0] == 'answer':
+			return ['answer', str(x[1]), None if x[2] is None else str(x[2])]
+		else:
+			raise ValueError('Unrecognized pending command received from worker')
 # }}}
 
+insecure = config['insecure'] or not os.path.exists('chroot')
+if insecure:
+	log('Warning: using insecure script parsing. Do not run untrusted scripts!')
 def Python():
-	if config['insecure'] or not os.path.exists('chroot'):
+	if insecure:
 		return Python_local()
 	else:
 		return Python_secure()
+# }}}
 
 #'''
 class Connection: # {{{
@@ -337,12 +391,7 @@ class Connection: # {{{
 		user.refresh_admins()
 	# }}}
 	def _safe_eval(self, expr, as_str): # {{{
-		try:
-			ret = self.user['python'].compute(expr, as_str)
-		except:
-			debug(1, 'error evaluating expression {}'.format(expr))
-			traceback.print_exc()
-			return '[fout]' if as_str else False
+		ret = self.user['python'].compute(expr, as_str)
 		return str(ret) if as_str else ret
 	# }}}
 	def _parse_text(self, text): # {{{
@@ -385,6 +434,9 @@ class Connection: # {{{
 	# }}}
 	def home(self): # {{{
 		self.user['section'] = None
+		self.user['python'].finish()
+		del self.user['python']
+		user.refresh_admins()
 		self.remote.main.event()
 	# }}}
 	def start(self, section): # {{{
@@ -410,7 +462,7 @@ class Connection: # {{{
 		self.user['python'].set('name', self.user['name'])
 		self.user['python'].set('group', self.user['group'])
 		'''self.user['variables'] = {
-				# act as if the user has answered a question.
+				# Set style for last answer.
 				#'answer': self._answer,
 				# act as if those commands were in the script.
 				#'text': self._add_text,
@@ -418,17 +470,12 @@ class Connection: # {{{
 				#'show': self._show,
 				#'hide': self._hide,
 				#'question': self._question,
-				# useful variable access
-				#'user': self.user,
-				'name': self.user['name'],
-				'group': self.user['group'],
-				#'self': self,
 				# TODO: provide access to answers, persistent local and persistent global data.
 				}'''
 		startup = fhs.read_data('startup.py')
 		if startup is not None:
 			try:
-				self.user['python'].run(startup.read())
+				self.user['python'].run(startup.read(), False)
 			except:
 				debug(1, 'Error in startup script')
 				traceback.print_exc()
@@ -484,9 +531,7 @@ class Connection: # {{{
 						self.user['run_stack'] = [[self.user['full_section'], len(self.user['full_section'])]]
 						user.refresh_admins()
 						return
-					self.user['section'] = None
-					user.refresh_admins()
-					self.remote.main.event()
+					self.home()
 					return
 			# Run instructions.
 			if self._run_item(self.user['run_stack'][-1][0][self.user['run_stack'][-1][1]]):
@@ -538,7 +583,9 @@ class Connection: # {{{
 			self.breaking = False
 			self.user['run_stack'][-1][1] += 1	# Do this before running the code, so goto works.
 			try:
-				self.user['python'].run('\n'.join(code[2]))
+				new_commands = self.user['python'].run('\n'.join(code[2]))
+				if len(new_commands) > 0:
+					self.user['run_stack'].append([new_commands, 0])
 			except:
 				debug(0, 'Error in script: {}'.format(code[2]))
 				traceback.print_exc()
