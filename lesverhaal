@@ -12,6 +12,7 @@ import fhs
 import websocketd
 import json
 import subprocess
+import fcntl
 import shlex
 from markdown import markdown
 from websocketd import log
@@ -61,7 +62,7 @@ class Admin_Connection: # {{{
 		q = remote.data['query']
 		keys = ('name', 'secret')
 		if config['secret'] != '' and all(x in q for x in keys) and q['secret'][0] == config['secret']:
-			if self._login(q['name'][0], 'admin'):
+			if self._login(q['name'][0]):
 				return
 		self.refresh = lambda: self.remote.login.event()
 		self.remote.login.event()
@@ -216,7 +217,7 @@ class Python_local: # {{{
 			}
 	def set(self, key, value):
 		self.variables[key] = value
-	def compute(self, expr, as_str):
+	def compute(self, wake, expr, as_str):
 		try:
 			ret = eval(expr, self.variables)
 		except:
@@ -224,7 +225,9 @@ class Python_local: # {{{
 			log('Error in expression %s: %s' % (expr, error_text))
 			ret = '[%s]' % error_text if as_str else False
 		return str(ret) if as_str else bool(ret)
-	def run(self, script, allow_ui = True):
+		# This version of Python does not support asynchronous operation, but it needs to be a generator.
+		yield
+	def run(self, wake, script, allow_ui = True):
 		if allow_ui:
 			self.pending = []
 		exec(script, self.variables)
@@ -233,6 +236,8 @@ class Python_local: # {{{
 			self.pending = None
 			return ret
 		return []
+		# This version of Python does not support asynchronous operation, but it needs to be a generator.
+		yield
 	def finish(self):
 		pass
 # }}}
@@ -244,43 +249,66 @@ class Python_secure: # {{{
 	'''
 	def __init__(self):
 		self.worker = subprocess.Popen(shlex.split(config['jail']), stdin = subprocess.PIPE, stdout = subprocess.PIPE, close_fds = True, encoding = 'utf-8')
+		flag = fcntl.fcntl(self.worker.stdout, fcntl.F_GETFL)
+		fcntl.fcntl(self.worker.stdout, fcntl.F_SETFL, flag | os.O_NONBLOCK)
+		self.data = ''
 	def set(self, key, value):
 		v = json.dumps(value)
 		self.worker.stdin.write(('set\t%s\t%s\n' % (key, v)))
 		self.worker.stdin.flush()
-	def compute(self, expr, as_str):
-		e = json.dumps(expr)
-		try:
-			self.worker.stdin.write((('str\t%s\n' if as_str else 'bool\t%s') % e))
-			self.worker.stdin.flush()
-			ret = self.worker.stdout.readline()
-			err, ret = json.loads(ret.strip())
-		except:
-			ret = False if as_str else ''
-			err = 'Failed to parse result from worker'
-		if as_str:
-			ret = str(ret)
-		else:
-			ret = bool(ret)
-		if err is not None:
-			log('error in compute: %s' % err)
+	def read_line(self, wake, cmd):
+		self.worker.stdin.write(cmd)
+		self.worker.stdin.flush()
+		to_handle = None
+		def cb():
+			self.data += self.worker.stdout.read() 
+			if '\n' not in self.data:
+				return True
+			websocketd.remove_timeout(to_handle)
+			pos = self.data.index('\n')
+			line = self.data[:pos]
+			self.data = self.data[pos + 1:]
+			try:
+				err, ret = json.loads(line)
+			except:
+				err = 'Error: failed to parse result from worker'
+				ret = None
+			if err is not None:
+				log(err)
+			debug(3, 'waking with %s, %s' % (err, ret))
+			wake((err, ret))
+			return False
+		def error():
+			log('error on fd from script handler')
+			websocketd.remove_read(self.worker.stdout)
+			websocketd.remove_timeout(to_handle)
+			wake(('Error on fd from script handler', None))
+			return False
+		def timeout():
+			websocketd.remove_read(self.worker.stdout)
+			log('Error: timeout on fd from script handler')
+			wake(('Error: timeout on fd from script handler', None))
+			return False
+		websocketd.add_read(self.worker.stdout, cb, error)
+		to_handle = websocketd.add_timeout(time.time() + 10, timeout)
+		debug(3, 'waiting for response')
+		ret = (yield)
+		debug(3, ret)
 		return ret
-	def run(self, script, allow_pending = True):
-		s = json.dumps(script)
-		try:
-			if allow_pending:
-				self.worker.stdin.write(('run\t%s\n' % s))
-			else:
-				self.worker.stdin.write(('init\t%s\n' % s))
-			self.worker.stdin.flush()
-			err, ret = json.loads(self.worker.stdout.readline())
-			ret = [self.make_cmd(x) for x in ret]
-		except:
-			ret = []
-			err = 'Failed to parse result from worker'
+	def compute(self, wake, expr, as_str):
+		err, ret = (yield from self.read_line(wake, '%s\t%s\n' % ('str' if as_str else 'bool', json.dumps(expr))))
 		if err is not None:
-			log('error in script: %s' % err)
-		return ret
+			return str(err) if as_str else False
+		return str(ret) if as_str else bool(ret)
+	def run(self, wake, script, allow_pending = True):
+		err, ret = (yield from self.read_line(wake, '%s\t%s\n' % ('run' if allow_pending else 'init', json.dumps(script))))
+		if err is not None:
+			return []
+		try:
+			return [self.make_cmd(x) for x in ret]
+		except:
+			log('Error')
+			return []
 	def finish(self):
 		try:
 			self.worker.stdin.close()
@@ -310,6 +338,7 @@ class Connection: # {{{
 		debug(2, 'New connection from {}:{}'.format(*remote.socket.remote))
 		self.remote = remote
 		remote.closed = self._closed
+		self.busy = False
 		try:
 			if 'cookie' in self.remote.data['headers']:
 				c = self.remote.data['headers']['cookie']
@@ -317,6 +346,7 @@ class Connection: # {{{
 				kv = {x[0]: x[1] for x in kv}
 				if 'name' in kv and 'group' in kv and 'key' in kv and (kv['name'], kv['group']) in user.users and user.users[(kv['name'], kv['group'])]['cookie'] == kv['key']:
 					if self._login(kv['name'], kv['group']):
+						websocketd.add_idle(self._finish_login)
 						return
 		except IndexError:
 			pass
@@ -324,10 +354,14 @@ class Connection: # {{{
 		keys = ('name', 'group', 'secret')
 		if config['secret'] != '' and all(x in q for x in keys) and q['secret'][0] == config['secret']:
 			if self._login(q['name'][0], q['group'][0]):
+				websocketd.add_idle(self._finish_login)
 				return
 		self.remote.login.event()
 	# }}}
 	def login(self, name, group, password): # {{{
+		wake = (yield)
+		if self.busy:
+			return 'duplicate login attempt'
 		u, answers = user.load(name.strip(), group.strip())
 		if u is None:
 			debug(2, 'Invalid user {}:{} on {}:{}'.format(name, group, *self.remote.socket.remote))
@@ -341,6 +375,9 @@ class Connection: # {{{
 		if u:
 			u['password'] = crypted
 			user.save(u)
+		self.busy = True
+		yield from self._finish_login(wake)
+		self.busy = False
 		return None
 	# }}}
 	def _login(self, name, group): # {{{
@@ -372,12 +409,16 @@ class Connection: # {{{
 		self.remote.cookie.event(u['filename'], group.lower(), u['cookie'])
 		self.remote.contents.event(content.list(group))
 		self.remote.main.event()
-		if u['section'] is not None:
-			if len(self.user['run_stack']) > 0 and len(self.user['run_stack'][-1]) > 1 and not self._run_item(self.user['run_stack'][-1][0][self.user['run_stack'][-1][1]]):
-				debug(0, 'Bug: saved state of user {}:{} was not a waiting state'.format(name, group))
-				self._run()
 		user.refresh_admins()
 		return u
+	# }}}
+	def _finish_login(self, wake = None): # {{{
+		if wake is None:
+			wake = (yield)
+		if self.user['section'] is not None:
+			if len(self.user['run_stack']) > 0 and len(self.user['run_stack'][-1]) > 1 and not (yield from self._run_item(wake, self.user['run_stack'][-1][0][self.user['run_stack'][-1][1]])):
+				debug(0, 'Bug: saved state of user {}:{} was not a waiting state'.format(name, group))
+				yield from self._run(wake)
 	# }}}
 	def _closed(self): # {{{
 		self.remote.close()
@@ -390,33 +431,40 @@ class Connection: # {{{
 		# TODO: schedule a timeout for discarding user data from memory.
 		user.refresh_admins()
 	# }}}
-	def _safe_eval(self, expr, as_str): # {{{
-		ret = self.user['python'].compute(expr, as_str)
+	def _safe_eval(self, wake, expr, as_str): # {{{
+		ret = (yield from self.user['python'].compute(wake, expr, as_str))
 		return str(ret) if as_str else ret
 	# }}}
-	def _parse_text(self, text): # {{{
-		def subst(obj):
-			return self._safe_eval(obj.group(1), as_str = True)
+	def _parse_text(self, wake, text): # {{{
 		if self.user['section'] is not None and self.user['section'][0] == 'sandbox':
 			filetarget = config['sandbox'] + '/' + self.user['group'].lower() + '/' + self.user['name'].lower() + '/'
 		else:
 			filetarget = config['content'] + '/' + self.user['group'].lower() + '/' + self.user['section'][0] + '/' + self.user['section'][1] + '/'
-		return re.sub('\${(.*?)}', subst, text).replace('FILE://common/', config['content'] + 'common/').replace('FILE://', filetarget)
+		result = ''
+		for m in re.finditer('\${(.*?)}|[^$]+', text):
+			if m.group(1) is None:
+				result += m.group(0)
+			else:
+				result += (yield from self._safe_eval(wake, m.group(1), as_str = True))
+		return result
 	# }}}
-	def _add_text(self, text): # {{{
+	def _add_text(self, wake, text): # {{{
 		'''Prepare text for displaying.'''
+		debug(3, 'running story item %s' % text)
 		if not isinstance(text, str):
 			if text[0] == 'text':
-				self.user['text_buffer'].append((text[0], '' if text[1] is None else self._parse_text(text[1]), self._parse_text(text[2]), text[3]))
+				self.user['text_buffer'].append((text[0], '' if text[1] is None else (yield from self._parse_text(wake, text[1])), (yield from self._parse_text(wake, text[2])), text[3]))
 			else:
 				self.user['text_buffer'].append(text)
+			debug(3, 'new text buffer: %s' % self.user['text_buffer'])
 			return
 		if len(self.user['text_buffer']) > 0 and isinstance(self.user['text_buffer'][-1], str):
-			self.user['text_buffer'][-1] += '\n' + self._parse_text(text)
+			self.user['text_buffer'][-1] += '\n' + (yield from self._parse_text(wake, text))
 		else:
-			self.user['text_buffer'].append(self._parse_text(text))
+			self.user['text_buffer'].append((yield from self._parse_text(wake, text)))
+		debug(3, 'new text buffer: %s' % self.user['text_buffer'])
 	# }}}
-	def _answer(self, key, value = None): # {{{
+	def _answer(self, wake, key, value = None): # {{{
 		'''Set style for last answer.
 		With only one argument, the style of the background is set.'''
 		if self.user['last_path'] is None:
@@ -427,12 +475,15 @@ class Connection: # {{{
 			key = None
 		if key is None:
 			key = 'background'
-		key = self._parse_text(key)
-		value = self._parse_text(value)
+		key = (yield from self._parse_text(wake, key))
+		value = (yield from self._parse_text(wake, value))
 		self.user['answers'][self.user['section']][self.user['last_path']][-1][1].append((key.strip(), value.strip()))
 		user.refresh_admins()
 	# }}}
 	def home(self): # {{{
+		if self.busy:
+			log('attempt to home while busy')
+			return
 		self.user['section'] = None
 		self.user['python'].finish()
 		del self.user['python']
@@ -440,10 +491,16 @@ class Connection: # {{{
 		self.remote.main.event()
 	# }}}
 	def start(self, section): # {{{
+		wake = (yield)
+		if self.busy:
+			log('attempt to start while busy')
+			return
 		self.user['section'] = tuple(section)
-		self._start(section, content.get(self.user['group'], self.user['section']), False)
+		self.busy = True
+		yield from self._start(wake, section, content.get(self.user['group'], self.user['section']), False)
+		self.busy = False
 	# }}}
-	def _start(self, section, section_content, send_errors): # {{{
+	def _start(self, wake, section, section_content, send_errors): # {{{
 		self.user['full_section'], self.index, characters, errors = section_content
 		if send_errors:
 			if len(errors) > 0:
@@ -461,29 +518,18 @@ class Connection: # {{{
 		self.user['python'] = Python()
 		self.user['python'].set('name', self.user['name'])
 		self.user['python'].set('group', self.user['group'])
-		'''self.user['variables'] = {
-				# Set style for last answer.
-				#'answer': self._answer,
-				# act as if those commands were in the script.
-				#'text': self._add_text,
-				#'say': self._say,
-				#'show': self._show,
-				#'hide': self._hide,
-				#'question': self._question,
-				# TODO: provide access to answers, persistent local and persistent global data.
-				}'''
 		startup = fhs.read_data('startup.py')
 		if startup is not None:
 			try:
-				self.user['python'].run(startup.read(), False)
+				yield from self.user['python'].run(wake, startup.read(), False)
 			except:
 				debug(1, 'Error in startup script')
 				traceback.print_exc()
 		for c in characters:
 			self._add_character(c, *characters[c])
-		self._run()
+		yield from self._run(wake)
 	# }}}
-	def _question(self, qtype, last_answer = None, params = ()): # {{{
+	def _question(self, wake, qtype, last_answer = None, params = ()): # {{{
 		if qtype == 'unit':
 			qtype = 'short'
 			if last_answer is not None:
@@ -492,7 +538,9 @@ class Connection: # {{{
 			qtype = 'longshort'
 			if last_answer is not None:
 				last_answer = (''.join(str(x) for x in last_answer[0]), last_answer[1])
-		self._handle_story(qtype, self.user['text_buffer'], last_answer, [self._parse_text(x) for x in params])
+		p = list((yield from self._parse_text(wake, x)) for x in params)
+		debug(3, p)
+		self._handle_story(qtype, self.user['text_buffer'], last_answer, p)
 		self.breaking = True
 		return True
 	# }}}
@@ -500,16 +548,16 @@ class Connection: # {{{
 		self.user['characters'][code] = {'name': name, 'imgs': imgs, 'ext': ext, 'mood': 'default', 'x': 0, 'y': 0}
 		c = self.user['characters'][code]
 	# }}}
-	def _say(self, name, text, image = None): # {{{
-		self.user['text_buffer'].append(('text', name, self._parse_text(text), image))
+	def _say(self, wake, name, text, image = None): # {{{
+		self.user['text_buffer'].append(('text', name, (yield from self._parse_text(wake, text)), image))
 	# }}}
 	def _show(self, tag, mood = None, at = 'center', transition = None, timing = None): # {{{
-		self._run_item(['story', None, content.showhide(True, tag, mood, at, transition, timing, False, None)])
+		yield from self._run_item(wake, ['story', None, content.showhide(True, tag, mood, at, transition, timing, False, None)])
 	# }}}
 	def _hide(self, tag, at = 'center', transition = None, timing = None): # {{{
-		self._run_item(['story', None, content.showhide(False, tag, None, at, transition, timing, False, None)])
+		yield from self._run_item(wake, ['story', None, content.showhide(False, tag, None, at, transition, timing, False, None)])
 	# }}}
-	def _run(self): # {{{
+	def _run(self, wake): # {{{
 		self.user['text_buffer'] = []
 		watchdog = 0
 		while len(self.user['run_stack']) > 0:
@@ -534,23 +582,23 @@ class Connection: # {{{
 					self.home()
 					return
 			# Run instructions.
-			if self._run_item(self.user['run_stack'][-1][0][self.user['run_stack'][-1][1]]):
+			if (yield from self._run_item(wake, self.user['run_stack'][-1][0][self.user['run_stack'][-1][1]])):
 				break
 		user.refresh_admins()
 	# }}}
-	def _run_item(self, code): # {{{
+	def _run_item(self, wake, code): # {{{
 		debug(3, '{}:{} running item {}'.format(self.user['name'], self.user['group'], repr(code)))
 		if code[0] == 'label':
 			pass
 		elif code[0] == 'story':
 			for item in code[2]:
-				self._add_text(item)
+				yield from self._add_text(wake, item)
 		elif code[0] == 'answer':
-			self._answer(code[2], code[3])
+			yield from self._answer(wake, code[2], code[3])
 		elif code[0] == 'if':
 			self.user['run_stack'][-1][1] += 1
 			for expr, target in code[2:-1]:
-				if self._safe_eval(expr, as_str = False):
+				if (yield from self._safe_eval(wake, expr, as_str = False)):
 					self.user['run_stack'].append([target, 0])
 					break
 			else:
@@ -559,7 +607,7 @@ class Connection: # {{{
 			return False
 		elif code[0] == 'while':
 			# Don't increment instruction pointer, so the loop restarts.
-			if self._safe_eval(code[2], as_str = False):
+			if (yield from self._safe_eval(wake, code[2], as_str = False)):
 				self.user['run_stack'].append([code[3], 0])
 			else:
 				self.user['run_stack'][-1][1] += 1
@@ -583,7 +631,7 @@ class Connection: # {{{
 			self.breaking = False
 			self.user['run_stack'][-1][1] += 1	# Do this before running the code, so goto works.
 			try:
-				new_commands = self.user['python'].run('\n'.join(code[2]))
+				new_commands = (yield from self.user['python'].run(wake, '\n'.join(code[2])))
 				if len(new_commands) > 0:
 					self.user['run_stack'].append([new_commands, 0])
 			except:
@@ -598,14 +646,14 @@ class Connection: # {{{
 				self.remote.video.event(config['content'] + '/' + self.user['group'].lower() + '/' + self.user['section'][0] + '/' + self.user['section'][1] + '/' + code[2])
 			return True
 		elif code[0] == 'hidden':
-			self.store_answer(code[2], self._safe_eval(code[3], as_str = True))
+			self._store_answer(code[2], (yield from self._safe_eval(wake, code[3], as_str = True)))
 		else:
 			# Question.
 			if self.user['section'] in self.user['answers'] and code[2] in self.user['answers'][self.user['section']]:
 				last_answer = self.user['answers'][self.user['section']][code[2]][-1][0]
 			else:
 				last_answer = None
-			return self._question(code[0], last_answer, code[3:])
+			return (yield from self._question(wake, code[0], last_answer, code[3:]))
 		self.user['run_stack'][-1][1] += 1
 		return False
 	# }}}
@@ -644,9 +692,10 @@ class Connection: # {{{
 			# ('animation', tag, anim)
 			# ('wait', seconds)
 			return item
+		debug(3, text_buffer)
 		self.remote.story.event(q, [handle(x) for x in text_buffer], last_answer, *args)
 	# }}}
-	def store_answer(self, question, answer, store = True): # {{{
+	def _store_answer(self, question, answer, store = True): # {{{
 		self.user['python'].set(question, answer)
 		if store:
 			if self.user['section'] not in self.user['answers']:
@@ -662,9 +711,15 @@ class Connection: # {{{
 			self.user['last_path'] = None
 	# }}}
 	def answer(self, answer): # {{{
+		wake = (yield)
+		if self.busy:
+			log('attempt to answer while busy')
+			return
 		debug(3, '{}:{} answers {}'.format(self.user['name'], self.user['group'], answer))
 		if self.user['run_stack'][-1][1] >= len(self.user['run_stack'][-1][0]):
-			self._run()
+			self.busy = True
+			yield from self._run(wake)
+			self.busy = False
 			return
 		current = self.user['run_stack'][-1][0][self.user['run_stack'][-1][1]]
 		if current[0] not in ('number', 'short', 'long', 'choice', 'unit', 'longnumber', 'longshort', 'longunit', 'longchoice'):
@@ -711,29 +766,50 @@ class Connection: # {{{
 				# Leave answer string as is (but force str); this only happens when users are messing with the js.
 				debug(2, 'unparsable long* answer: {}'.format(answer))
 				answer = ('', str(answer).strip())
-		self.store_answer(current[2], answer, store)
+		self._store_answer(current[2], answer, store)
 		self.user['run_stack'][-1][1] += 1
-		self._run()
+		self.busy = True
+		yield from self._run(wake)
+		self.busy = False
 	# }}}
 	def video_done(self): # {{{
+		wake = (yield)
+		if self.busy:
+			log('attempt to finish video while busy')
+			return
 		if self.user['run_stack'][-1][1] >= len(self.user['run_stack'][-1][0]):
-			self._run()
+			self.busy = True
+			yield from self._run(wake)
+			self.busy = False
 			return
 		current = self.user['run_stack'][-1][0][self.user['run_stack'][-1][1]]
 		if current[0] == 'video':
 			self.user['run_stack'][-1][1] += 1
-			self._run()
+			self.busy = True
+			yield from self._run(wake)
+			self.busy = False
 	# }}}
 	def text_done(self): # {{{
+		wake = (yield)
+		if self.busy:
+			log('attempt to finish text while busy')
+			return
 		if self.user['run_stack'][-1][1] >= len(self.user['run_stack'][-1][0]):
-			self._run()
+			self.busy = True
+			yield from self._run(wake)
+			self.busy = False
 			return
 		current = self.user['run_stack'][-1][0][self.user['run_stack'][-1][1]]
 		if current[0] == 'story':
 			self.user['run_stack'][-1][1] += 1
-		self._run()
+		self.busy = True
+		yield from self._run(wake)
+		self.busy = False
 	# }}}
 	def sandbox_list(self): # {{{
+		if self.busy:
+			log('attempt to list sandbox while busy')
+			return
 		if not self.user['sandbox']:
 			debug(1, 'User {}:{} is not allowed to use sandbox'.format(self.user['name'], self.user['group']))
 			raise PermissionError('User is not allowed to use sandbox')
@@ -754,6 +830,9 @@ class Connection: # {{{
 		return make_list(basedir, '')
 	# }}}
 	def sandbox_remove(self, name): # {{{
+		if self.busy:
+			log('attempt to remove sandbox while busy')
+			return
 		if not self.user['sandbox']:
 			debug(1, 'User is not allowed to use sandbox')
 			raise PermissionError('User is not allowed to use sandbox')
@@ -763,6 +842,10 @@ class Connection: # {{{
 		os.unlink(os.path.join(basedir, name))
 	# }}}
 	def sandbox_play(self, scriptname): # {{{
+		wake = (yield)
+		if self.busy:
+			log('attempt to play sandbox while busy')
+			return
 		if not self.user['sandbox']:
 			debug(1, 'User is not allowed to use sandbox')
 			raise PermissionError('User is not allowed to use sandbox')
@@ -770,9 +853,14 @@ class Connection: # {{{
 		d = os.path.dirname(scriptname)
 		assert '.' not in d and os.path.exists(os.path.join(basedir, scriptname))
 		self.user['section'] = ('sandbox', self.user['name'].lower())
-		self._start(self.user['section'], content.get_file(self.user['group'], self.user['section'], os.path.join(basedir, scriptname)), True)
+		self.busy = True
+		yield from self._start(wake, self.user['section'], content.get_file(self.user['group'], self.user['section'], os.path.join(basedir, scriptname)), True)
+		self.busy = False
 	# }}}
 	def sandbox_get(self, name): # {{{
+		if self.busy:
+			log('attempt to get sandbox while busy')
+			return
 		if not self.user['sandbox']:
 			debug(1, 'User is not allowed to use sandbox')
 			raise PermissionError('User is not allowed to use sandbox')
@@ -782,6 +870,9 @@ class Connection: # {{{
 		return open(os.path.join(basedir, name)).read()
 	# }}}
 	def sandbox_put(self, name, contents): # {{{
+		if self.busy:
+			log('attempt to put sandbox while busy')
+			return
 		if not self.user['sandbox']:
 			debug(1, 'User is not allowed to use sandbox')
 			raise PermissionError('User is not allowed to use sandbox')
@@ -796,6 +887,9 @@ def sandbox_post(connection): # {{{
 	'''Upload a new file for the sandbox.
 	Credentials must be provided in the cookie. User must be allowed to use the sandbox.
 	'''
+	if connection.busy:
+		log('attempt to post sandbox while busy')
+		return
 	if 'cookie' not in connection.headers or 'file' not in connection.post[1]:
 		debug(1, 'ignoring invalid POST request')
 		sandboxserver.reply(connection, 404, 'invalid POST request', 'text/plain;charset=utf-8')
