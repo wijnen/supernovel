@@ -275,7 +275,6 @@ class Python_secure: # {{{
 				ret = None
 			if err is not None:
 				log(err)
-			debug(3, 'waking with %s, %s' % (err, ret))
 			wake((err, ret))
 			return False
 		def error():
@@ -291,9 +290,7 @@ class Python_secure: # {{{
 			return False
 		websocketd.add_read(self.worker.stdout, cb, error)
 		to_handle = websocketd.add_timeout(time.time() + 10, timeout)
-		debug(3, 'waiting for response')
 		ret = (yield)
-		debug(3, ret)
 		return ret
 	def compute(self, wake, expr, as_str):
 		err, ret = (yield from self.read_line(wake, '%s\t%s\n' % ('str' if as_str else 'bool', json.dumps(expr))))
@@ -450,19 +447,17 @@ class Connection: # {{{
 	# }}}
 	def _add_text(self, wake, text): # {{{
 		'''Prepare text for displaying.'''
-		debug(3, 'running story item %s' % text)
+		#debug(3, 'running story item %s' % text)
 		if not isinstance(text, str):
 			if text[0] == 'text':
 				self.user['text_buffer'].append((text[0], '' if text[1] is None else (yield from self._parse_text(wake, text[1])), (yield from self._parse_text(wake, text[2])), text[3]))
 			else:
 				self.user['text_buffer'].append(text)
-			debug(3, 'new text buffer: %s' % self.user['text_buffer'])
 			return
 		if len(self.user['text_buffer']) > 0 and isinstance(self.user['text_buffer'][-1], str):
 			self.user['text_buffer'][-1] += '\n' + (yield from self._parse_text(wake, text))
 		else:
 			self.user['text_buffer'].append((yield from self._parse_text(wake, text)))
-		debug(3, 'new text buffer: %s' % self.user['text_buffer'])
 	# }}}
 	def _answer(self, wake, key, value = None): # {{{
 		'''Set style for last answer.
@@ -538,8 +533,9 @@ class Connection: # {{{
 			qtype = 'longshort'
 			if last_answer is not None:
 				last_answer = (''.join(str(x) for x in last_answer[0]), last_answer[1])
-		p = list((yield from self._parse_text(wake, x)) for x in params)
-		debug(3, p)
+		p = []
+		for x in params:
+			p.append((yield from self._parse_text(wake, x)))
 		self._handle_story(qtype, self.user['text_buffer'], last_answer, p)
 		self.breaking = True
 		return True
@@ -692,7 +688,6 @@ class Connection: # {{{
 			# ('animation', tag, anim)
 			# ('wait', seconds)
 			return item
-		debug(3, text_buffer)
 		self.remote.story.event(q, [handle(x) for x in text_buffer], last_answer, *args)
 	# }}}
 	def _store_answer(self, question, answer, store = True): # {{{
