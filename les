@@ -11,7 +11,16 @@ import time
 import fhs
 import websocketd
 from markdown import markdown
-config = fhs.init({'data': '.', 'port': '8010', 'admin-port': '8011', 'beamer-port': '8012', 'loglimit': 1, 'content': 'les-content', 'lazysave': False, 'secret': '', 'logfile': '', 'group': None})
+fhs.option('data', 'data directory', default = '.')
+fhs.option('port', 'user port', default = '8010')
+fhs.option('admin-port', 'admin port', default = '8011')
+fhs.option('beamer-port', 'beamer port', default = '8012')
+fhs.option('loglimit', 'highest log level to output', default = 1)
+fhs.option('content', 'replacement string for FILE://', default = 'les-content')
+fhs.option('lazysave', 'save only when user quits', argtype = bool)
+fhs.option('secret', 'security override key', default = '')
+fhs.option('logfile', 'send log to this file instead of stderr', default = '')
+config = fhs.init(help = 'let students answer questions while in class', contact = 'Bas Wijnen <wijnen@debian.org>', version = '0.1')
 from debug import debug
 import user
 # }}}
@@ -23,7 +32,7 @@ import user
 		3: Debug
 }}} '''
 
-group = config['group']
+group = sys.argv[1]
 variables = {}
 def parse_text(text): # {{{
 	def subst(obj):
@@ -38,7 +47,13 @@ def parse_text(text): # {{{
 	return re.sub('\${(.*?)}', subst, text).replace('FILE://', config['content'] + '/')
 # }}}
 
+def user_has_pw(the_user):
+	u, answers = user.load(the_user, group)
+	return u['password'] is not None
+
 all_users = user.list_group(group)
+have_pw = {u: user_has_pw(u) for u in all_users}
+seen = set()
 all_admins = user.list_group('admin')
 responses = {u: None for u in all_users}
 cookies = {u: ''.join(chr(random.randrange(ord('a'), ord('z') + 1)) for _ in range(32)) for u in all_users}
@@ -148,6 +163,7 @@ def run(index): # {{{
 	for a in user.admins:
 		user.admins[a].remote.current.event(current)
 		user.admins[a]._update_responses()
+	beamerserver.broadcast.refresh(refresh_beamer())
 # }}}
 
 def update_responses(): # {{{
@@ -160,18 +176,21 @@ blocked = set()
 def update_blocks():
 	for a in user.admins:
 		user.admins[a]._update_blocks()
+	beamerserver.broadcast.refresh(refresh_beamer())
 
+freeze = None
 def refresh_beamer(): # {{{
 	p = program[current] if current < len(program) else {'arg': '-', 'option': []}
+	p = {k: v for k, v in p.items() if k in ('cmd', 'arg', 'option')}
 	if not show_answers or not current < len(program):
-		return p, False, sum(a is not None for a in responses), len(responses), {}, []
-	num_ans = 0
+		return p, False, sum(responses[u] is not None for u in responses), len(user.users) - len(user.admins), {}, []
+	if freeze is not None:
+		return p, True, freeze[0], freeze[1]
 	answers = {}
 	opts = []
 	for u in all_users:
 		a = responses[u]
 		if a is not None:
-			num_ans += 1
 			if program[current]['cmd'] not in ('choices', 'words', 'terms'):
 				a = [a]
 			for opt in a:
@@ -181,17 +200,18 @@ def refresh_beamer(): # {{{
 					answers[opt] = 0
 					opts.append(opt)
 				answers[opt] += 1
-	opts.sort(key = lambda a, b: answers[a] - answers[b])
-	return p, True, num_ans, len(responses), answers, opts
+	opts.sort(key = lambda a: answers[a])
+	return p, True, answers, opts
 # }}}
 
 class Beamer_Connection: # {{{
 	def __init__(self, remote): # {{{
 		self.remote = remote
-		self.refresh.event(refresh_beamer())
+		self.remote.refresh.event(refresh_beamer())
 	# }}}
 # }}}
 
+show_answers = False
 class Admin_Connection: # {{{
 	def __init__(self, remote): # {{{
 		self.remote = remote
@@ -268,7 +288,7 @@ class Admin_Connection: # {{{
 	# }}}
 	#'
 	def _update_responses(self): # {{{
-		self.remote.responses.event([(u, responses[u], (u, group) in user.users) for u in all_users])
+		self.remote.responses.event([(u, responses[u], 'answered' if responses[u] is not None else 'waiting' if (u, group) in user.users else 'inactive' if not have_pw[u] else 'disconnected' if u in seen else 'offline') for u in all_users])
 	# }}}
 	def _update_blocks(self): # {{{
 		self.remote.blocked.event({b: True for b in blocked})
@@ -277,7 +297,8 @@ class Admin_Connection: # {{{
 		run(index)
 	# }}}
 	def refresh(self): # {{{
-		pass
+		self._update_responses()
+		self._update_blocks()
 	# }}}
 	def block(self, option, value): # {{{
 		if isinstance(option, list):
@@ -289,10 +310,33 @@ class Admin_Connection: # {{{
 				blocked.remove(option)
 		update_blocks()
 	# }}}
-	def show_answers(show = True): # {{{
+	def show_answers(self, show = True): # {{{
 		global show_answers
+		if show_answers is show:
+			return
 		show_answers = show
+		self.freeze(show)
+		adminserver.broadcast.show(show)
+	# }}}
+	def freeze(self, frozen = True): # {{{
+		global freeze
+		if (freeze is not None) == frozen:
+			return
+		freeze = None
+		if frozen:
+			freeze = refresh_beamer()[-2:]
 		beamerserver.broadcast.refresh(refresh_beamer())
+		adminserver.broadcast.freeze(frozen)
+	# }}}
+	def reset_password(self, the_user): # {{{
+		u, answers = user.load(the_user.strip(), group)
+		if u is None:
+			debug(2, 'Invalid user {}:{} on {}:{}'.format(name, group, *self.remote.socket.remote))
+			return 'deze naam is onbekend'
+		u['password'] = None
+		have_pw[the_user] = False
+		user.refresh_admins()
+		user.save(u)
 	# }}}
 # }}}
 
@@ -331,7 +375,11 @@ class Connection: # {{{
 			return 'dit wachtwoord is onjuist'
 		u = self._login(name.strip(), group.strip())
 		# In case the password is new, it needs to be stored.
-		u['password'] = crypted
+		if name.lower() not in have_pw or not have_pw[name.lower()]:
+			u['password'] = crypted
+			have_pw[name] = True
+			user.refresh_admins()
+			user.save(u)
 		return None
 	# }}}
 	def _login(self, name, group): # {{{
@@ -348,6 +396,7 @@ class Connection: # {{{
 			self.answers = u['connection'].answers
 			u['connection'].remote.close()
 		else:
+			seen.add(u['name'])
 			self.answers = answers
 			user.users[(name.lower(), group.lower())] = u
 		u['connection'] = self
@@ -356,6 +405,7 @@ class Connection: # {{{
 		self.remote.cookie.event(self.user['filename'], cookies[self.user['filename']])
 		self._send_state()
 		user.refresh_admins()
+		beamerserver.broadcast.refresh(refresh_beamer())
 		return u
 	# }}}
 	def _closed(self): # {{{
@@ -370,6 +420,7 @@ class Connection: # {{{
 		except:
 			pass
 		user.refresh_admins()
+		beamerserver.broadcast.refresh(refresh_beamer())
 	# }}}
 	def _send_state(self): # {{{
 		self.remote.content.event(current, {k: v for k, v in program[current].items() if k not in ('filter', 'score')} if current < len(program) else None, responses[self.user['name'].lower()])
@@ -396,7 +447,7 @@ class Connection: # {{{
 # }}}
 
 # Main program {{{
-server = websocketd.RPChttpd(config['port'], Connection, httpdirs = [os.path.join('les-html', 'main')], tls = False)
+server = websocketd.RPChttpd(config['port'], Connection, httpdirs = [os.path.join('les-html', 'main')], tls = False, proxy = 'les')
 adminserver = websocketd.RPChttpd(config['admin-port'], Admin_Connection, httpdirs = [os.path.join('les-html', 'admin')], tls = False)
 # The beamer is the same in terms of handling, but it uses different html.
 beamerserver = websocketd.RPChttpd(config['beamer-port'], Beamer_Connection, httpdirs = [os.path.join('les-html', 'beamer')], tls = False)

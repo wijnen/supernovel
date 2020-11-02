@@ -13,11 +13,9 @@
 			<h1>Een moment geduld</h1>
 			<p>De verbinding met de server wordt gemaakt.</p>
 			<p>Als dit bericht blijft staan, is er iets mis.</p>
-			<p>Hieronder kunnen meldingen staan die het probleem hopelijk verduidelijken.</p>
-			<div id='debugging_console'></div>
 		</div>
 		<div id='login'>
-			<div id='group'>Klas: </div>
+			<div>Klas: <span id='group'></span></div>
 			<form onsubmit='return log_in()'>
 				Naam: <input type='text' id='loginname'/><br/>
 				Wachtwoord: <input type='password' id='password'/><br/>
@@ -26,7 +24,11 @@
 		</div>
 		<div id='content'>
 		</div>
-		<div id='names'>
+		<div id='namesbox'>
+			<div id='names'>
+			</div>
+			<label><input type='checkbox' id='show' onchange='show()'/>Show Answers</label>
+			<label><input type='checkbox' id='freeze' onchange='freeze()'/>Freeze</label>
 		</div>
 	</body>
 </html>

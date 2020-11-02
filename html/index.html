@@ -12,38 +12,36 @@
 		<audio id='music' loop='loop'></audio>
 		<audio id='sound'></audio>
 		<div id='error'>
-			<h1>Een moment geduld</h1>
-			<p>De verbinding met de server wordt gemaakt.</p>
-			<p>Als dit bericht blijft staan, is er iets mis.</p>
-			<p>Hieronder kunnen meldingen staan die het probleem hopelijk verduidelijken.</p>
-			<div id='debugging_console'></div>
+			<h1>Please Wait</h1>
+			<p>The connection with the server is attempted.</p>
+			<p>If this message does not disappear, there is a problem. There may be messages in the debugging console that identify the problem.</p>
 		</div>
 		<div id='login'>
-			<h1>Log in bij Lesverhaal</h1>
+			<h1>Log in to Lesverhaal</h1>
 			<form onsubmit='return log_in()'>
-				Naam: <input type='text' id='loginname'/><br/>
-				Klas: <input type='text' id='class'/><br/>
-				Wachtwoord: <input type='password' id='password'/><br/>
-				<button type='button' value='Log in' onclick='log_in()'>Log in</button>
+				Name: <input type='text' id='loginname'/><br/>
+				Class: <input type='text' id='class'/><br/>
+				Password: <input type='password' id='password'/><br/>
+				<input type='submit' value='Log in'/>
 			</form>
 		</div>
 		<div id='contents'>
-			<div id='logout'><button type='button' onclick='log_out()'>Log uit</button></div>
+			<div id='logout'><button type='button' onclick='log_out()'>Log out</button></div>
 			<ul id='chapters'></ul>
 			<hr/>
 			<ul id='sections'></ul>
 		</div>
 		<div id='video'>
 			<video preload='auto' controls></video><br/>
-			Snelheid: <input type='number' id='speed' onchange='speed()' value='100'/>%<br/>
-			<button onclick='video_done()'>Ga verder</button>
+			Speed: <input type='number' id='speed' onchange='speed()' value='100'/>%<br/>
+			<button onclick='video_done()'>Continue</button>
 		</div>
 		<div id='navigation'>
-			<button type='button' class='navbutton' onclick='prev_kinetic(true)'>Begin</button>
-			<button type='button' class='navbutton' onclick='prev_kinetic()'>Terug</button>
-			<button type='button' class='navbutton' onclick='home()'>Inhoud</button>
-			<button type='button' class='navbutton' onclick='next_kinetic()'>Verder</button>
-			<button type='button' class='navbutton' onclick='next_kinetic("finish")'>Eind</button>
+			<button type='button' class='navbutton' onclick='prev_kinetic(true)'>&#x21e4;</button>
+			<button type='button' class='navbutton' onclick='prev_kinetic()'>&#x2190;</button>
+			<button type='button' class='navbutton' onclick='home()'>&#x2191;</button>
+			<button type='button' class='navbutton' onclick='next_kinetic()'>&#x2192;</button>
+			<button type='button' class='navbutton' onclick='next_kinetic("finish")'>&#x21e5;</button>
 		</div>
 		<div id='spritebox'></div>
 		<div id='speechbox'>

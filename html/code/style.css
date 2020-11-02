@@ -12,8 +12,10 @@ body {
 	left: 0px;
 	top: 0px;
 	right: 0px;
-	padding: 1em 1em;
-	margin: 1em 1em;
+	padding: 3em 3em 3em 3em;
+	margin: 3em 3em 3em 3em;
+	border-radius: 2ex;
+	border: solid black .5ex;
 }
 
 #login {
@@ -88,6 +90,7 @@ button.not(#navbutton) {
 
 #question {
 	background-color: rgba(255, 255, 255, .5);
+	box-sizing: border-box;
 	height: 90vh;
 	z-index: 2;
 }
@@ -97,8 +100,14 @@ button.not(#navbutton) {
 	top: 0px;
 	right: 0px;
 }
-.choicebutton {
-	display: block;
+.choicebuttons {
+	text-align: center;
+}
+.choicebutton, .chapter, .script {
+	display: inline;
+	padding: 1em 5em 1em 5em;
+	margin: 1ex 1ex 1ex 1ex;
+	border-radius: 2em;
 }
 
 #contents {
@@ -115,4 +124,5 @@ ul {
 
 .active {
 	background-color: blue;
+	color: white;
 }

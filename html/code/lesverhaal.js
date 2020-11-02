@@ -47,14 +47,14 @@ var Connection = {
 		var buttons = [];
 		for (var c = 0; c < chapterlist.length; ++c) {
 			var chapter = chapterlist[c];
-			buttons.push(chapters.AddElement('li').AddElement('button').AddText(chapter).AddEvent('click', function() {
+			buttons.push(chapters.AddElement('li').AddElement('button', 'chapter').AddText(chapter).AddEvent('click', function() {
 				sections.ClearAll();
 				for (var b = 0; b < buttons.length; ++b)
 					buttons[b].RemoveClass('active');
 				this.AddClass('active');
 				for (var s = 0; s < data[this.chapter].length; ++s) {
 					var section = data[this.chapter][s];
-					var button = sections.AddElement('li').AddElement('button').AddText(section).AddEvent('click', function() {
+					var button = sections.AddElement('li').AddElement('button', 'script').AddText(section).AddEvent('click', function() {
 						server.call('start', [[this.chapter, this.section]]);
 					});
 					button.chapter = this.chapter;
@@ -138,12 +138,26 @@ var Connection = {
 				case 'longchoice':
 					var l = form.AddElement('textarea');
 					var div = form.AddElement('div');
+					var choices = [];
 					for (var o = 0; o < options.length; ++o) {
-						var button = div.AddElement('button', 'choicebutton').AddText(options[o]);
+						var label = div.AddElement('label', 'longchoice');
+						var radio = label.AddElement('input');
+						radio.type = 'radio';
+						radio.name = 'radio';
+						choices.push(radio);
+						label.AddText(options[o]);
+						var button = div.AddElement('button');
 						button.type = 'button';
-						button.value = o;
+						button.AddText('Answer');
 						button.AddEvent('click', function() {
-							server.call('answer', [[Number(this.value), l.value]]);
+							for (var o = 0; o < choices.length; ++o) {
+								if (choices[o].checked)
+									break;
+							}
+							if (o < choices.length)
+								server.call('answer', [[o, l.value]]);
+							else
+								alert('Please select your answer');
 						});
 					}
 					if (last_answer != null) {
@@ -183,8 +197,10 @@ var Connection = {
 					};
 					break;
 				case 'choice':
-					var div = form.AddElement('div');
+					var div = form.AddElement('div', 'choicebuttons');
 					for (var o = 0; o < options.length; ++o) {
+						if (o > 0)
+							div.AddElement('br');
 						var button = div.AddElement('button', 'choicebutton').AddText(options[o]);
 						button.type = 'button';
 						button.value = o;
@@ -194,7 +210,7 @@ var Connection = {
 					}
 					if (last_answer != null) {
 						div.AddElement('hr');
-						var button = div.AddElement('button', 'choicebutton').AddText('Herhaal laatste antwoord: ' + options[last_answer]);
+						var button = div.AddElement('button', 'choicebutton').AddText('Repeat last answer: ' + options[last_answer]);
 						button.type = 'button';
 						button.AddEvent('click', function() {
 							server.call('answer', [last_answer]);
@@ -227,7 +243,7 @@ var Connection = {
 					break;
 				case 'text': // Not a real question, just continue.
 					form.AddElement('br');
-					form.AddElement('button').AddText('Ga Verder').AddEvent('click', function() {
+					form.AddElement('button').AddText('Continue').AddEvent('click', function() {
 						server.call('text_done', []);
 					}).type = 'button';
 					return;
@@ -238,7 +254,7 @@ var Connection = {
 				send_answer();
 			}).type = 'button';
 			if (last_answer != null) {
-				form.AddElement('button').AddText('Herhaal vorige antwoord: ' + last_answer).AddEvent('click', function() {
+				form.AddElement('button').AddText('Repeat last answer: ' + last_answer).AddEvent('click', function() {
 					server.call('answer', [last_answer]);
 				}).type = 'button';
 			}
@@ -267,9 +283,9 @@ var Connection = {
 		video.play();
 	},
 	cookie: function(n, g, c) {
-		document.cookie = 'name=' + encodeURIComponent(n);
-		document.cookie = 'group=' + encodeURIComponent(g);
-		document.cookie = 'key=' + encodeURIComponent(c);
+		document.cookie = 'name=' + encodeURIComponent(n) + '; sameSite=Lax';
+		document.cookie = 'group=' + encodeURIComponent(g) + '; sameSite=Lax';
+		document.cookie = 'key=' + encodeURIComponent(c) + '; sameSite=Lax';
 	},
 };
 

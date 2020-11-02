@@ -65,4 +65,4 @@ for line in sys.stdin:
 		sys.stderr.write('Invalid command received: %s\n' % repr(line))
 	#sys.stderr.write('handling done\n')
 
-#sys.stderr.write('Worker received EOF on stdin; closing.\n')
+sys.stderr.write('Worker received EOF on stdin; closing.\n')

@@ -248,7 +248,7 @@ class Python_secure: # {{{
 	That needs to be set up externally. This class just runs a program that should do that.
 	'''
 	def __init__(self):
-		self.worker = subprocess.Popen(shlex.split(config['jail']), stdin = subprocess.PIPE, stdout = subprocess.PIPE, close_fds = True, encoding = 'utf-8')
+		self.worker = subprocess.Popen(shlex.split(config['jail']), stdin = subprocess.PIPE, stdout = subprocess.PIPE, stderr = sys.stderr, close_fds = True, encoding = 'utf-8')
 		flag = fcntl.fcntl(self.worker.stdout, fcntl.F_GETFL)
 		fcntl.fcntl(self.worker.stdout, fcntl.F_SETFL, flag | os.O_NONBLOCK)
 		self.data = ''
@@ -475,15 +475,19 @@ class Connection: # {{{
 		self.user['answers'][self.user['section']][self.user['last_path']][-1][1].append((key.strip(), value.strip()))
 		user.refresh_admins()
 	# }}}
-	def home(self): # {{{
-		if self.busy:
-			log('attempt to home while busy')
-			return
+	def _home(self): # {{{
 		self.user['section'] = None
 		self.user['python'].finish()
 		del self.user['python']
 		user.refresh_admins()
 		self.remote.main.event()
+	# }}}
+	def home(self): # {{{
+		if self.busy and not force:
+			traceback.print_stack()
+			log('attempt to home while busy')
+			return
+		self._home()
 	# }}}
 	def start(self, section): # {{{
 		wake = (yield)
@@ -575,7 +579,7 @@ class Connection: # {{{
 						self.user['run_stack'] = [[self.user['full_section'], len(self.user['full_section'])]]
 						user.refresh_admins()
 						return
-					self.home()
+					self._home()
 					return
 			# Run instructions.
 			if (yield from self._run_item(wake, self.user['run_stack'][-1][0][self.user['run_stack'][-1][1]])):

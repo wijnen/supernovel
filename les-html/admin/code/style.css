@@ -28,12 +28,19 @@ body {
 	position: absolute;
 	left: 0px;
 	top: 0px;
-	width: 50vw;
+	width: 100vw;
+	z-index: 0;
 }
 
-#names {
-	position: absolute;
+#namesbox {
+	position: fixed;
 	right: 0px;
 	top: 0px;
 	width: 50vw;
+	z-index: 1;
+	background: #cfc;
+}
+
+img {
+	display: none;
 }

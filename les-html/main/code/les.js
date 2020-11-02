@@ -6,14 +6,16 @@ var Connection = {
 		init();
 	},
 	login: function() {
+		//console.info('login');
 		error.style.display = 'none';
 		login.style.display = 'block';
 		content.style.display = 'none';
 	},
 	group: function(g) {
-		group.AddText(g);
+		group.ClearAll().AddText(g);
 	},
 	content: function(tag, data, my_response) {
+		//console.info('content');
 		error.style.display = 'none';
 		login.style.display = 'none';
 		content.style.display = 'block';

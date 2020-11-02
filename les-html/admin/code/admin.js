@@ -22,7 +22,9 @@ function build_content() {
 	var anss = {};
 	var opts = [];
 	var students = {};
-	var waiting = '', offline = '';
+	var waiting = '';
+	var disconnected = [];
+	var offline = [];
 	for (var i = 0; i < responses.length; ++i) {
 		var a = responses[i][1];
 		if (a !== null) {
@@ -38,15 +40,16 @@ function build_content() {
 			anss[a] += 1;
 		}
 		else {
-			if (responses[i][2]) {
+			if (responses[i][2] == 'waiting') {
 				if (waiting.length > 0)
 					waiting += ', ';
 				waiting += responses[i][0];
 			}
+			else if (responses[i][2] == 'disconnected') {
+				disconnected.push([responses[i][0], responses[i][2]]);
+			}
 			else {
-				if (offline.length > 0)
-					offline += ', ';
-				offline += responses[i][0];
+				offline.push([responses[i][0], responses[i][2]]);
 			}
 		}
 	}
@@ -64,7 +67,25 @@ function build_content() {
 		});
 	}
 	ul.AddElement('li').AddText('Wacht op: ' + waiting);
-	ul.AddElement('li').AddText('Offline: ' + offline);
+	var parts = [['Disconnected', disconnected], ['Offline', offline]];
+	for (var i = 0; i < parts.length; ++i) {
+		parts[i][1].sort();
+		var li = ul.AddElement('li').AddText(parts[i][0] + ': ');
+		for (var u = 0; u < parts[i][1].length; ++u) {
+			if (u > 0)
+				li.AddText(', ');
+			var a = li.AddElement('a');
+			a.AddText(parts[i][1][u][0]);
+			if (parts[i][1][u][1] != 'inactive')
+				a.href = 'javascript:reset_password("' + parts[i][1][u][0] + '")';
+		}
+	}
+}
+
+function reset_password(user) {
+	if (!confirm('Do you want to reset the password for ' + user + '?'))
+		return;
+	server.call('reset_password', [user]);
 }
 
 var Connection = {
@@ -79,7 +100,7 @@ var Connection = {
 		names.style.display = 'none';
 	},
 	group: function(g) {
-		group.AddText(g);
+		group.ClearAll().AddText(g);
 	},
 	program: function(prog) {
 		error.style.display = 'none';
@@ -91,6 +112,16 @@ var Connection = {
 	},
 	current: function(cur) {
 		current = cur;
+		document.getElementById('show').checked = false;
+		show();
+		build_content();
+	},
+	show: function(show) {
+		document.getElementById('show').checked = show;
+		build_content();
+	},
+	freeze: function(freeze) {
+		document.getElementById('freeze').checked = freeze;
 		build_content();
 	},
 	responses: function(res) {
@@ -144,6 +175,21 @@ function log_in() {
 			alert('Inloggen is mislukt: ' + error);
 	});
 	return false;
+}
+
+function show() {
+	var state = document.getElementById('show').checked;
+	server.call('show_answers', [state], {}, function() {
+		if (!state) {
+			document.getElementById('freeze').checked = false;
+		}
+		document.getElementById('freeze').disabled = state == false;
+	});
+}
+
+function freeze() {
+	var state = document.getElementById('freeze').checked;
+	server.call('freeze', [state]);
 }
 
 // vim: set foldmethod=marker foldmarker={,} :
