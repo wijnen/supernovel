@@ -12,7 +12,7 @@ from debug import debug
 users = {}	# including admins.
 admins = {}
 # Keys which are never saved.
-unsaved = ('connection', 'text_buffer', 'full_section', 'run_stack', 'section', 'answers', 'variables', 'last_path', 'characters', 'cookie')
+unsaved = ('connection', 'text_buffer', 'full_section', 'run_stack', 'section', 'answers', 'variables', 'last_path', 'characters', 'cookie', 'python')
 
 def mangle(src): # {{{
 	def escape(x):

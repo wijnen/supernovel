@@ -192,4 +192,8 @@ function freeze() {
 	server.call('freeze', [state]);
 }
 
+function store_answers() {
+	server.call('store_answers');
+}
+
 // vim: set foldmethod=marker foldmarker={,} :

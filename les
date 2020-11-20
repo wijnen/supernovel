@@ -20,6 +20,7 @@ fhs.option('content', 'replacement string for FILE://', default = 'les-content')
 fhs.option('lazysave', 'save only when user quits', argtype = bool)
 fhs.option('secret', 'security override key', default = '')
 fhs.option('logfile', 'send log to this file instead of stderr', default = '')
+fhs.option('store', 'file to store answers in', default = 'answers.txt')
 config = fhs.init(help = 'let students answer questions while in class', contact = 'Bas Wijnen <wijnen@debian.org>', version = '0.1')
 from debug import debug
 import user
@@ -288,19 +289,32 @@ class Admin_Connection: # {{{
 	# }}}
 	#'
 	def _update_responses(self): # {{{
+		assert self.user is not None
 		self.remote.responses.event([(u, responses[u], 'answered' if responses[u] is not None else 'waiting' if (u, group) in user.users else 'inactive' if not have_pw[u] else 'disconnected' if u in seen else 'offline') for u in all_users])
 	# }}}
 	def _update_blocks(self): # {{{
+		assert self.user is not None
 		self.remote.blocked.event({b: True for b in blocked})
 	# }}}
 	def run(self, index): # {{{
+		assert self.user is not None
 		run(index)
 	# }}}
+	def store_answers(self): # {{{
+		assert self.user is not None
+		with open(config['store'], 'a') as f:
+			f.write(str(program[current]) + '\n')
+			for u, r in responses.items():
+				f.write('{}\t{}\n'.format(u, repr(r)))
+			f.write('\n')
+	# }}}
 	def refresh(self): # {{{
+		assert self.user is not None
 		self._update_responses()
 		self._update_blocks()
 	# }}}
 	def block(self, option, value): # {{{
+		assert self.user is not None
 		if isinstance(option, list):
 			option = ','.join(option)
 		if value:
@@ -311,6 +325,7 @@ class Admin_Connection: # {{{
 		update_blocks()
 	# }}}
 	def show_answers(self, show = True): # {{{
+		assert self.user is not None
 		global show_answers
 		if show_answers is show:
 			return
@@ -319,6 +334,7 @@ class Admin_Connection: # {{{
 		adminserver.broadcast.show(show)
 	# }}}
 	def freeze(self, frozen = True): # {{{
+		assert self.user is not None
 		global freeze
 		if (freeze is not None) == frozen:
 			return
@@ -329,6 +345,7 @@ class Admin_Connection: # {{{
 		adminserver.broadcast.freeze(frozen)
 	# }}}
 	def reset_password(self, the_user): # {{{
+		assert self.user is not None
 		u, answers = user.load(the_user.strip(), group)
 		if u is None:
 			debug(2, 'Invalid user {}:{} on {}:{}'.format(name, group, *self.remote.socket.remote))

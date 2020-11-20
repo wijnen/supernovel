@@ -36,6 +36,7 @@ var Connection = {
 		var response_cb;
 		var div = content.ClearAll().AddElement('div');
 		div.innerHTML = data.arg;
+		var rich = false;
 		if (data.cmd == 'choice') {
 			var ul = div.AddElement('ul');
 			var opts = [];
@@ -75,38 +76,40 @@ var Connection = {
 			};
 		}
 		else {
+			rich = true;
 			var div2 = content.AddElement('div');
 			var e;
 			if (data.cmd == 'term') {
 				div2.AddText('Je antwoord: ');
-				e = div2.AddElement('input');
+				e = div2.AddElement('input', 'richinput');
 				response_cb = function() {
 					return e.value;
 				};
 			}
 			if (data.cmd == 'word') {
 				div2.AddText('Je antwoord (1 woord): ');
-				e = div2.AddElement('input');
+				e = div2.AddElement('input', 'richinput');
 				response_cb = function() {
 					return e.value;
 				};
 			}
 			if (data.cmd == 'words') {
 				div2.AddText('Je antwoord (1 of meer woorden): ');
-				e = div2.AddElement('input');
+				e = div2.AddElement('input', 'richinput');
 				response_cb = function() {
 					return e.value.split(' ');
 				};
 			}
 			else if (data.cmd == 'terms') {
 				div2.AddText('Je antwoorden (1 per regel): ');
-				e = div2.AddElement('textarea');
+				e = div2.AddElement('textarea', 'richinput');
 				response_cb = function() {
 					return e.value.split('\n');
 				};
 			}
 			else if (data.cmd == 'title') {
 				response_cb = function() { return null; };
+				rich = false;
 			}
 		}
 		if (data.cmd != 'title') {
@@ -118,6 +121,8 @@ var Connection = {
 				server.call('respond', [tag, r]);
 			});
 		}
+		if (rich)
+			richinput(content);
 		content.Add(response);
 	},
 	cookie: function(n, c) {
