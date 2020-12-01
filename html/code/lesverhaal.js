@@ -359,7 +359,6 @@ function next_kinetic(force) {
 				var anim = null;
 				if (cmd[2].animation !== undefined)
 					anim = cmd[2].animation;
-				delete cmd[2].animation;
 				var initial = {time: n};
 				for (var p in defaults) {
 					initial[p] = kinetic_sprites[cmd[1]].props[p];
