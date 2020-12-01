@@ -302,7 +302,7 @@ function home() {
 	server.call('home');
 }
 
-function next_kinetic(force) {
+function next_kinetic(force, rewind) {
 	if (document.activeElement != document.body)
 		document.activeElement.blur();
 	if (show_question || (!force && in_kinetic))
@@ -357,7 +357,7 @@ function next_kinetic(force) {
 					new_sprite(cmd[1]);
 				cmd[2].time = 0;
 				var anim = null;
-				if (cmd[2].animation !== undefined)
+				if (!rewind && cmd[2].animation !== undefined)
 					anim = cmd[2].animation;
 				var initial = {time: n};
 				for (var p in defaults) {
@@ -435,7 +435,7 @@ function prev_kinetic(full) {
 	}
 	// Set story position.
 	kinetic_pos = data[2];
-	next_kinetic();
+	next_kinetic(true, true);
 }
 
 function new_sprite(tag) {
