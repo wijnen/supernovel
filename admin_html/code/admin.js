@@ -39,7 +39,7 @@ var Connection = {
 		// Show the list of groups, with the available sections for each group.
 		show('groups');
 		// list = [ ['klas', [ ['chapter', 'section'], num ], ...], ... ]
-		console.info(list);
+		//console.info(list);
 		groups.ClearAll();
 		var top_ul = groups.AddElement('ul');
 		for (var g = 0; g < list.length; ++g) {
@@ -74,9 +74,6 @@ var Connection = {
 		tr.AddElement('th').AddText(group);
 		for (var q = 0; q < questions.length; ++q)
 			tr.AddElement('th').AddText(questions[q][1]).title = questions[q][2];
-		var parse = function(ans) {
-			return ans.length == 2 ? String(ans[0]).replace('.', ',') + ' ' + ans[1] : ans;
-		};
 		for (var s = 0; s < students.length; ++s) {
 			// Fill a table row for a student.
 			tr = table.AddElement('tr');
@@ -93,9 +90,9 @@ var Connection = {
 					// There is at least one answer: fill the cell.
 					// There are more answers: add the last one.
 					answer = answers[answers.length - 1];
-					span = td.AddText(answers.length + ':').AddElement('span').AddText(parse(answer[0]));
-					for (var n = 0; n < answer[1].length; ++n)
-						span.style[answer[1][n][0]] = answer[1][n][1];
+					span = td.AddText(answers.length + ':').AddElement('span').AddText(answer.raw);
+					for (var n = 0; n < answer['style'].length; ++n)
+						span.style[answer['style'][n][0]] = answer['style'][n][1];
 					span.title = answers;
 				}
 				td.style.background = (students[s][q][0] ? students[s][1][1] ? 'white' : 'grey' : '');

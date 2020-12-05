@@ -13,16 +13,15 @@ This also works if there are other commands in between.
 All strings are used when a video or question is encountered, or the input ends.
 Strings can contain ${substitution expressions}."""
 # Question types:
-number variable		-> float
-short variable		-> str
-long variable		-> str
-choice variable/option1/option2/option3		-> int		# / may be any non-identifier character.
-unit variable		-> (float, str)
-longnumber variable	-> (float, str)
-longshort variable	-> (str, str)
-longchoice variable/option1/option2	-> (int, str)
-longunit variable	-> ((float, str), str)
-
+short variable		-> {'text': str}
+long variable		-> {'text': str}
+choice variable		-> {'index': int, 'text': str}
+unit variable		-> {'quantity': str | None, 'unit': str, 'digits': int, 'value': float}	(all are None if unparsable)
+# Notes:
+#	all contain 'raw'
+#	all contain 'style', which is for internal use
+#	all long<thing> are identical to <thing>, with 'long' added
+#	longlong does not exist
 while expr:
 	code
 	'''Strings in an indented block

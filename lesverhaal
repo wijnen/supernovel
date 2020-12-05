@@ -44,6 +44,14 @@ import user
 }}} '''
 #'''
 
+tosuper_dict = {'0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹', '-': '⁻', '+': '⁺', '=': '⁼', '(': '⁽', ')': '⁾', 'n': 'ⁿ'}
+def tosuper(src):
+	return ''.join(tosuper_dict[c] if c in tosuper_dict else c for c in src)
+
+fromsuper_dict = {v: k for k, v in tosuper_dict.items()}
+def fromsuper(src):
+	return ''.join(fromsuper_dict[c] if c in fromsuper_dict else c for c in src)
+
 class Admin_Connection: # {{{
 	def __init__(self, remote): # {{{
 		self.remote = remote
@@ -157,7 +165,7 @@ class Admin_Connection: # {{{
 					questions.append((p[1], os.path.splitext(p[2])[0], 'video', p[0]))
 				elif p[0] == 'hidden':
 					questions.append((p[1], p[2], p[3], p[0]))
-				elif p[0] in ('unit', 'number', 'short', 'long', 'choice', 'longunit', 'longnumber', 'longshort', 'longchoice'):
+				elif p[0] in ('unit', 'short', 'long', 'choice', 'longunit', 'longshort', 'longchoice'):
 					questions.append((p[1], p[2], prev[0], p[0]))
 					prev[0] = ''
 				elif p[0] == 'story':
@@ -472,7 +480,7 @@ class Connection: # {{{
 			key = 'background'
 		key = (yield from self._parse_text(wake, key))
 		value = (yield from self._parse_text(wake, value))
-		self.user['answers'][self.user['section']][self.user['last_path']][-1][1].append((key.strip(), value.strip()))
+		self.user['answers'][self.user['section']][self.user['last_path']][-1]['style'].append((key.strip(), value.strip()))
 		user.refresh_admins()
 	# }}}
 	def _home(self): # {{{
@@ -650,7 +658,7 @@ class Connection: # {{{
 		else:
 			# Question.
 			if self.user['section'] in self.user['answers'] and code[2] in self.user['answers'][self.user['section']]:
-				last_answer = self.user['answers'][self.user['section']][code[2]][-1][0]
+				last_answer = self.user['answers'][self.user['section']][code[2]][-1]['raw']
 			else:
 				last_answer = None
 			return (yield from self._question(wake, code[0], last_answer, code[3:]))
@@ -702,7 +710,7 @@ class Connection: # {{{
 			if question not in self.user['answers'][self.user['section']]:
 				self.user['answers'][self.user['section']][question] = []
 			if len(self.user['answers'][self.user['section']][question]) == 0 or answer != self.user['answers'][self.user['section']][question][-1]:
-				self.user['answers'][self.user['section']][question].append((answer, []))
+				self.user['answers'][self.user['section']][question].append(answer)
 			self.user['last_path'] = question
 			if not config['lazysave']:
 				user.save(self.user)
@@ -721,50 +729,70 @@ class Connection: # {{{
 			self.busy = False
 			return
 		current = self.user['run_stack'][-1][0][self.user['run_stack'][-1][1]]
-		if current[0] not in ('number', 'short', 'long', 'choice', 'unit', 'longnumber', 'longshort', 'longunit', 'longchoice'):
+		if current[0] not in ('short', 'long', 'choice', 'unit', 'longshort', 'longunit', 'longchoice'):
 			debug(1, 'answer given by {}:{} for non-question: {}'.format(self.remote.socket.remote[0], self.remote.socket.remote[1], current))
 			return
 		store = not current[2].startswith('_')
 		def parse_unit(src):
-			r = re.match('\s*([+-]?[0-9]*([.,]\d*)?(e[+-]?\d+)?)\s*(\S*)\s*$', src)
+			r = re.match(r'\s*(?:(\S+)\s*=\s*)?([+-]?[0-9]*(?:[.,]\d*)?)(?:·10([⁻⁺]?[⁰¹²³⁴⁵⁶⁷⁸⁹]+))?\s*(\S*)\s*$', src)
+			# groups:
+			# 1: quantity	(\S+)
+			# 2: base value	([+-]?[0-9]*(?:[.,]\d*)?)
+			# 3: exponent	(·10([⁻⁺]?[⁰¹²³⁴⁵⁶⁷⁸⁹]+))?
+			# 4: unit	(\S*)
 			if not r:
 				debug(3, 'no match for unit answer')
-				answer = (None, str(src).strip())
+				answer = {'quantity': None, 'unit': None, 'digits': None, 'value': None}
 			try:
-				value = float(r.group(1).replace(',' ,'.'))
-				answer = (value, r.group(4))
+				answer = {}
+				answer['quantity'] = r.group(1)
+				base = r.group(2).replace(',', '.')
+				exponent = None if r.group(3) is None else int(fromsuper(r.group(3)))
+				answer['unit'] = r.group(4)
+				answer['digits'] = len(base.replace('.', '').lstrip('0'))
+				answer['value'] = float(base) * (1 if exponent is None else 10 ** exponent)
 			except:
-				answer = (None, str(src).strip())
+				traceback.print_exc()
+				answer = {'quantity': None, 'unit': None, 'digits': None, 'value': None}
 			debug(3, 'unit-split answer: {}'.format(answer))
 			return answer
+		raw = answer
 		if current[0] == 'choice':
-			if not 0 <= answer < len(current) - 3:
-				answer = None
+			if isinstance(answer, int) and 0 <= answer < len(current) - 3:
+				answer = {'index': answer, 'text': current[3 + answer]}
+			else:
+				answer = {}
 			if len(current) == 3:
 				store = False
 		elif current[0] == 'longchoice':
-			if 0 <= answer[0] < len(current) - 3:
-				answer = (answer[0], str(answer[1]).strip())
+			if isinstance(answer[0], int) and 0 <= answer[0] < len(current) - 3:
+				answer = {'index': answer[0], 'text': current[3 + answer[0]], 'long': str(answer[1]).strip()}
 			else:
 				# Leave answer string as is (but force str); this only happens when users are messing with the js.
 				debug(2, 'unparsable longchoice answer: {}'.format(answer))
-				answer = (None, str(answer).strip())
+				answer = {'choice': None, 'long': str(answer).strip()}
 		elif current[0] == 'unit':
 			answer = parse_unit(answer)
 		elif current[0] == 'longunit':
+			l = answer[1]
 			try:
-				answer = (parse_unit(answer[0]), answer[1])
+				answer = parse_unit(answer[0])
+				answer['long'] = l
 			except:
 				# Leave answer string as is (but force str); this only happens when users are messing with the js.
 				debug(2, 'unparsable longunit answer: {}'.format(answer))
-				answer = ((None, ''), str(answer).strip())
+				answer = {}
 		elif current[0].startswith('long') and current[0] != 'long':
 			try:
-				answer = (str(answer[0]).strip(), str(answer[1]).strip())
+				answer = {'text': str(answer[0]).strip(), 'long': str(answer[1]).strip()}
 			except:
 				# Leave answer string as is (but force str); this only happens when users are messing with the js.
 				debug(2, 'unparsable long* answer: {}'.format(answer))
-				answer = ('', str(answer).strip())
+				answer = {}
+		else:
+			answer = {'text': answer}
+		answer['raw'] = raw
+		answer['style'] = []
 		self._store_answer(current[2], answer, store)
 		self.user['run_stack'][-1][1] += 1
 		self.busy = True

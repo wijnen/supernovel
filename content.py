@@ -406,20 +406,20 @@ def get_file(group, section, filename): # {{{
 				finish_story_item()
 				stack[-1].append(['video', None, r.group(1).strip()])
 				continue
-			r = re.match(r'(number|unit|short|long|longnumber|longunit|longshort)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*$', ln)
+			r = re.match(r'(unit|short|long|longunit|longshort)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*$', ln)
 			if r:
 				finish_story_item()
 				stack[-1].append([r.group(1), None, r.group(2)])
 				continue
-			r = re.match(r'((long)?choice)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*$', ln)
+			r = re.match(r'((long)?choices?)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*$', ln)
 			if r:
 				finish_story_item()
 				stack[-1].append([r.group(1), None, r.group(3)])
 				continue
 			r = re.match(r'option\s+(.*)$', ln)
 			if r:
-				if len(stack[-1]) < 1 or len(stack[-1][-1]) < 1 or stack[-1][-1][0] not in ('choice', 'longchoice'):
-					parse_error(nr, 'option moet direct achter choice of longchoice komen')
+				if len(stack[-1]) < 1 or len(stack[-1][-1]) < 1 or stack[-1][-1][0] not in ('choice', 'choices', 'longchoice', 'longchoices'):
+					parse_error(nr, 'option moet direct achter choice(s) of longchoice(s) komen')
 					continue
 				stack[-1][-1].append(r.group(1).strip())
 				continue

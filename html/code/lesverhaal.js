@@ -121,20 +121,8 @@ var Connection = {
 				send_answer();
 				return false;
 			}
+			var rich = null;
 			switch (type) {
-				case 'longnumber':
-					var l = form.AddElement('textarea');
-					form.AddElement('br');
-					var e = form.AddElement('input');
-					e.type = 'text';
-					l.focus();
-					get_value = function() {
-						var ret = Number(e.value.replace(',', '.'));
-						if (isNaN(ret))
-							return [null, l.value];
-						return [ret, l.value];
-					};
-					break;
 				case 'longchoice':
 					var l = form.AddElement('textarea');
 					var div = form.AddElement('div');
@@ -176,6 +164,7 @@ var Connection = {
 					form.AddElement('br');
 					var e = form.AddElement('input');
 					e.type = 'text';
+					rich = form;
 					l.focus();
 					get_value = function() {
 						var ret = e.value;
@@ -183,17 +172,6 @@ var Connection = {
 							return [null, null];
 						e.value = '';
 						return [ret, l.value];
-					};
-					break;
-				case 'number':
-					var e = form.AddElement('input');
-					e.type = 'text';
-					e.focus();
-					get_value = function() {
-						var ret = Number(e.value.replace(',', '.'));
-						if (isNaN(ret))
-							return null;
-						return ret;
 					};
 					break;
 				case 'choice':
@@ -221,6 +199,7 @@ var Connection = {
 				case 'unit':
 					var e = form.AddElement('input');
 					e.type = 'text';
+					rich = form;
 					e.focus();
 					get_value = function() {
 						var ret = e.value;
@@ -232,6 +211,7 @@ var Connection = {
 					break;
 				case 'long': // <textarea>
 					var e = form.AddElement('textarea');
+					rich = form;
 					e.focus();
 					get_value = function() {
 						var ret = e.value;
@@ -258,6 +238,8 @@ var Connection = {
 					server.call('answer', [last_answer]);
 				}).type = 'button';
 			}
+			if (rich !== null)
+				richinput(rich);
 		};
 		kinetic_script = story;
 		kinetic_pos = 0;

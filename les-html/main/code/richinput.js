@@ -7,7 +7,7 @@ function richinput(element) {
 	if (inputs.length == 0) {
 		inputs = element.getElementsByTagName('textarea');
 		if (inputs.length == 0) {
-			console.error('richinput called on element without input or div children');
+			console.error('richinput called on element without input or textarea children');
 			return;
 		}
 	}
