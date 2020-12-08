@@ -124,8 +124,8 @@ var Connection = {
 			var rich = null;
 			switch (type) {
 				case 'longchoice':
-					var l = form.AddElement('textarea');
 					var div = form.AddElement('div');
+					var l = form.AddElement('textarea');
 					var choices = [];
 					for (var o = 0; o < options.length; ++o) {
 						var label = div.AddElement('label', 'longchoice');
@@ -134,20 +134,21 @@ var Connection = {
 						radio.name = 'radio';
 						choices.push(radio);
 						label.AddText(options[o]);
-						var button = div.AddElement('button');
-						button.type = 'button';
-						button.AddText('Answer');
-						button.AddEvent('click', function() {
-							for (var o = 0; o < choices.length; ++o) {
-								if (choices[o].checked)
-									break;
-							}
-							if (o < choices.length)
-								server.call('answer', [[o, l.value]]);
-							else
-								alert('Please select your answer');
-						});
+						div.AddElement('br');
 					}
+					var button = form.AddElement('p').AddElement('button');
+					button.type = 'button';
+					button.AddText('Answer');
+					button.AddEvent('click', function() {
+						for (var o = 0; o < choices.length; ++o) {
+							if (choices[o].checked)
+								break;
+						}
+						if (o < choices.length)
+							server.call('answer', [[o, l.value]]);
+						else
+							alert('Please select your answer');
+					});
 					if (last_answer != null) {
 						div.AddElement('hr');
 						var button = div.AddElement('button', 'choicebutton').AddText('Herhaal laatste antwoord: ' + last_answer[1] + ': ' + options[last_answer[0]]);
