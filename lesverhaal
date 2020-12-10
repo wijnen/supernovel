@@ -76,7 +76,7 @@ class Admin_Connection: # {{{
 		self.remote.login.event()
 	# }}}
 	def login(self, name, password): # {{{
-		u, answers = user.load(name.strip(), 'admin')
+		u = user.load(name.strip(), 'admin')
 		if u is None:
 			debug(2, 'Invalid admin {} from {}:{}'.format(name, *self.remote.socket.remote))
 			return False
@@ -92,7 +92,7 @@ class Admin_Connection: # {{{
 		return True
 	# }}}
 	def _login(self, name): # {{{
-		u, answers = user.load(name, 'admin')
+		u = user.load(name, 'admin')
 		if u is None:
 			return False
 		if u['connection'] is not None:
@@ -188,11 +188,11 @@ class Admin_Connection: # {{{
 		for u in user.list_group(group):
 			if (u, group) in user.users:
 				continue
-			student, answers = user.load(u, group)
+			student = user.load(u, group)
 			if student is None:
 				debug(0, 'student found but unloadable: {}:{}'.format(u, group))
 				continue
-			others.append(((student['name'], u), (None, False)) + tuple(make_other_field(student, q, answers) for q in questions))
+			others.append(((student['name'], u), (None, False)) + tuple(make_other_field(student, q, students['answers']) for q in questions))
 		try:
 			others.sort()
 		except:
@@ -367,7 +367,7 @@ class Connection: # {{{
 		wake = (yield)
 		if self.busy:
 			return 'duplicate login attempt'
-		u, answers = user.load(name.strip(), group.strip())
+		u = user.load(name.strip(), group.strip())
 		if u is None:
 			debug(2, 'Invalid user {}:{} on {}:{}'.format(name, group, *self.remote.socket.remote))
 			return 'deze naam is onbekend'
@@ -386,7 +386,7 @@ class Connection: # {{{
 		return None
 	# }}}
 	def _login(self, name, group): # {{{
-		u, answers = user.load(name, group.lower())
+		u = user.load(name, group.lower())
 		if u is None:
 			debug(2, 'failed login for {}:{}'.format(name, group))
 			return None
@@ -399,7 +399,6 @@ class Connection: # {{{
 			u['connection'].remote.close()
 		else:
 			user.users[(name.lower(), group.lower())] = u
-		u['answers'] = answers
 		u['connection'] = self
 		self.user = u
 		debug(1, 'User {}:{} logged in from {}:{}'.format(name, group, *self.remote.socket.remote))

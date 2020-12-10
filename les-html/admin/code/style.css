@@ -24,24 +24,59 @@ body {
 	float: left;
 }
 
-#content {
-	position: absolute;
-	left: 0px;
-	top: 0px;
-	width: 100vw;
+input.tab + label {
+	border-radius: 1ex 1ex 0ex 0ex;
+	background: grey;
+	padding: 1ex;
+	margin: 1ex 3ex 0ex 3ex;
 	z-index: 0;
 }
 
-#namesbox {
-	position: fixed;
-	right: 0px;
-	top: 0px;
-	width: 50vw;
-	z-index: 1;
-	background: #cfc;
-	overflow: auto;
+div#content {
+	padding-top: 1ex;
 }
 
-img {
+h1 {
+	text-align: center;
+}
+
+:root {
+	--tab: lightgreen;
+}
+
+input.tab:checked + label {
+	background: var(--tab);
+}
+
+input.tab {
 	display: none;
+}
+
+div.tab {
+	padding: 1ex 1ex 1ex 1ex;
+	margin-top: .99ex;
+	z-index: 1;
+	border-radius: 1ex 1ex 0ex 0ex;
+}
+
+div#fixed {
+	border: solid var(--tab) 1ex;
+	border-radius: 0px 0px 1ex 1ex;
+}
+
+table#questions tr {
+	background: lightblue;
+}
+table#questions tr.odd {
+	background: lightyellow;
+}
+
+input.tab#SSELECT:not(:checked) ~ div#SSELECT_tab,
+input.tab#CSELECT:not(:checked) ~ div#CSELECT_tab,
+input.tab#QSELECT:not(:checked) ~ div#QSELECT_tab {
+	display: none;
+}
+
+div.tab {
+	background: var(--tab);
 }

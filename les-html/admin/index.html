@@ -15,7 +15,6 @@
 			<p>Als dit bericht blijft staan, is er iets mis.</p>
 		</div>
 		<div id='login'>
-			<div>Klas: <span id='group'></span></div>
 			<form onsubmit='return log_in()'>
 				Naam: <input type='text' id='loginname'/><br/>
 				Wachtwoord: <input type='password' id='password'/><br/>
@@ -23,15 +22,35 @@
 			</form>
 		</div>
 		<div id='content'>
-		</div>
-		<div id='namesbox'>
-			<div id='names'>
+			<!-- Tabs -->
+			<input class='tab' name='tab' type='radio' id='SSELECT'/><label for='SSELECT'>Students</label>
+			<input class='tab' name='tab' type='radio' id='CSELECT'/><label for='CSELECT'>Chapter</label>
+			<input class='tab' name='tab' type='radio' id='QSELECT'/><label for='QSELECT'>Question</label>
+			<div class='tab' id='SSELECT_tab'>
+				<h1>Select Students</h1>
+				<ul id='students'></ul>
+				<button type='button' onclick='new_group()'>Add Group</button><input type='text' id='newgname'/>
 			</div>
-			<p>
-				<label><input type='checkbox' id='show' onchange='show()'/>Show Answers</label>
-				<label><input type='checkbox' id='freeze' onchange='freeze()'/>Freeze</label>
-			</p>
-			<p><button type='button' onclick='store_answers()'>Store Answers</button></p>
+			<div class='tab' id='CSELECT_tab'>
+				<h1>Select Chapter</h1>
+				<ul id='chapters'></ul>
+			</div>
+			<div class='tab' id='QSELECT_tab'>
+				<h1>Select Question</h1>
+				<table id='questions'></table>
+				<button type='button' onclick='new_question()'>Add Question</button>
+			</div>
+			<!-- Fixed content -->
+			<div id='fixed'>
+				<div id='settings'>
+					<label><input id='show' type='checkbox' onchange='show()'/>Show answers</label>
+					<label><input id='freeze' type='checkbox' onchange='freeze()'/>Freeze results</label>
+					<label><input id='publish' type='checkbox' onchange='publish()'/>Results on devices</label>
+					<button type='button' onclick='store_answers()'>Store Answers</button>
+				</div>
+				<table id='results'></table>
+				<button type='button' onclick='new_student()'>Add Student</button><input type='text' id='newsname'/>
+			</div>
 		</div>
 	</body>
 </html>

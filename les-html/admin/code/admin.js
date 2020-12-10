@@ -1,112 +1,158 @@
-var server, error, login, group, content, names, program, current, responses, blocked;
-
-function build_content() {
-	var ul = content.ClearAll().AddElement('ul');
-	for (var i = 0; i < program.length; ++i) {
-		var li = ul.AddElement('li');
-		var button = li.AddElement('button');
-		button.innerHTML = program[i].arg;
-		button.type = 'button';
-		if (i == current) {
-			li.AddClass('active');
-			button.disabled = true;
-		}
-		else {
-			button.AddEvent('click', function() {
-				server.call('run', [this.index]);
-			});
-			button.index = i;
-		}
-	}
-	var ans = 0;
-	var anss = {};
-	var opts = [];
-	var students = {};
-	var waiting = '';
-	var disconnected = [];
-	var offline = [];
-	for (var i = 0; i < responses.length; ++i) {
-		var a = responses[i][1];
-		if (a !== null) {
-			ans += 1;
-			if (anss[a] === undefined) {
-				anss[a] = 0;
-				students[a] = responses[i][0];
-				opts.push(a);
-			}
-			else {
-				students[a] += ', ' + responses[i][0];
-			}
-			anss[a] += 1;
-		}
-		else {
-			if (responses[i][2] == 'waiting') {
-				if (waiting.length > 0)
-					waiting += ', ';
-				waiting += responses[i][0];
-			}
-			else if (responses[i][2] == 'disconnected') {
-				disconnected.push([responses[i][0], responses[i][2]]);
-			}
-			else {
-				offline.push([responses[i][0], responses[i][2]]);
-			}
-		}
-	}
-	opts.sort(function(a, b) { return anss[b] - anss[a]; });
-	ul = names.ClearAll().AddElement('ul');
-	for (var i = 0; i < opts.length; ++i) {
-		var li = ul.AddElement('li');
-		var box = li.AddElement('input');
-		li.AddText('(' + anss[opts[i]] + ') ' + opts[i] + ':' + students[opts[i]]);
-		box.type = 'checkbox';
-		box.checked = (blocked[opts[i]] != true);
-		box.opt = opts[i];
-		box.AddEvent('change', function() {
-			server.call('block', [this.opt, !this.checked]);
-		});
-	}
-	ul.AddElement('li').AddText('Wacht op: ' + waiting);
-	var parts = [['Disconnected', disconnected], ['Offline', offline]];
-	for (var i = 0; i < parts.length; ++i) {
-		parts[i][1].sort();
-		var li = ul.AddElement('li').AddText(parts[i][0] + ': ');
-		for (var u = 0; u < parts[i][1].length; ++u) {
-			if (u > 0)
-				li.AddText(', ');
-			var a = li.AddElement('a');
-			a.AddText(parts[i][1][u][0]);
-			if (parts[i][1][u][1] != 'inactive')
-				a.href = 'javascript:reset_password("' + parts[i][1][u][0] + '")';
-		}
-	}
-}
+var server, error, login, content, groups, group, chapter, current_chapter, program, current, responses, blocked;
 
 function reset_password(user) {
-	if (!confirm('Do you want to reset the password for ' + user + '?'))
+	if (!confirm('Do you want to reset the password for ' + responses[user].name + '?'))
 		return;
 	server.call('reset_password', [user]);
 }
 
+function build_content() {
+	// Build group selection.
+	var list = document.getElementById('students');
+	list.ClearAll();
+	if (groups !== undefined) {
+		for (var g = 0; g < groups.length; ++g) {
+			var li = list.AddElement('li');
+			var label = li.AddElement('label');
+			var input = label.AddElement('input');
+			label.AddText(groups[g]);
+			input.type = 'radio';
+			input.name = 'group';
+			input.idx = g;
+			input.checked = groups[g] == group;
+			input.AddEvent('click', function(event) {
+				event.preventDefault();
+				server.call('group', [this.idx]);
+			});
+		}
+	}
+	// Build chapter selection.
+	var list = document.getElementById('chapters');
+	list.ClearAll();
+	if (chapter !== undefined) {
+		for (var c = 0; c < chapter.length; ++c) {
+			var li = list.AddElement('li');
+			var label = li.AddElement('label');
+			var input = li.AddElement('input');
+			label.AddText(chapter[c]);
+			input.type = 'radio';
+			input.name = 'chapter';
+			input.idx = c;
+			input.checked = c == current_chapter;
+			input.AddEvent('click', function(event) {
+				event.preventDefault();
+				server.call('chapter', [this.idx]);
+			});
+		}
+	}
+	// Build question selection.
+	var table = document.getElementById('questions');
+	table.ClearAll();
+	if (program !== undefined) {
+		for (var p = 0; p < program.length; ++p) {
+			var tr = table.AddElement('tr');
+			if (p & 1)
+				tr.AddClass('odd');
+			var input = tr.AddElement('td').AddElement('input');
+			input.type = 'radio';
+			input.idx = p;
+			input.checked = p == current;
+			input.AddEvent('click', function() {
+				event.preventDefault();
+				server.call('run', [this.idx]);
+			});
+			input.id = 'q' + p;
+			input.name = 'question';
+			var label = tr.AddElement('td').AddElement('label');
+			label.htmlFor = input.id;
+			label.innerHTML = program[p].arg;
+			var td = tr.AddElement('td');
+			if (p > 0) {
+				var button = td.AddElement('button').AddText('↑').AddEvent('click', function() {
+					server.call('q_move_up', [this.idx]);
+				});
+				button.idx = p;
+			}
+			if (p < program.length - 1) {
+				button = td.AddElement('button').AddText('↓').AddEvent('click', function() {
+					server.call('q_move_down', [this.idx]);
+				});
+				button.idx = p;
+			}
+			button = td.AddElement('button').AddText('❌').AddEvent('click', function() {
+				server.call('q_remove', [this.idx]);
+			});
+			button.idx = p;
+			button = td.AddElement('button').AddText('✏').AddEvent('click', function() {
+				if (this.editing) {
+					server.call('edit', [this.idx, this.box.value]);
+				}
+				else {
+					this.box = this.label.ClearAll().AddElement('textarea');
+					this.box.value = program[this.idx].markdown;
+					this.editing = true;
+				}
+			});
+			button.idx = p;
+			button.label = label;
+			button.editing = false;
+		}
+	}
+	// Build response section.
+	var table = document.getElementById('results');
+	table.ClearAll();
+	var tr = table.AddElement('tr');
+	tr.AddElement('th').AddText('Name');
+	tr.AddElement('th').AddText('State');
+	tr.AddElement('th').AddText('Use');
+	tr.AddElement('th').AddText('Answer');
+	if (responses !== undefined) {
+		for (var r = 0; r < responses.length; ++r) {
+			tr = table.AddElement('tr');
+			tr.AddElement('td').AddText(responses[r].name);
+			if (responses[r].state == 'offline' || responses[r].state == 'disconnected') {
+				var button = tr.AddElement('td').AddElement('button').AddText(responses[r].state);
+				button.idx = r;
+				button.type = 'button';
+				button.AddEvent('click', function() {
+					reset_password(this.idx);
+				});
+			}
+			else
+				tr.AddElement('td').AddText(responses[r].state);
+			var use = tr.AddElement('td').AddElement('input');
+			use.type = 'checkbox';
+			use.checked = !responses[r].blocked;
+			use.idx = r;
+			use.AddEvent('change', function() {
+				console.info(responses[this.idx], this.checked);
+			});
+			tr.AddElement('td').AddText(responses[r].answer);
+		}
+	}
+}
+
+var closed = false;
 var Connection = {
 	replaced: function() {
+		closed = true;
 		alert('De verbinding is overgenomen door een nieuwe login');
-		init();
+	},
+	closed: function() {
+		closed = true;
+		alert('De verbinding is verbroken door de docent');
 	},
 	login: function() {
 		error.style.display = 'none';
 		login.style.display = 'block';
 		content.style.display = 'none';
-		names.style.display = 'none';
 	},
-	group: function(g) {
-		group.ClearAll().AddText(g);
-	},
-	program: function(prog) {
+	program: function(ch_list, ch, prog) {
 		error.style.display = 'none';
 		login.style.display = 'none';
 		content.style.display = 'block';
-		names.style.display = 'block';
+		chapter = ch_list;
+		current_chapter = ch;
 		program = prog;
 		build_content();
 	},
@@ -124,7 +170,9 @@ var Connection = {
 		document.getElementById('freeze').checked = freeze;
 		build_content();
 	},
-	responses: function(res) {
+	responses: function(g_list, g, res) {
+		groups = g_list;
+		group = g;
 		responses = res;
 		build_content();
 	},
@@ -141,30 +189,24 @@ var Connection = {
 function init() {
 	error = document.getElementById('error');
 	login = document.getElementById('login');
-	group = document.getElementById('group');
 	content = document.getElementById('content');
-	names = document.getElementById('names');
 	responses = [];
 	blocked = {};
-	server = Rpc(Connection, null, connection_lost);
-
 	error.style.display = 'block';
 	login.style.display = 'none';
 	content.style.display = 'none';
-	names.style.display = 'none';
+	server = Rpc(Connection, null, connection_lost);
 }
 window.AddEvent('load', init);
 
 function connection_lost() {
-	try {
-		error.style.display = 'block';
-		login.style.display = 'none';
-		content.style.display = 'none';
-		names.style.display = 'none';
-		server = Rpc(Connection, null, connection_lost);
-	}
-	catch (err) {
-	}
+	if (closed)
+		return;
+	closed = true;
+	alert('The connection was closed.')
+	error.style.display = 'block';
+	login.style.display = 'none';
+	content.style.display = 'none';
 }
 
 function log_in() {
@@ -194,6 +236,28 @@ function freeze() {
 
 function store_answers() {
 	server.call('store_answers');
+}
+
+function new_group() {
+	var name = document.getElementById('newgname').value;
+	if (name == '') {
+		alert("Please enter the new group's name");
+		return;
+	}
+	server.call('new_group', name);
+}
+
+function new_student() {
+	var name = document.getElementById('newsname').value;
+	if (name == '') {
+		alert("Please enter the new student's name");
+		return;
+	}
+	server.call('new_student', name);
+}
+
+function new_question() {
+	server.call('new_question');
 }
 
 // vim: set foldmethod=marker foldmarker={,} :

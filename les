@@ -20,10 +20,12 @@ fhs.option('content', 'replacement string for FILE://', default = 'les-content')
 fhs.option('lazysave', 'save only when user quits', argtype = bool)
 fhs.option('secret', 'security override key', default = '')
 fhs.option('logfile', 'send log to this file instead of stderr', default = '')
+fhs.option('programs', 'location of program chapters', default = 'lessen')
 fhs.option('store', 'file to store answers in', default = 'answers.txt')
 config = fhs.init(help = 'let students answer questions while in class', contact = 'Bas Wijnen <wijnen@debian.org>', version = '0.1')
 from debug import debug
 import user
+user.unsaved.append('index')
 # }}}
 
 ''' Log priorities: {{{
@@ -33,7 +35,6 @@ import user
 		3: Debug
 }}} '''
 
-group = sys.argv[1]
 variables = {}
 def parse_text(text): # {{{
 	def subst(obj):
@@ -49,107 +50,137 @@ def parse_text(text): # {{{
 # }}}
 
 def user_has_pw(the_user):
-	u, answers = user.load(the_user, group)
+	u = user.load(the_user, group)
 	return u['password'] is not None
 
-all_users = user.list_group(group)
-have_pw = {u: user_has_pw(u) for u in all_users}
-seen = set()
+def set_group(idx): # {{{
+	global group, all_users, have_pw, seen, responses, cookies
+	assert 0 <= idx < len(groups)
+	if group == groups[idx]:
+		return
+	for (u, g) in tuple(user.users):
+		if g == 'admin':
+			continue
+		debug(3, 'Closing connection for ' + user.users[(u, g)]['name'])
+		try:
+			user.users[(u, g)]['connection'].remote.closed.event()
+		except:
+			pass
+		user.users[(u, g)]['connection'].remote.close()
+	group = groups[idx]
+	all_users = user.list_group(group)
+	have_pw = [user_has_pw(u) for u in all_users]
+	seen = [False for u in all_users]
+	responses = []
+	cookies = {u: ''.join(chr(random.randrange(ord('a'), ord('z') + 1)) for _ in range(32)) for u in all_users}
+	run(current)
+# }}}
+
 all_admins = user.list_group('admin')
-responses = {u: None for u in all_users}
-cookies = {u: ''.join(chr(random.randrange(ord('a'), ord('z') + 1)) for _ in range(32)) for u in all_users}
 admin_cookies = {u: ''.join(chr(random.randrange(ord('a'), ord('z') + 1)) for _ in range(32)) for u in all_admins}
 
-# Read program from standard input. {{{
-program = []
-lineno = 0
-toplevel = re.compile(r'^([A-Za-z][a-z]*)\s*:\s*(.*?)\s*$')
-block = re.compile(r'^\s(.*?)\s*$')
-# Read blocks. {{{
-for ln in sys.stdin:
-	lineno += 1
-	if ln.strip() == '':
-		if len(program) > 0 and program[-1]['indent'] not in (-1, None):
-			program[-1]['arg'].append('')
-		continue
-	r = toplevel.match(ln)
-	if r:
-		cmd = r.group(1)
-		arg = r.group(2)
-		if len(arg) > 0:
-			arg = [arg]
-			indent = -1
+# Set state value for all user responses. {{{
+def update_states():
+	for i, u in enumerate(all_users):
+		if (u, group) not in user.users:
+			responses[i]['state'] = 'disconnected' if seen[i] else 'offline' if have_pw[i] else 'inactive'
 		else:
-			arg = []
-			indent = None
-		program.append({'cmd': cmd.lower(), 'case': cmd != cmd.lower(), 'arg': arg, 'indent': indent, 'lineno': lineno, 'option': []})
-	else:
-		r = block.match(ln)
+			responses[i]['state'] = 'waiting' if responses[i]['answer'] is None else 'answered'
+# }}}
+
+# Read program from file. {{{
+def read_program(num):
+	global program, current_program
+	current_program = num
+	name = programs[current_program]
+	program = []
+	lineno = 0
+	toplevel = re.compile(r'^([A-Za-z][a-z]*)\s*:\s*(.*?)\s*$')
+	block = re.compile(r'^\s(.*?)\s*$')
+	# Read blocks. {{{
+	for ln in open(os.path.join(config['programs'], name + os.extsep + 'txt')):
+		lineno += 1
+		if ln.strip() == '':
+			if len(program) > 0 and program[-1]['indent'] not in (-1, None):
+				program[-1]['arg'].append('')
+			continue
+		r = toplevel.match(ln)
 		if r:
-			if len(program) == 0:
-				debug(0, '%d: block before first toplevel command is not allowed' % lineno)
-				continue
-			if program[-1]['indent'] == -1:
-				indent = None
+			cmd = r.group(1)
+			arg = r.group(2)
+			if len(arg) > 0:
+				arg = [arg]
+				indent = -1
 			else:
-				indent = program[-1]['indent']
-			l = r.group(1)
-			if indent is not None and l[:indent].strip() != '':
-				debug(0, '%d: incorrect indentation' % lineno)
-			if indent is None:
-				indent = len(l) - len(l.lstrip())
-				program[-1]['indent'] = indent
-			program[-1]['arg'].append(l[indent:].rstrip())
+				arg = []
+				indent = None
+			program.append({'cmd': cmd.lower(), 'case': cmd != cmd.lower(), 'arg': arg, 'indent': indent, 'lineno': lineno, 'option': []})
 		else:
-			debug(0, '%d: invalid line: ' % lineno + ln)
+			r = block.match(ln)
+			if r:
+				if len(program) == 0:
+					debug(0, '%d: block before first toplevel command is not allowed' % lineno)
+					continue
+				if program[-1]['indent'] == -1:
+					indent = None
+				else:
+					indent = program[-1]['indent']
+				l = r.group(1)
+				if indent is not None and l[:indent].strip() != '':
+					debug(0, '%d: incorrect indentation' % lineno)
+				if indent is None:
+					indent = len(l) - len(l.lstrip())
+					program[-1]['indent'] = indent
+				program[-1]['arg'].append(l[indent:].rstrip())
+			else:
+				debug(0, '%d: invalid line: ' % lineno + ln)
+				continue
+	# }}}
+	# Combine blocks. {{{
+	current = 0
+	mc = ('choice', 'choices')
+	toplevel = ('python', 'term', 'terms', 'word', 'words', 'title') + mc
+	args = ('score', 'filter', 'option')
+	while current < len(program):
+		p = program[current]
+		if p['cmd'] not in toplevel:
+			if p['cmd'] not in args:
+				debug(0, '%d: ignoring invalid command ' % p['lineno'] + p['cmd'])
+				continue
+			if current == 0:
+				debug(0, '%d: ignoring invalid initial command ' % p['lineno'] + p['cmd'])
+				continue
+			if p['cmd'] == 'option':
+				program[current - 1]['option'].append(' '.join(p['arg']))
+			else:
+				program[current - 1][p['cmd']] = p['arg']
+			program.pop(current)
 			continue
-# }}}
-# Combine blocks. {{{
-current = 0
-mc = ('choice', 'choices')
-toplevel = ('python', 'term', 'terms', 'word', 'words', 'title') + mc
-args = ('score', 'filter', 'option')
-while current < len(program):
-	p = program[current]
-	if p['cmd'] not in toplevel:
-		if p['cmd'] not in args:
-			debug(0, '%d: ignoring invalid command ' % p['lineno'] + p['cmd'])
-			continue
-		if current == 0:
-			debug(0, '%d: ignoring invalid initial command ' % p['lineno'] + p['cmd'])
-			continue
-		if p['cmd'] == 'option':
-			program[current - 1]['option'].append(' '.join(p['arg']))
+		if p['cmd'] in mc:
+			p['case'] = True
+		p['arg'] = parse_text('\n'.join(p['arg']))
+		if p['cmd'] != 'python':
+			p['markdown'] = p['arg']
+			p['arg'] = markdown(p['arg'])
+		current += 1
+	# }}}
+	# Set up scores and filters. {{{
+	for p in program:
+		# Put this in a function to create a new scope for expr.
+		run_eval = lambda expr: lambda r: eval(expr, variables, {'response': r})
+		if 'filter' in p:
+			p['filter'] = run_eval(p['filter'])
 		else:
-			program[current - 1][p['cmd']] = p['arg']
-		program.pop(current)
-		continue
-	if p['cmd'] in mc:
-		p['case'] = True
-	p['arg'] = parse_text('\n'.join(p['arg']))
-	if p['cmd'] != 'python':
-		p['arg'] = markdown(p['arg'])
-	current += 1
+			p['filter'] = lambda r: r
+		if 'score' in p:
+			p['score'] = run_eval(p['score'])
+		else:
+			p['score'] = lambda r: 0
+	# }}}
 # }}}
-# Set up scores and filters. {{{
-for p in program:
-	# Put this in a function to create a new scope for expr.
-	run_eval = lambda expr: lambda r: eval(expr, variables, {'response': r})
-	if 'filter' in p:
-		p['filter'] = run_eval(p['filter'])
-	else:
-		p['filter'] = lambda r: r
-	if 'score' in p:
-		p['score'] = run_eval(p['score'])
-	else:
-		p['score'] = lambda r: 0
-# }}}
-# }}}
-current = 0
 def run(index): # {{{
-	global current, blocked
+	global current, responses
 	current = index
-	blocked = set()
 	if isinstance(current, int):
 		while current < len(program):
 			p = program[current]
@@ -157,52 +188,55 @@ def run(index): # {{{
 				break
 			current += 1
 			exec(p['arg'], variables)
-	for u in all_users:
-		responses[u] = None
+	responses = []
+	for i, u in enumerate(all_users):
+		responses.append({'name': u, 'blocked': False, 'answer': None})	# 'state' is filled below.
 		if (u, group) in user.users:
 			user.users[(u, group)]['connection']._send_state()
+	update_states()
 	for a in user.admins:
 		user.admins[a].remote.current.event(current)
 		user.admins[a]._update_responses()
 	beamerserver.broadcast.refresh(refresh_beamer())
 # }}}
+current = 0
+programs = [os.path.splitext(x)[0] for x in os.listdir(config['programs']) if os.path.splitext(x)[1] == os.extsep + 'txt']
+programs.sort()
+current_program = None
+if len(programs) > 0:
+	read_program(len(programs) - 1)
 
 def update_responses(): # {{{
+	update_states()
 	for a in user.admins:
 		user.admins[a]._update_responses()
 	beamerserver.broadcast.refresh(refresh_beamer())
 # }}}
-
-blocked = set()
-def update_blocks():
-	for a in user.admins:
-		user.admins[a]._update_blocks()
-	beamerserver.broadcast.refresh(refresh_beamer())
 
 freeze = None
 def refresh_beamer(): # {{{
 	p = program[current] if current < len(program) else {'arg': '-', 'option': []}
 	p = {k: v for k, v in p.items() if k in ('cmd', 'arg', 'option')}
 	if not show_answers or not current < len(program):
-		return p, False, sum(responses[u] is not None for u in responses), len(user.users) - len(user.admins), {}, []
+		return p, False, sum(r['answer'] is not None for r in responses), len(user.users) - len(user.admins), {}, []
 	if freeze is not None:
 		return p, True, freeze[0], freeze[1]
 	answers = {}
 	opts = []
-	for u in all_users:
-		a = responses[u]
-		if a is not None:
+	for i, u in enumerate(all_users):
+		a = responses[i]
+		if a['answer'] is not None:
 			if program[current]['cmd'] not in ('choices', 'words', 'terms'):
-				a = [a]
+				a = [a['answer']]
+			else:
+				a = a['answer']
 			for opt in a:
-				if opt in blocked:
-					continue
 				if opt not in answers:
 					answers[opt] = 0
 					opts.append(opt)
 				answers[opt] += 1
 	opts.sort(key = lambda a: answers[a])
-	return p, True, answers, opts
+	return p, True, answers, opts[::-1]
 # }}}
 
 class Beamer_Connection: # {{{
@@ -217,7 +251,6 @@ class Admin_Connection: # {{{
 	def __init__(self, remote): # {{{
 		self.remote = remote
 		remote.closed = self._closed
-		self.remote.group.event(group)
 		self.user = None
 		if 'cookie' in self.remote.data['headers']:
 			c = self.remote.data['headers']['cookie']
@@ -236,7 +269,7 @@ class Admin_Connection: # {{{
 	# }}}
 	def login(self, name, password): # {{{
 		debug(2, 'admin login attempt')
-		u, answers = user.load(name.strip(), 'admin')
+		u = user.load(name.strip(), 'admin')
 		if u is None:
 			debug(2, 'Invalid admin {} from {}:{}'.format(name, *self.remote.socket.remote))
 			return 'Invalid admin name'
@@ -249,7 +282,7 @@ class Admin_Connection: # {{{
 		return None
 	# }}}
 	def _login(self, name): # {{{
-		new_user, answers = user.load(name, 'admin')
+		new_user = user.load(name, 'admin')
 		if new_user is None:
 			return False
 		if new_user['connection'] is not None:
@@ -266,10 +299,9 @@ class Admin_Connection: # {{{
 		debug(2, 'Admin {} logged in from {}:{}'.format(name, *self.remote.socket.remote))
 		user.admins[name.lower()] = self
 		self.remote.cookie.event(self.user['filename'], admin_cookies[self.user['filename']])
-		self.remote.program.event([{k: v for k, v in p.items() if k not in ('filter', 'score')} for p in program])
+		self.remote.program.event(programs, current_program, [{k: v for k, v in p.items() if k not in ('filter', 'score')} for p in program])
 		self.remote.current.event(current)
 		self._update_responses()
-		self._update_blocks()
 		return True
 	# }}}
 	def _closed(self): # {{{
@@ -290,11 +322,7 @@ class Admin_Connection: # {{{
 	#'
 	def _update_responses(self): # {{{
 		assert self.user is not None
-		self.remote.responses.event([(u, responses[u], 'answered' if responses[u] is not None else 'waiting' if (u, group) in user.users else 'inactive' if not have_pw[u] else 'disconnected' if u in seen else 'offline') for u in all_users])
-	# }}}
-	def _update_blocks(self): # {{{
-		assert self.user is not None
-		self.remote.blocked.event({b: True for b in blocked})
+		self.remote.responses.event(groups, group, responses)
 	# }}}
 	def run(self, index): # {{{
 		assert self.user is not None
@@ -304,25 +332,20 @@ class Admin_Connection: # {{{
 		assert self.user is not None
 		with open(config['store'], 'a') as f:
 			f.write(str(program[current]) + '\n')
-			for u, r in responses.items():
-				f.write('{}\t{}\n'.format(u, repr(r)))
+			for r in responses:
+				f.write('{}\t{}\n'.format(r['name'], repr(r['answer'])))
 			f.write('\n')
 	# }}}
 	def refresh(self): # {{{
 		assert self.user is not None
 		self._update_responses()
-		self._update_blocks()
 	# }}}
-	def block(self, option, value): # {{{
+	def block(self, user, value): # {{{
 		assert self.user is not None
 		if isinstance(option, list):
 			option = ','.join(option)
-		if value:
-			blocked.add(option)
-		else:
-			if option in blocked:
-				blocked.remove(option)
-		update_blocks()
+		responses[user]['blocked'] = value
+		update_responses()
 	# }}}
 	def show_answers(self, show = True): # {{{
 		assert self.user is not None
@@ -344,17 +367,43 @@ class Admin_Connection: # {{{
 		beamerserver.broadcast.refresh(refresh_beamer())
 		adminserver.broadcast.freeze(frozen)
 	# }}}
-	def reset_password(self, the_user): # {{{
+	def chapter(self, idx): # {{{
+		assert 0 <= idx < len(programs)
+		read_program(idx)
+		if len(program) > 0:
+			run(0)
+		adminserver.broadcast.program(programs, current_program, [{k: v for k, v in p.items() if k not in ('filter', 'score')} for p in program])
+		adminserver.broadcast.current(current)
+	# }}}
+	def group(self, idx): # {{{
+		set_group(idx)
+	# }}}
+	def reset_password(self, idx): # {{{
 		assert self.user is not None
-		u, answers = user.load(the_user.strip(), group)
+		u = user.load(all_users[idx], group)
 		if u is None:
-			debug(2, 'Invalid user {}:{} on {}:{}'.format(name, group, *self.remote.socket.remote))
+			debug(2, 'Invalid user {}:{} on {}:{}'.format(all_users[idx], group, *self.remote.socket.remote))
 			return 'deze naam is onbekend'
 		u['password'] = None
-		have_pw[the_user] = False
+		have_pw[idx] = False
+		update_states()
 		user.refresh_admins()
 		user.save(u)
 	# }}}
+	def new_group(self, name):
+		pass	# TODO
+	def new_student(self, name):
+		pass	# TODO
+	def new_question(self):
+		pass	# TODO
+	def q_move_up(self, idx):
+		pass	# TODO
+	def q_move_down(self, idx):
+		pass	# TODO
+	def q_remove(self, idx):
+		pass	# TODO
+	def q_edit(self, idx, markdown):
+		pass	# TODO
 # }}}
 
 class Connection: # {{{
@@ -382,7 +431,7 @@ class Connection: # {{{
 	#'
 	def login(self, name, password): # {{{
 		debug(2, 'user login attempt {}/{}'.format(name, password))
-		u, answers = user.load(name.strip(), group)
+		u = user.load(name.strip(), group)
 		if u is None:
 			debug(2, 'Invalid user {}:{} on {}:{}'.format(name, group, *self.remote.socket.remote))
 			return 'deze naam is onbekend'
@@ -392,15 +441,15 @@ class Connection: # {{{
 			return 'dit wachtwoord is onjuist'
 		u = self._login(name.strip(), group.strip())
 		# In case the password is new, it needs to be stored.
-		if name.lower() not in have_pw or not have_pw[name.lower()]:
+		if not have_pw[u['index']]:
 			u['password'] = crypted
-			have_pw[name] = True
+			have_pw[u['index']] = True
 			user.refresh_admins()
 			user.save(u)
 		return None
 	# }}}
 	def _login(self, name, group): # {{{
-		u, answers = user.load(name, group)
+		u = user.load(name, group)
 		if u is None:
 			debug(2, 'failed login for {}:{}'.format(name, group))
 			return None
@@ -410,17 +459,17 @@ class Connection: # {{{
 				u['connection'].remote.replaced.event()
 			except:
 				pass
-			self.answers = u['connection'].answers
 			u['connection'].remote.close()
 		else:
-			seen.add(u['name'])
-			self.answers = answers
+			u['index'] = all_users.index(name.lower())
+			seen[u['index']] = True
 			user.users[(name.lower(), group.lower())] = u
 		u['connection'] = self
 		self.user = u
 		debug(2, 'User {}:{} logged in from {}:{}'.format(name, group, *self.remote.socket.remote))
 		self.remote.cookie.event(self.user['filename'], cookies[self.user['filename']])
 		self._send_state()
+		update_states()
 		user.refresh_admins()
 		beamerserver.broadcast.refresh(refresh_beamer())
 		return u
@@ -436,13 +485,18 @@ class Connection: # {{{
 			user.users.pop((self.user['filename'], group.lower()))
 		except:
 			pass
+		update_states()
 		user.refresh_admins()
 		beamerserver.broadcast.refresh(refresh_beamer())
 	# }}}
 	def _send_state(self): # {{{
-		self.remote.content.event(current, {k: v for k, v in program[current].items() if k not in ('filter', 'score')} if current < len(program) else None, responses[self.user['name'].lower()])
+		if not hasattr(self, 'user'):
+			return
+		self.remote.content.event(current, {k: v for k, v in program[current].items() if k not in ('filter', 'score')} if current < len(program) else None, responses[self.user['index']]['answer'])
 	# }}}
 	def respond(self, serial, response): # {{{
+		if not hasattr(self, 'user'):
+			return
 		if serial != current:
 			debug(1, 'response for wrong question received from ' + self.user['name'])
 		else:
@@ -457,7 +511,7 @@ class Connection: # {{{
 					response = [x.lower() for x in response]
 				else:
 					response = response.lower()
-			responses[self.user['name'].lower()] = program[current]['filter'](response)
+			responses[self.user['index']]['answer'] = program[current]['filter'](response)
 			update_responses()
 		self._send_state()
 	# }}}
@@ -468,6 +522,9 @@ server = websocketd.RPChttpd(config['port'], Connection, httpdirs = [os.path.joi
 adminserver = websocketd.RPChttpd(config['admin-port'], Admin_Connection, httpdirs = [os.path.join('les-html', 'admin')], tls = False)
 # The beamer is the same in terms of handling, but it uses different html.
 beamerserver = websocketd.RPChttpd(config['beamer-port'], Beamer_Connection, httpdirs = [os.path.join('les-html', 'beamer')], tls = False)
+groups = user.list_groups()
+group = None
+set_group(0)
 print('servers are running')
 websocketd.fgloop()
 # }}}

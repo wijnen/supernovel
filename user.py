@@ -13,24 +13,23 @@ from debug import debug
 users = {}	# including admins.
 admins = {}
 # Keys which are never saved.
-unsaved = ('connection', 'text_buffer', 'full_section', 'run_stack', 'section', 'answers', 'variables', 'last_path', 'characters', 'cookie', 'python')
+unsaved = ['connection', 'text_buffer', 'full_section', 'run_stack', 'section', 'answers', 'variables', 'last_path', 'characters', 'cookie', 'python']
 
 def load(name, group): # {{{
 	# Set default user data; can be replaced (or not returned) below.
-	ret = {'filename': name.lower(), 'name': name, 'group': group.lower(), 'connection': None, 'password': None, 'nosave': False, 'sandbox': False}
+	ret = {'filename': name.lower(), 'name': name, 'group': group.lower(), 'connection': None, 'password': None, 'nosave': False, 'sandbox': False, 'answers': {}}
 	if not os.path.exists(os.path.join(config['data'], 'users', group.lower())):
 		debug(0, 'user.load called for nonexistent group {}:{}'.format(name, group))
-		return None, {}
+		return None
 	if not os.path.exists(os.path.join(config['data'], 'users', group.lower(), name.lower())):
 		if os.path.exists(os.path.join(config['data'], 'users', group.lower(), 'Open')):
 			# Create new user.
 			save(ret)
 		else:
 			debug(0, 'user.load called for nonexistent user {}:{}'.format(name, group))
-			return None, {}
+			return None
 	if (name.lower(), group.lower()) in users:
 		ret = users[(name.lower(), group.lower())]
-	answers = {}
 	for ln in open(os.path.join(config['data'], 'users', group.lower(), name.lower()), errors = 'replace'):
 		if ln.strip() == '':
 			continue
@@ -51,14 +50,14 @@ def load(name, group): # {{{
 			except:
 				log('Failed to parse answer key {}; ignoring'.format(key))
 				continue
-			if (c, s) not in answers:
-				answers[(c, s)] = {}
+			if (c, s) not in ret['answers']:
+				ret['answers'][(c, s)] = {}
 			try:
-				answers[(c, s)][q] = [json.loads(a) for a in value.split(';')]
-				assert all('raw' in x for x in answers[(c, s)][q])
-				assert all('style' in x for x in answers[(c, s)][q])
+				ret['answers'][(c, s)][q] = [json.loads(a) for a in value.split(';')]
+				assert all('raw' in x for x in ret['answers'][(c, s)][q])
+				assert all('style' in x for x in ret['answers'][(c, s)][q])
 			except:
-				answers[(c, s)][q] = [{'raw': a, 'style': []} for a in value.split(';')]
+				ret['answers'][(c, s)][q] = [{'raw': a, 'style': []} for a in value.split(';')]
 			continue
 		ret[key] = value.rstrip('\n')
 	# Make sure name and group match file location.
@@ -66,7 +65,14 @@ def load(name, group): # {{{
 		ret['filename'] = name.lower()
 	if ret['group'].casefold() != group.casefold():
 		ret['group'] = group
-	return ret, answers
+	return ret
+# }}}
+
+def list_groups(): # {{{
+	path = os.path.join(config['data'], 'users')
+	ret = [p for p in os.listdir(path) if os.path.isdir(os.path.join(path, p)) and p.lower() == p and p != 'admin']
+	ret.sort()
+	return ret
 # }}}
 
 def list_group(group): # {{{
