@@ -519,9 +519,9 @@ class Connection: # {{{
 
 # Main program {{{
 server = websocketd.RPChttpd(config['port'], Connection, httpdirs = [os.path.join('les-html', 'main')], tls = False, proxy = 'les')
-adminserver = websocketd.RPChttpd(config['admin-port'], Admin_Connection, httpdirs = [os.path.join('les-html', 'admin')], tls = False)
+adminserver = websocketd.RPChttpd(config['admin-port'], Admin_Connection, httpdirs = [os.path.join('les-html', 'admin')], tls = False, proxy = 'les-admin')
 # The beamer is the same in terms of handling, but it uses different html.
-beamerserver = websocketd.RPChttpd(config['beamer-port'], Beamer_Connection, httpdirs = [os.path.join('les-html', 'beamer')], tls = False)
+beamerserver = websocketd.RPChttpd(config['beamer-port'], Beamer_Connection, httpdirs = [os.path.join('les-html', 'beamer')], tls = False, proxy = 'les-beamer')
 groups = user.list_groups()
 group = None
 set_group(0)

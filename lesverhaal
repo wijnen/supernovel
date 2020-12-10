@@ -25,6 +25,7 @@ fhs.option('sandbox', 'path to sandbox content, relative to <data path>/sandbox_
 fhs.option('lazysave', 'Only save when user logs out (default is on every change)', argtype = bool)
 fhs.option('secret', 'If set, key to log in as any user (including admin) without cookie', default = '')
 fhs.option('proxy', 'virtual proxy directory', default = 'lesverhaal')
+fhs.option('proxy-admin', 'virtual proxy directory for admin', default = 'lesverhaal-admin')
 fhs.option('proxy-sandbox', 'virtual proxy directory for sandbox', default = 'lesverhaal-sandbox')
 fhs.option('logfile', 'file for logging events', default = '')
 fhs.option('loglimit', 'maximum loglevel that is written to screen', default = 1)
@@ -176,8 +177,8 @@ class Admin_Connection: # {{{
 		def make_field(student, question):
 			active = student['section'] == section and len(student['run_stack'][-1][0]) > student['run_stack'][-1][1] and student['run_stack'][-1][0][student['run_stack'][-1][1]][1] == question[0]
 			return (active, student['answers'][section][question[1]] if question[3] not in ('video', 'end') and section in student['answers'] and question[1] in student['answers'][section] else None)
-		def make_other_field(student, question, answers):
-			return (False, answers[section][question[1]] if question[3] not in ('video', 'end') and section in answers and question[1] in answers[section] else None)
+		def make_other_field(student, question):
+			return (False, student['answers'][section][question[1]] if question[3] not in ('video', 'end') and section in student['answers'] and question[1] in student['answers'][section] else None)
 		for s in user.users:
 			if user.users[s]['group'].lower() != group.lower():
 				continue
@@ -192,7 +193,7 @@ class Admin_Connection: # {{{
 			if student is None:
 				debug(0, 'student found but unloadable: {}:{}'.format(u, group))
 				continue
-			others.append(((student['name'], u), (None, False)) + tuple(make_other_field(student, q, students['answers']) for q in questions))
+			others.append(((student['name'], u), (None, False)) + tuple(make_other_field(student, q) for q in questions))
 		try:
 			others.sort()
 		except:
@@ -956,7 +957,7 @@ def sandbox_post(connection): # {{{
 
 # Main program {{{
 server = websocketd.RPChttpd(config['port'], Connection, httpdirs = ['html'], tls = False, proxy = config['proxy'])
-adminserver = websocketd.RPChttpd(config['admin-port'], Admin_Connection, httpdirs = ['admin_html'], tls = False)
+adminserver = websocketd.RPChttpd(config['admin-port'], Admin_Connection, httpdirs = ['admin_html'], proxy = config['proxy-admin'], tls = False)
 sandboxserver = websocketd.RPChttpd(config['sandbox-port'], Connection, httpdirs = ['sandbox_html'], tls = False, proxy = config['proxy-sandbox'] or ())
 sandboxserver.post = sandbox_post
 print('servers are running')

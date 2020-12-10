@@ -21,7 +21,8 @@ function richinput(element) {
 		//console.info(event.keyCode);
 	});
 	input.AddEvent('keypress', function(event) {
-		//console.info(event.charCode);
+		//var dbg = document.getElementById('debug');
+		//dbg.AddElement('p').AddText('keypress charcode ' + event.charCode + ' keycode ' + event.keyCode);
 		if (this.power === true) {
 			var c = translation[0][event.charCode];
 			if (c !== undefined) {
