@@ -57,7 +57,24 @@ sense.
 In this *Chapter* directory you will later place your game scripts. Those are
 also sorted alphabetically.
 
-From the top level directory of the lesverhaal source tree, run *./lesverhaal*.
+Make a virtual environment for Python 3 named *.env*
+
+```python3 -m venv .env```
+
+Activate the virtual environment (Do this every time before you start the servers)
+
+(for bash+zsh) ```source .env/bin/activate```
+
+(for powershell) ```.\.env\Scripts\Activate.ps1```
+
+(for CMD) ```.\.env\Scripts\activate.bat```
+
+Install the dependencies
+
+```pip install -r requirements.txt```
+
+
+From the top level directory of the lesverhaal source tree, run ```python3 lesverhaal```.
 This should start the system and tell you that servers are running.
 
 Using a browser from the same computer, go to http://localhost:7000 and log in

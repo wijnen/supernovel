@@ -1,3 +1,4 @@
+.env/
 fhs.py
 network.py
 websocketd.py
