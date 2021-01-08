@@ -500,7 +500,7 @@ function init() {
 		var item = c[i].split('=');
 		for (var j = 0; j < item.length; ++j)
 			item[j] = strip(item[j]);
-		crumbs[item[0]] = item[1];
+		crumbs[item[0]] = decodeURIComponent(item[1]);
 	}
 	var loginname = document.getElementById('loginname');
 	var group = document.getElementById('class');

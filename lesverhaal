@@ -4,7 +4,11 @@
 import sys
 import os
 import re
-import crypt
+try:
+	from crypt import crypt
+except:
+	print('Warning: crypt could not be imported; storing passwords in plain text', file = sys.stderr)
+	crypt = lambda pw, salt: pw
 import traceback
 import time
 import random
@@ -81,7 +85,7 @@ class Admin_Connection: # {{{
 		if u is None:
 			debug(2, 'Invalid admin {} from {}:{}'.format(name, *self.remote.socket.remote))
 			return False
-		crypted = crypt.crypt(password, salt = u['password'])
+		crypted = crypt(password, salt = u['password'])
 		if crypted != u['password']:
 			debug(2, 'Invalid password for {} from {}:{}'.format(name, *self.remote.socket.remote))
 			return False
@@ -372,7 +376,7 @@ class Connection: # {{{
 		if u is None:
 			debug(2, 'Invalid user {}:{} on {}:{}'.format(name, group, *self.remote.socket.remote))
 			return 'deze naam is onbekend'
-		crypted = crypt.crypt(password, salt = u['password'])
+		crypted = crypt(password, salt = u['password'])
 		if u['password'] is not None and crypted != u['password']:
 			debug(2, 'Invalid password for {}:{} on {}:{}'.format(name, group, *self.remote.socket.remote))
 			return 'dit wachtwoord is onjuist'
@@ -960,7 +964,7 @@ server = websocketd.RPChttpd(config['port'], Connection, httpdirs = ['html'], tl
 adminserver = websocketd.RPChttpd(config['admin-port'], Admin_Connection, httpdirs = ['admin_html'], proxy = config['proxy-admin'], tls = False)
 sandboxserver = websocketd.RPChttpd(config['sandbox-port'], Connection, httpdirs = ['sandbox_html'], tls = False, proxy = config['proxy-sandbox'] or ())
 sandboxserver.post = sandbox_post
-print('servers are running')
+print('servers are running on ports {}, {} and {}'.format(config['port'], config['admin-port'], config['sandbox-port']))
 websocketd.fgloop()
 # }}}
 
