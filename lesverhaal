@@ -543,12 +543,8 @@ class Connection: # {{{
 	def _question(self, wake, qtype, last_answer = None, params = ()): # {{{
 		if qtype == 'unit':
 			qtype = 'short'
-			if last_answer is not None:
-				last_answer = ''.join(str(x) for x in last_answer)
 		if qtype == 'longunit':
 			qtype = 'longshort'
-			if last_answer is not None:
-				last_answer = (''.join(str(x) for x in last_answer[0]), last_answer[1])
 		p = []
 		for x in params:
 			p.append((yield from self._parse_text(wake, x)))
