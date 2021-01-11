@@ -15,9 +15,6 @@ import random
 import fhs
 import websocketd
 import json
-import subprocess
-import fcntl
-import shlex
 from markdown import markdown
 from websocketd import log
 fhs.option('data', 'path to user and game data', default = '.')
@@ -335,6 +332,11 @@ class Python_secure: # {{{
 insecure = config['insecure'] or not os.path.exists('chroot')
 if insecure:
 	log('Warning: using insecure script parsing. Do not run untrusted scripts!')
+else:
+	import subprocess
+	import fcntl
+	import shlex
+
 def Python():
 	if insecure:
 		return Python_local()
