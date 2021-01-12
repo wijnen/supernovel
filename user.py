@@ -14,10 +14,11 @@ users = {}	# including admins.
 admins = {}
 # Keys which are never saved.
 unsaved = ['connection', 'text_buffer', 'full_section', 'run_stack', 'section', 'answers', 'variables', 'last_path', 'characters', 'cookie', 'python']
+default_user = lambda group, name: {'filename': name.lower(), 'name': name, 'group': group.lower(), 'connection': None, 'password': None, 'nosave': False, 'sandbox': False, 'score': 0, 'answers': {}}
 
 def load(name, group): # {{{
 	# Set default user data; can be replaced (or not returned) below.
-	ret = {'filename': name.lower(), 'name': name, 'group': group.lower(), 'connection': None, 'password': None, 'nosave': False, 'sandbox': False, 'answers': {}}
+	ret = default_user(group, name)
 	if not os.path.exists(os.path.join(config['data'], 'users', group.lower())):
 		debug(0, 'user.load called for nonexistent group {}:{}'.format(name, group))
 		return None
@@ -73,6 +74,32 @@ def list_groups(): # {{{
 	ret = [p for p in os.listdir(path) if os.path.isdir(os.path.join(path, p)) and p.lower() == p and p != 'admin']
 	ret.sort()
 	return ret
+# }}}
+
+def new_group(name): # {{{
+	path = os.path.join(config['data'], 'users')
+	target = os.path.join(path, name)
+	assert not os.path.exists(target)
+	os.mkdir(target)
+# }}}
+
+def del_group(name): # {{{
+	os.rmdir(os.path.join(config['data'], 'users', name))
+# }}}
+
+def new_user(group, name): # {{{
+	path = os.path.join(config['data'], 'users', group.lower())
+	assert os.path.exists(path)
+	target = os.path.join(path, name.lower())
+	assert not os.path.exists(target)
+	ret = default_user(group, name)
+	save(ret)
+# }}}
+
+def del_user(group, name): # {{{
+	path = os.path.join(config['data'], 'users', group.lower(), name)
+	assert os.path.exists(target)
+	os.unlink(target)
 # }}}
 
 def list_group(group): # {{{
