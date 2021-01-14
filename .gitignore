@@ -2,8 +2,8 @@
 fhs.py
 network.py
 websocketd.py
-builders.js
-rpc.js
+html/code/builders.js
+html/code/rpc.js
 html/content/
 les-html/admin/les-content
 les-html/beamer/les-content

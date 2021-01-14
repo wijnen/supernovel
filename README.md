@@ -30,9 +30,9 @@ link the python files (fhs.py, network.py, websocketd.py) to the lesverhaal
 directory.
 
 The files rpc.js and builders.js from the websocketd package need to be copied
-(or linked) into the html directories. If you installed the package, you should
+(or linked) into the main html directory. If you installed the package, you should
 make symlinks to the installed versions in /usr/share/python3-websocketd/. They
-need to go in html/code, admin\_html/code and sandbox\_html/code.
+need to go in html/code/.
 
 If you want to use the sandbox, or run untrusted scripts, you should use the
 safe system. For this, you will need to set up a chroot in the directory
@@ -135,6 +135,18 @@ using a simple textarea widget, and playing the games.
 
 The files are stored under sandbox\_html and can be copied to the main content
 directories to publish them.
+
+# Note for Windows users
+While lesverhaal has been tested and can run on Windows, some features don't
+work. In particular:
+
+  - Chroot and firejail are not available, which means secure mode is not possible. You need to use the --insecure option or lesverhaal will crash instead of starting. Of course this also means that you must not run scripts from untrusted sources.
+  - Crypt has been reported to not work. If it fails to import, as a fallback passwords will be stored in plain text. This is a very bad idea, but doing this will allow the program to run.
+
+It is strongly recommended not to use Windows for anything other than personal
+use, i.e. testing. If users are accessing your program, they should expect a
+secure system and on Windows this is not provided. Please don't do this to
+them.
 
 # Feedback
 Questions, suggestions, praise or any other feedback is welcome at
