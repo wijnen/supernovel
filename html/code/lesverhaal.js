@@ -266,9 +266,9 @@ var Connection = {
 		video.play();
 	},
 	cookie: function(n, g, c) {
-		document.cookie = 'name=' + encodeURIComponent(n) + '; sameSite=Lax';
-		document.cookie = 'group=' + encodeURIComponent(g) + '; sameSite=Lax';
-		document.cookie = 'key=' + encodeURIComponent(c) + '; sameSite=Lax';
+		document.cookie = 'name=' + encodeURIComponent(n) + '; sameSite=Strict';
+		document.cookie = 'group=' + encodeURIComponent(g) + '; sameSite=Strict';
+		document.cookie = 'key=' + encodeURIComponent(c) + '; sameSite=Strict';
 	},
 };
 

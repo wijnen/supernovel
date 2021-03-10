@@ -93,7 +93,10 @@ var Connection = {
 					span = td.AddText(answers.length + ':').AddElement('span').AddText(answer.raw);
 					for (var n = 0; n < answer['style'].length; ++n)
 						span.style[answer['style'][n][0]] = answer['style'][n][1];
-					span.title = answers;
+					var t = [];
+					for (var a = 0; a < answers.length; ++a)
+						t.push(answers[a].raw);
+					span.title = t;
 				}
 				td.style.background = (students[s][q][0] ? students[s][1][1] ? 'white' : 'grey' : '');
 			}
@@ -106,8 +109,8 @@ var Connection = {
 		// TODO: show student details.
 	},
 	cookie: function(n, c) {
-		document.cookie = 'name=' + encodeURIComponent(n);
-		document.cookie = 'key=' + encodeURIComponent(c);
+		document.cookie = 'name=' + encodeURIComponent(n) + '; sameSite=Strict';
+		document.cookie = 'key=' + encodeURIComponent(c) + '; sameSite=Strict';
 	},
 };
 
