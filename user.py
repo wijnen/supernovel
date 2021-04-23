@@ -107,7 +107,9 @@ def list_group(group): # {{{
 	if not os.path.exists(path):
 		debug(0, 'list_group called for nonexistent group {}'.format(group))
 		return []
-	return [p for p in os.listdir(path) if p == p.lower() and not os.path.isdir(os.path.join(path, p))]
+	ret = [p for p in os.listdir(path) if p == p.lower() and not os.path.isdir(os.path.join(path, p))]
+	ret.sort()
+	return ret
 # }}}
 
 def save(user): # {{{
