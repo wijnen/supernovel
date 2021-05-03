@@ -13,11 +13,18 @@ function richinput(element) {
 	}
 	var input = inputs[0];
 	input.power = null;
+	var actions = [
+		[function(e) { e.AddText('·10').AddElement('sup').AddText('x'); }, '·10', true, false],
+		[function(e) { e.AddText('n').AddElement('sup').AddText('x'); }, '', true, true],
+		[function(e) { e.AddText('n').AddElement('sub').AddText('x'); }, '', false, true]
+	];
 	input.AddEvent('keydown', function(event) {
 		// Cursor keys finish power mode.
 		if (event.keyCode < 37 || event.keyCode > 40)
 			return;
 		this.power = null;
+		actions[1][4].checked = false;
+		actions[2][4].checked = false;
 		//console.info(event.keyCode);
 	});
 	input.AddEvent('keypress', function(event) {
@@ -39,25 +46,44 @@ function richinput(element) {
 				return;
 			}
 		}
-		this.power = null;
 	});
 	element.AddElement('br');
-	var actions = [
-		[function(e) { e.AddText('·10').AddElement('sup').AddText('x'); }, '·10', true],
-		[function(e) { e.AddText('n').AddElement('sup').AddText('x'); }, '', true],
-		[function(e) { e.AddText('n').AddElement('sub').AddText('x'); }, '', false]
-	];
 	for (var a = 0; a < actions.length; ++a) {
-		var button = element.AddElement('button');
-		button.type = 'button';
-		button.input = input;
-		actions[a][0](button);
-		button.action = actions[a];
-		button.AddEvent('click', function() {
-			this.input.value += this.action[1];
-			this.input.power = this.action[2];
-			this.input.focus();
-		});
+		var button;
+		if (this.action[3]) {
+			var label = element.AddElement('label');
+			button = label.AddElement('input');
+			button.type = 'checkbox';
+			button.input = input;
+			button.action = actions[a];
+			button.other = 3 - a;
+			actions[a][0](label);
+			actions[a].push(button);
+			button.AddEvent('change', function() {
+				if (this.checked) {
+					this.input.value += this.action[1];
+					this.input.power = this.action[2];
+					this.actions[this.other][4].checked = false;
+				}
+				else {
+					this.input.power = null;
+					this.actions[this.other][4].checked = false;
+				}
+				this.input.focus();
+			});
+		}
+		else {
+			button = element.AddElement('button');
+			button.type = 'button';
+			button.input = input;
+			button.action = actions[a];
+			actions[a][0](button);
+			button.AddEvent('click', function() {
+				this.input.value += this.action[1];
+				this.input.power = this.action[2];
+				this.input.focus();
+			});
+		}
 	}
 	var symbols = 'πμΔφηλρεσαβγ';
 	for (var s = 0; s < symbols.length; ++s) {

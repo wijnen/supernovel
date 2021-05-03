@@ -1,20 +1,112 @@
-var error, login, videodiv, video, contents, contentslist, question, navigation, spritebox, sandbox, speechbox, speaker, photo, speech;
+var error, login, videodiv, video, contents, contentslist, question, navigation, spritebox, sandbox, speechbox, speaker, speaker_image, speech;
 var music, sound;
 var is_replaced;
 var server;
-var kinetic_script = null;
-var kinetic_pos = 0;
-var kinetic_sprites = {};
-var kinetic_end = null;
-var kinetic_history = [];
-var preparing_animation;
+var thread = {};
+var sprite = {};
+var history = [];
 var show_question = false;
-var doing_animation;
-var animations = {};
-var defaults = {x: 0, y: 0, rotation: 0, scale: 1, url: ''};
+var now;
+var speech = [];
+var animating = false;
+
+function new_thread(script, cb, name, now) {
+	if (name === undefined) {
+		n = 0;
+		while (thread[String(n)] !== undefined)
+			n += 1;
+		name = String(n);
+	}
+	thread[name] = {'script': script, 'pos': 0, 'start': now || performance.now(), 'cb': cb || null};
+	activate(name);
+	if (!animating)
+		animate();
+	return name;
+}
+
+function activate(name, start_time) {
+	var current = thread[name];
+	var action = current['script'][current['pos']];
+	if (action['action'] == 'speech') {
+		speech.push(name);
+		speaker.innerHTML = action['speaker'];
+		speaker.style.display = (action['speaker'] ? 'inline' : 'none');
+		speech.innerHTML = action['speech'];
+		speaker_image.style.display = (action['image'] ? 'block' : 'none');
+		speaker_image.src = action['image'] ? action['image'] : '';
+		// Record state. TODO
+	}
+	else if (action['action'] == 'music') {
+		// TODO.
+	}
+	else if (action['action'] == 'sound') {
+		// TODO.
+	}
+	else if (action['action'] == 'serial') {
+		new_thread(action['actions'], function(extra) {
+			activate(name, extra);
+		}, newname, now - start_time);
+	}
+	else if (action['action'] == 'parallel') {
+		var wait = action['actions'].length;
+		for (var a = 0; a < action['actions'].length; ++a) {
+			new_thread([action['actions'][a]], function(extra) {
+				if (--wait == 0) {
+					activate(name, extra);
+				}
+			}, newname, now - start_time)
+		}
+	}
+	else if (action['action'] == 'scene') {
+		// TODO: transitions.
+		background.src = action['target']
+	}
+	else {
+		var from, to, finish;
+		if (action['action'] == 'show') {
+			// TODO
+		}
+		else if (action['action'] == 'hide') {
+			// TODO
+		}
+		else
+			console.assert(action['action'] == 'move');
+		// TODO: if from != to, move, then finish and activate next item.
+	}
+}
+
+function run_story(story, cb) {
+	question.style.display = 'none';
+	videodiv.style.display = 'none';
+	contents.style.display = 'none';
+	speechbox.style.display = 'block';
+	navigation.style.display = 'block';
+	spritebox.style.display = 'block';
+	sandbox.style.display = 'none';
+	question.innerHTML = '';
+	video.pause();
+	show_question = false;
+	history = [];
+	speech = [];
+	new_thread(story, cb, '');
+}
+
+function animate(running) {
+	if (running == animating)
+		return;
+	animating = running;
+	if (running)
+		requestAnimationFrame(update_screen);
+}
+
+function update_screen() {
+	if (!animating)
+		return;
+	// TODO
+}
 
 var Connection = {
-	replaced: function() {
+	replaced: function() {	// Connection has been replaced by new connection.
 		is_replaced = true;
 		alert('De verbinding is overgenomen door een nieuwe login');
 		is_replaced = false;
@@ -22,7 +114,7 @@ var Connection = {
 		server.close();
 		init();
 	},
-	login: function() {
+	login: function() {	// Player needs to log in.
 		kinetic_script = null;
 		error.style.display = 'none';
 		login.style.display = 'block';
@@ -37,7 +129,7 @@ var Connection = {
 		music.pause();
 		sound.pause();
 	},
-	contents: function(data) {
+	contents: function(data) {	// Update chapter and section contents.
 		chapters.ClearAll();
 		sections.ClearAll();
 		var chapterlist = [];
@@ -66,7 +158,7 @@ var Connection = {
 			buttons[c].type = 'button';
 		}
 	},
-	main: function() {
+	main: function() {	// Show chapter and section selection.
 		document.getElementsByTagName('body')[0].style.backgroundImage = '';
 		animations = {};
 		kinetic_script = null;
@@ -85,23 +177,10 @@ var Connection = {
 		for (var s in question.style)
 			delete question.style[s];
 	},
-	style: function(key, value) {
-		question.style[key] = value;
-	},
-	story: function(type, story, last_answer, options) {
-		question.style.display = 'none';
-		videodiv.style.display = 'none';
-		contents.style.display = 'none';
-		speechbox.style.display = 'block';
-		navigation.style.display = 'block';
-		spritebox.style.display = 'block';
-		sandbox.style.display = 'none';
-		question.innerHTML = '';
-		video.pause();
-		kinetic_end = function() {
+	question: function(story, text, type, options, last_answer) {
+		run_story(story, function() {
 			if (show_question)
 				return;
-			//console.info('kinetic end');
 			show_question = true;
 			speechbox.style.display = 'none';
 			question.style.display = 'block';
@@ -160,7 +239,6 @@ var Connection = {
 					l.focus();
 					return;
 				case 'longshort':
-				case 'longunit':
 					var l = form.AddElement('textarea');
 					form.AddElement('br');
 					var e = form.AddElement('input');
@@ -197,7 +275,6 @@ var Connection = {
 					}
 					return;
 				case 'short':
-				case 'unit':
 					var e = form.AddElement('input');
 					e.type = 'text';
 					rich = form;
@@ -222,12 +299,6 @@ var Connection = {
 						return ret;
 					};
 					break;
-				case 'text': // Not a real question, just continue.
-					form.AddElement('br');
-					form.AddElement('button').AddText('Continue').AddEvent('click', function() {
-						server.call('text_done', []);
-					}).type = 'button';
-					return;
 				default:
 					console.error('invalid question type', type);
 			}
@@ -241,57 +312,53 @@ var Connection = {
 			}
 			if (rich !== null)
 				richinput(rich);
-		};
-		kinetic_script = story;
-		kinetic_pos = 0;
-		show_question = false;
-		preparing_animation = false;
-		kinetic_history = [];
-		next_kinetic(true);
+		});
 	},
-	video: function(file) {
-		music.pause();
-		sound.pause();
-		kinetic_script = null;
-		video.src = file;
-		video.load();
-		videodiv.style.display = 'block';
-		contents.style.display = 'none';
-		question.style.display = 'none';
-		speechbox.style.display = 'none';
-		navigation.style.display = 'none';
-		spritebox.style.display = 'none';
-		sandbox.style.display = 'none';
-		speed(); // Set playback speed.
-		video.play();
+	video: function(story, file) {	// Next game item is a video, optionally with a kinetic part before it.
+		run_story(story, function() {
+			music.pause();
+			sound.pause();
+			animate(false);
+			video.src = file;
+			video.load();
+			videodiv.style.display = 'block';
+			contents.style.display = 'none';
+			question.style.display = 'none';
+			speechbox.style.display = 'none';
+			navigation.style.display = 'none';
+			spritebox.style.display = 'none';
+			sandbox.style.display = 'none';
+			speed(); // Set playback speed.
+			video.play();
+		});
 	},
-	cookie: function(n, g, c) {
+	cookie: function(n, g, c) {	// A cookie should be set to make the browser auto-login next time.
 		document.cookie = 'name=' + encodeURIComponent(n) + '; sameSite=Strict';
 		document.cookie = 'group=' + encodeURIComponent(g) + '; sameSite=Strict';
 		document.cookie = 'key=' + encodeURIComponent(c) + '; sameSite=Strict';
 	},
 };
 
-// Script is a list of instructions:
-// 'text': question text.
-// ['text', speaker, text, image]: speech. with empty speaker, hide speaker box; empty image, hide photo; empty all, hide all.
-// ['scene', url]: set new background and remove all sprites. With no url, clear all.
-// ['sprite', tag, null]: hide sprite.
-// ['sprite', tag, {x, y, rotation, scale, url, animation}]: set sprite properties and optionally start animation.
-// ['animation', tag, [{initial}, {time, x, y, rotation, scale, url}, ..., next]]: define canned animation.
-// ['wait', seconds]: wait specified time before next step.
-
 function home() {
 	server.call('home');
 }
 
-function next_kinetic(force, rewind) {
+function next_kinetic() {
 	if (document.activeElement != document.body)
 		document.activeElement.blur();
-	if (show_question || (!force && in_kinetic))
+	if (show_question || story[main] === undefined)
 		return;
-	in_kinetic = true;
-	show_question = false;
+	var script = story[main]['script'];
+	var pos = story[main]['pos'];
+	if (script[pos] === undefined || script[pos]['action'] != 'speech')
+		return;
+	pos += 1;
+	story[main]['pos'] = pos;
+	if (script[pos] === undefined) {
+		// Main thread ended.
+		story[main]['cb']();	// There is always a cb defined for the main thread.
+		return;
+	}
 	while (kinetic_script !== null && kinetic_pos < kinetic_script.length) {
 		var cmd = kinetic_script[kinetic_pos++];
 		//console.info('kinetic', force, cmd);
@@ -306,8 +373,8 @@ function next_kinetic(force, rewind) {
 				speaker.innerHTML = cmd[1];
 				speaker.style.display = (cmd[1] ? 'inline' : 'none');
 				speech.innerHTML = cmd[2];
-				photo.style.display = (cmd[3] ? 'block' : 'none');
-				photo.src = cmd[3] ? cmd[3] : '';
+				speaker_image.style.display = (cmd[3] ? 'block' : 'none');
+				speaker_image.src = cmd[3] ? cmd[3] : '';
 				in_kinetic = false;
 				// Record state.
 				var sprites = {};
@@ -462,7 +529,7 @@ function init() {
 	spritebox = document.getElementById('spritebox');
 	sandbox = document.getElementById('sandbox');
 	speaker = document.getElementById('speaker');
-	photo = document.getElementById('photo');
+	speaker_image = document.getElementById('speaker_image');
 	speech = document.getElementById('speech');
 	music = document.getElementById('music');
 	sound = document.getElementById('sound');
@@ -488,10 +555,10 @@ function init() {
 	spritebox.AddEvent('click', function(event) {
 		if (event.button != 0)
 			return;
-		if (kinetic_script === null)
+		if (story[''] === undefined)
 			return;
 		event.preventDefault();
-		next_kinetic(false);
+		next_kinetic();
 	});
 	
 	var c = document.cookie.split(';');
@@ -519,7 +586,7 @@ function keypress(event) {
 		return;
 	event.preventDefault();
 	if (event.charCode == 32)
-		next_kinetic(false);
+		next_kinetic();
 	else
 		prev_kinetic();
 }

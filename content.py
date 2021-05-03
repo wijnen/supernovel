@@ -35,429 +35,302 @@ def list(group): # {{{
 
 errors = []
 def parse_error(line, message):
-	errors.append('{}: {}'.format(line + 1 if line is not None else '(from code)', message))
-	debug(1, '{}: parse error: {}'.format(line + 1, message))
+	errors.append('{}: {}'.format(line if line is not None else '(from code)', message))
+	debug(1, '{}: parse error: {}'.format(line, message))
 
-def parse_transition(show, transition, timing, in_in, mood, hat, vat, line): # {{{
-	'''Parse a transition that was specified by "with".
-	Returns: animation for the transition:
-	[{time: 0}, {time, x, y, rotation, scale, mood}, ...]
-	'''
-	if timing is None:
-		if in_in:
-			timing = in_in[0]
+def read_structure(f): # {{{
+	indentstack = ['']
+	stack = [[]]
+	ln = 0
+	for line in f:
+		ln += 1
+		l = line.lstrip()
+		if l == '':
+			continue
+		i = line[:len(line) - len(l)]
+		if len(i) > len(indentstack[-1]):
+			# Indentation was increased.
+			if len(stack[-1]) == 0:
+				parse_error(ln, 'first line of file must not be indented')
+				continue
+			if not i.startswith(indentstack[-1]):
+				parse_error(ln, 'indentation changed during increase')
+			stack.append(stack[-1][-1]['children'])
+			indentstack.append(i)
+		while indentstack[-1] is not None and len(i) < len(indentstack[-1]):
+			# Indentation was decreased.
+			stack.pop()
+			indentstack.pop()
+		if indentstack[-1] != i:
+			parse_error(ln, 'indentation changed')
+		stack[-1].append({'line': ln, 'code': line.strip(), 'children': [], 'rawchildren': ''})
+		for frames, indent in zip(stack[:-1], indentstack[:-1]):
+			frames[-1]['rawchildren'] += line[len(indent):]
+	return stack[0]
+# }}}
+
+def parse_raw(ln, d, firstline):
+	if firstline != '':
+		if d['rawchildren'] != '':
+			parse_error(ln, 'raw block present after inline data')
+		return firstline
+	return d['rawchildren']
+
+def parse_anim_args(ln, a, parent_args):
+	args = {'with': None, 'in': None, 'to': None, 'from': None, 'scale': None, 'rotate': None, 'around': None}
+	while len(a) > 0:
+		ra = re.match(r'.*\b((with|in|to|from|scale|rotate|around)\s+(.+?))$', a)
+		if ra is None:
+			print(repr(a))
+			parse_error(ln, 'syntax error parsing animation arguments')
+			return None
+		full = ra.group(1)
+		key = ra.group(2)
+		expr = ra.group(3)
+		a = a[:-len(full)].strip()
+		if args[key] is not None:
+			parse_error(ln, 'duplicate attribute')
+			continue
+		args[key] = expr
+	if parent_args is not None:
+		for a in args:
+			if args[a] is None:
+				args[a] = parent_args[a]
+	return args
+
+def parse_anim_element(ln, c, d, parent_args):
+	'''Read and return single animation command, possibly including children
+	Returns None if this was not an animation command, False if there was an error and the action otherwise.'''
+	# parallel, serial
+	r = re.match(r'(parallel|serial)\b\s*(.*)\s*:$', c)
+	if r is not None:
+		args = parse_anim_args(ln, r.group(2), parent_args)
+		if args is None:
+			# Parsing arguments triggered an error. Abort.
+			return False
+		ret = {'action': r.group(1), 'target': None, 'line': ln, 'args': args, 'actions': []}
+		for ch in d['children']:
+			action = parse_anim_element(ch['line'], ch['code'], ch, args)
+			if action is None:
+				parse_error(ch['line'], 'only animation commands are allowed in this context')
+				continue
+			if action is False:
+				continue
+			ret['actions'].append(action)
+		return ret
+
+	# speech
+	r = re.match(r'(\S*)(?:\s+(\S*))?\s*:\s*(.*?)\s*$', c)
+	if r is not None:
+		return {'action': 'speech', 'line': ln, 'speaker': r.group(1), 'style': r.group(2), 'markdown': parse_raw(ln, d, r.group(3))})
+	
+	# scene, show, hide, move
+	r = re.match(r'(scene|show|hide|move)\s*(?:\s(\S*))?\s*(.*?)\s*$', c)
+	if r is None:
+		return None
+
+	if len(d['children']) > 0:
+		parse_error(ln, 'command cannot have indented block argument')
+
+	if r.group(1) != 'scene' and r.group(2) is None:
+		parse_error(ln, 'command needs a target')
+
+	args = parse_anim_args(ln, r.group(3), parent_args)
+	if args is None:
+		# There was an error.
+		return False
+
+	return {'action': r.group(1), 'target': r.group(2), 'args': args, 'line': ln}
+
+def parse_anim(ln, c, d, ostack):
+	'''Check if a line is an animation command. Parse it and return True if it is.'''
+	action = parse_anim_element(ln, c, d, None)
+	if action is None:
+		# This was not an animation command.
+		return False
+	if action is False:
+		# There was an error, which has already been reported.
+		return True
+	if len(ostack[-1]) == 0 or ostack[-1][-1]['command'] != 'kinetic':
+		ostack[-1].append({'command': 'kinetic', 'line': ln, 'kinetic': action})
+		return True
+	if ostack[-1][-1]['kinetic']['action'] != 'serial':
+		prev = ostack[-1][-1]['kinetic']
+		ostack[-1][-1]['kinetic'] = {'action': 'serial', 'args': parse_anim_args(ln, '', None), 'actions': [prev]}
+	ostack[-1][-1]['kinetic']['actions'].append(action)
+	return True
+
+def parse_line(d, ln, istack, ostack, index):
+	# d is the data dict of the current line; ln is the current line number.
+	# return False if parsing should be aborted, True otherwise.
+	# Note that True does not imply parsing was successfull. False is only returned if the error will likely cause a chain of useless errors.
+	c = d['code']
+
+	# if, elif, while
+	r = re.match(r'(if|elif|while)\b\s*(.*?)\s*:\s*(.*?)\s*$', c)
+	if r is not None:
+		cmd = r.group(1)
+		expr = r.group(2)
+		code = r.group(3)
+		new_frame = []
+		if cmd == 'if':
+			ostack[-1].append({'command': 'if', 'line': ln, 'code': [(expr, new_frame)]})
+		elif cmd == 'elif':
+			if ostack[-1][-1]['command'] != 'if':
+				parse_error(ln, 'elif without if')
+				return False
+			ostack[-1][-1]['code'].append((expr, new_frame))
+		elif cmd == 'while':
+			ostack[-1].append({'command': 'while', 'line': ln, 'test': expr, 'code': new_frame, 'else': []})
+		ostack.append(new_frame)
+		if len(code) == 0:
+			istack.append(d['children'])
 		else:
-			timing = .5
-	ret = [{'time': 0}, {'time': timing}]
-	if hat is not None:
-		ret[-1]['x'] = hat
-	if vat is not None:
-		ret[-1]['y'] = vat
-	if mood is not None:
-		ret[-1]['mood'] = mood
-	if not transition:
-		ret[-1]['time'] = 0
-		return ret
-	if transition == 'move':
-		return ret
-	elif transition == 'moveinleft':
-		if not show:
-			parse_error(line, 'moveinleft is only allowed with show')
-		ret.append({'time': timing})
-		ret[-2]['time'] = 0
-		ret[-1]['x'] = ret[-2]['x'] if 'x' in ret[-2] else 50
-		ret[-2]['x'] = -20
-		return ret
-	elif transition == 'moveinright':
-		if not show:
-			parse_error(line, 'moveinright is only allowed with show')
-		ret.append({'time': timing})
-		ret[-2]['time'] = 0
-		ret[-1]['x'] = ret[-2]['x'] if 'x' in ret[-2] else 50
-		ret[-2]['x'] = 120
-		return ret
-	elif transition == 'moveoutleft':
-		if show:
-			parse_error(line, 'moveoutleft is only allowed with hide')
-		ret[-1]['x'] = 120
-		return ret
-	elif transition == 'moveoutright':
-		if show:
-			parse_error(line, 'moveoutright is only allowed with hide')
-		ret[-1]['x'] = -20
-		return ret
-	else:
-		parse_error(line, 'unknown transition: {}'.format(repr(transition)))
-		ret[-1]['time'] = 0
-		return ret
-# }}}
+			istack.append([{'code': code, 'line': ln, 'children': []}])
+			if len(d['children']) > 0:
+				parse_error(ln, 'indented block is only allowed without inline code')
+		return True
 
-def showhide(show, tag, mood, at, transition, timing, in_in, nr): # {{{
-	'''Create event list for showing or hiding a character.'''
-	ret = []
-	if not at:
-		at = 'center'
-	if ',' in at:
-		hat, vat = at.split(',', 1)
-	else:
-		hat = at
-		vat = 'bottom'
-	hnames = {'left': 30, 'right': 70, 'center': 50}
-	if hat in hnames:
-		hat = hnames[hat]
-	else:
-		try:
-			assert hat[-1] == '%'
-			hat = float(hat[:-1])
-		except:
-			parse_error(nr, 'foute horizontale positie: {}'.format(hat))
-			hat = 50
-	vnames = {'top': 70, 'bottom': 0}
-	if vat in vnames:
-		vat = vnames[vat]
-	else:
-		try:
-			assert vat[-1] == '%'
-			vat = float(vat[:-1])
-		except:
-			parse_error(nr, 'foute vertikale positie: {}'.format(vat))
-			vat = 0
-	if transition:
-		transition = parse_transition(show, transition, timing, in_in, mood, hat, vat, nr)
-	if show and not transition:
-		t = parse_transition(show, None, 0, False, mood, hat, vat, nr)
-		ret.append(['sprite', tag, t[-1]])
-		del t[-1]['time']
-		return ret
-	if transition:
-		transition.append(None)
-		ret.append(['animation', '', transition])
-		ret.append(['sprite', tag, {'animation': ''}])
-		if not in_in:
-			ret.append(['wait', transition[-2]['time']])
-	if not show:
-		ret.append(['sprite', tag, None])
-	return ret
-# }}}
+	# else
+	r = re.match(r'else\s*:\s*(.*?)\s*$', c)
+	if r is not None:
+		code = r.group(1)
+		if ostack[-1][-1]['command'] == 'if':
+			new_frame = []
+			ostack[-1][-1]['code'].append((None, new_frame))
+			ostack.append(new_frame)
+			if len(code) == 0:
+				istack.append(d['children'])
+			else:
+				istack.append([{'code': code, 'line': ln, 'children': []}])
+				if len(d['children']) > 0:
+					parse_error(ln, 'indented block is only allowed without inline code')
+		elif ostack[-1][-1]['command'] == 'while':
+			new_frame = ostack[-1][-1]['else']
+			if len(code) == 0:
+				ostack.append(new_frame)
+			else:
+				istack.append([{'code': code, 'line': ln, 'children': []}])
+				if len(d['children']) > 0:
+					parse_error(ln, 'indented block is only allowed without inline code')
+			istack.append(d['children'])
+		else:
+			parse_error(ln, 'else without if or while')
+			return False
+		return True
+
+	# question
+	r = re.match(r'question\s+(\S*)\s+(\S*)\s*:\s*(.*)$', c)
+	if r is not None:
+		t = r.group(1)
+		if t not in ('hidden', 'short', 'long', 'unit', 'choice', 'longshort', 'longunit', 'longchoice'):
+			parse_error(ln, 'invalid question type')
+			return True
+		name = r.group(2)
+		text = parse_raw(ln, d, r.group(3))
+		ostack[-1].append({'command': 'question', 'type': t, 'variable': name, 'markdown': text, 'line': ln})
+		if 'choice' in t:
+			ostack[-1][-1]['option'] = []
+		else:
+			ostack[-1][-1]['option'] = None
+		return True
+
+	# option
+	r = re.match(r'option\s*:\s*(.*?)$', c)
+	if r is not None:
+		if ostack[-1][-1]['command'] != 'question' or 'choice' not in ostack[-1][-1]['type']:
+			parse_error(ln, 'option is only allowed after a multiple choice question')
+			return True
+		ostack[-1][-1]['option'].append(parse_raw(ln, d, r.group(1)))
+		return True
+
+	if parse_anim(ln, c, d, ostack):
+		return True
+
+	# python
+	r = re.match(r'python\s*:\s*(.*?)\s*$', c)
+	if r is not None:
+		if len(r.group(1)) > 0:
+			if len(d['children']) > 0:
+				parse_error(ln, 'python command cannot have both inline and block code')
+				return True
+			ostack[-1].append({'command': 'python', 'line': ln, 'code': r.group(1)})
+			return True
+		ostack[-1].append({'command': 'python', 'line': ln, 'code': parse_raw(ln, d, r.group(1))})
+		return True
+
+	if len(d['children']) > 0:
+		parse_error(ln, 'unexpected indent')
+		return False
+
+	# $
+	if c[0] == '$':
+		ostack[-1].append({'command': 'python', 'line': ln, 'code': c[1:].strip()})
+		return True
+
+	# break, continue
+	if c in ('break', 'continue'):
+		ostack[-1].append({'command': c, 'line': ln})
+
+	# label, goto
+	r = re.match(r'(label|goto)\s*(\S*)\s*$', c)
+	if r is not None:
+		if r.group(1) == 'label' and len(ostack) > 1:
+			parse_error(ln, 'labels are only allowed at top level')
+			return True
+		name = r.group(2)
+		if name.startswith('.'):
+			name = last_label + name
+		else:
+			last_label = name
+		index[r.group(1)][name] = len(ostack[0])
+		ostack[0].append({'command': r.group(1), 'line': ln, 'label': name, 'target': None})
+		return True
+
+	# video
+	r = re.match(r'video\s*(.*)\s*$', c)
+	if r is not None:
+		ostack[-1].append({'command': 'video', 'line': ln, 'video': r.group(1)})
+		return True
+
+	# answer
+	r = re.match(r'answer\s*(.*)\s*$', c)
+	if r is not None:
+		ostack[-1].append({'command': 'answer', 'line': ln, 'answer': r.group(1)})
+		return True
+
+	# sprite
+	r = re.match(r'sprite\s*(.*)\s*$', c)
+	if r is not None:
+		ostack[-1].append({'command': 'sprite', 'line': ln, 'sprite': r.group(1)})
+		return True
+
+	parse_error(ln, 'syntax error')
+	return True
 
 def get_file(group, section, filename): # {{{
 	global errors
 	errors = []
 	with open(filename) as f:
-		parts = []
-		stack = [parts]
-		istack = [None]
-		index = {}
-		characters = {}
-		labels = []
-		last_label = ''
-		in_string = False
-		in_comment = False
-		in_speech = False
-		in_in = False
-		pending_emote = [None]
-		def add_story_item(item = None):
-			finish_story_item(item)
-			if len(stack) == 0 or len(stack[-1]) == 0 or stack[-1][-1][0] != 'story':
-				stack[-1].append(['story', None, []])
-			if item is not None:
-				if isinstance(item, str) and len(stack[-1][-1][2]) > 0 and isinstance(stack[-1][-1][2][-1], str):
-					stack[-1][-1][2][-1] += '\n' + item
-				else:
-					stack[-1][-1][2].append(item)
-		def finish_story_item(item = None):
-			# If there is no story item, do nothing.
-			if len(stack[-1]) < 1 or len(stack[-1][-1]) < 1 or stack[-1][-1][0] != 'story':
-				return
-			# If there is no pending emote in the story, do nothing.
-			if pending_emote[0] is None:
-				return
-			p = pending_emote[0]
-			if item is not None and item[0] == 'sprite' and 'mood' in item[2]:
-				if item[1] == p:
-					# My image is set. Don't change to pending.
-					pending_emote[0] = None
-					return
-				else:
-					# Someone else's image: don't change image yet.
-					return
-			else:
-				pending_emote[0] = None
-				name, imgs, ext = characters[p]
-				if imgs and ext:
-					add_story_item(['restore-image', p])
-		for nr, ln in enumerate(f):
-			ln = ln.rstrip()
-			if in_string:
-				if ln.strip() != '' and ln[:istack[-1]].strip() != '':
-					parse_error(nr, 'fout met inspringen in lange tekst')
-				ln = ln[istack[-1]:]
-				if ln.endswith(in_string):
-					ln = ln[:-len(in_string)].rstrip()
-					in_string = False
-					if ln != '':
-						add_story_item(ln)
-					continue
-				add_story_item(ln)
-				continue
-			if in_comment:
-				if ln.strip() != '' and ln[:istack[-1]].strip() != '':
-					parse_error(nr, 'fout met inspringen in lang commentaar')
-				if ln.endswith('###'):
-					in_comment = False
-				continue
-			if in_speech:
-				if ln.strip() == '' or ln[:istack[-1]].strip() == '':
-					stack[-1][-1][2] += '\n' + ln[istack[-1]:]
-					continue
-				in_speech = False
-				istack.pop()
-			ilevel = len(ln) - len(ln.strip())
-			ln = ln.strip()
-			if ln.startswith('###'):
-				if len(ln) > 3 and ln.endswith('###'):
-					continue
-				in_comment = True
-				continue
-			if ln.startswith('#') or ln == '':
-				continue
-			if istack[-1] is None:
-				if len(istack) > 1 and ilevel <= istack[-2]:
-					parse_error(nr, 'regel moet ingesprongen zijn')
-					istack[-1] = istack[-2]
-				else:
-					istack[-1] = ilevel
-			while ilevel < istack[-1]:
-				istack.pop()
-				if in_in:
-					# Finish animation.
-					stack[-1][-1][2].append(['wait', in_in[0]])
-					in_in = False
-				else:
-					stack.pop()
-			if ilevel != istack[-1]:
-				parse_error(nr, 'regel mag niet ingesprongen zijn')
-			if len(istack) >= 2 and istack[-2] is None:
-				istack[-2] = istack[-1]
-			if ln.strip().startswith("'''") or ln.strip().startswith('"""'):
-				in_string = ln[:3]
-				ln = ln[3:]
-				if ln.endswith(in_string):
-					ln = ln[:-len(in_string)].rstrip()
-					in_string = False
-					add_story_item(ln)
-					continue
-				add_story_item()
-				if ln != '':
-					add_story_item(ln)
-				continue
-			r = re.match(r'(["\'])(.*)\1\s*$', ln)
-			if r:
-				add_story_item(r.group(2))
-				continue
-			r = re.match(r'answer\s+((.+?)\s+)?(.+?)\s*$', ln)
-			if r:
-				finish_story_item()
-				stack[-1].append(['answer', None, r.group(2), r.group(3)])
-				continue
-			r = re.match(r'label\s+(.+?)\s*$', ln)
-			if r:
-				# Labels are only allowed at top level.
-				if len(stack) != 1:
-					parse_error(nr, 'labels mogen niet ingesprongen zijn')
-					continue
-				name = r.group(1)
-				if name.startswith('.'):
-					name = last_label + name
-				else:
-					last_label = name
-				index[name] = len(stack[-1])
-				stack[-1].append(['label', None, name]) # Label name is not used, but good for debugging.
-				continue
-			r = re.match(r'goto\s+(.+?)\s*$', ln)
-			if r:
-				name = r.group(1)
-				if name.startswith('.'):
-					name = last_label + name
-				finish_story_item()
-				stack[-1].append(['goto', None, 0]) # Label is filled in at end.
-				labels.append((name, stack[-1][-1]))
-				continue
-			r = re.match(r'if\s+(.+):$', ln)
-			if r:
-				finish_story_item()
-				stack[-1].append(['if', None, [r.group(1), []], None])
-				stack.append(stack[-1][-1][-2][1])
-				istack.append(None)
-				continue
-			r = re.match(r'elif\s+(.+):$', ln)
-			if r:
-				if stack[-1][-1][0] != 'if':
-					parse_error(nr, 'elif zonder if')
-					continue
-				if stack[-1][-1][-1] is not None:
-					parse_error(nr, 'elif na else')
-					continue
-				stack[-1][-1].insert(-1, [r.group(1), []])
-				stack.append(stack[-1][-1][-2][1])
-				istack.append(None)
-				continue
-			r = re.match(r'else\s*:$', ln)
-			if r:
-				if stack[-1][-1][0] != 'if':
-					parse_error(nr, 'else zonder if')
-					continue
-				if stack[-1][-1][-1] is not None:
-					parse_erorr(nr, 'else na else')
-					continue
-				stack[-1][-1][-1] = []
-				stack.append(stack[-1][-1][-1])
-				istack.append(None)
-				continue
-			r = re.match(r'while\s+(.+):$', ln)
-			if r:
-				finish_story_item()
-				stack[-1].append(['while', None, r.group(1), []])
-				stack.append(stack[-1][-1][3])
-				istack.append(None)
-				continue
-			if ln in ('continue', 'break'):
-				finish_story_item()
-				stack[-1].append([ln, None])
-				continue
-			r = re.match(r'character\s+(\S+)(\s+(\S+)(\s+(.*?))?)?\s*$', ln)
-			if r:
-				tag = r.group(1)
-				url = r.group(3)
-				name = r.group(5)
-				if url == '-':
-					fulldir = None
-					ext = None
-				else:
-					imgdir, ext = os.path.splitext(url)
-					if imgdir.startswith('common/'):
-						fulldir = config['content'] + '/' + imgdir + '/'
-					elif section[0] == 'sandbox':
-						fulldir = config['sandbox'] + '/' + group.lower() + '/' + section[1] + '/' + imgdir + '/'
-					else:
-						fulldir = config['content'] + '/' + group.lower() + '/' + section[0] + '/' + section[1] + '/' + imgdir + '/'
-				characters[tag] = (name, fulldir, ext)
-				continue
-			r = re.match(r'(scene|music|sound)(\s+(.*?))?\s*$', ln)
-			if r:
-				if r.group(3):
-					if r.group(3).startswith('common/'):
-						url = config['content'] + '/' + r.group(3)
-					elif section[0] == 'sandbox':
-						url = config['sandbox'] + '/' + group.lower() + '/' + section[1] + '/' + r.group(3)
-					else:
-						url = config['content'] + '/' + group.lower() + '/' + section[0] + '/' + section[1] + '/' + r.group(3)
-				else:
-					url = None
-				add_story_item([r.group(1), url])
-				continue
-			r = re.match(r'(show|hide)\s+(\S+)(\s+(\S*))?(\s+at\s+(.*?))?(\s+with\s+(.*?))?(\s+in\s+(\S*?)(m)?s)?$', ln)
-			if r:
-				show = r.group(1) == 'show'
-				tag = r.group(2)
-				mood = r.group(4)
-				at = r.group(6)
-				transition = r.group(8)
-				if r.group(10) is None:
-					timing = None
-				else:
-					try:
-						timing = float(r.group(10))
-						if r.group(11):
-							timing /= 1000
-					except:
-						timing = None
-						parse_error(nr, 'achter in moet een getal staan')
-				add_story_item()
-				stack[-1][-1][2].extend(showhide(show, tag, mood, at, transition, timing, in_in, nr))
-				continue
-			r = re.match(r'in\s+(\S*?)(m)?s\s*:\s*$', ln)
-			if r:
-				if in_in:
-					parse_error(nr, 'genest in-blok')
-				try:
-					timing = float(r.group(1))
-					if r.group(2):
-						timing /= 1000
-				except:
-					parse_error(nr, 'achter in moet een tijd staan')
-					timing = 0
-				in_in = (timing, nr)
-				istack.append(None)
-				continue
-			if ln.startswith('$'):
-				if len(stack[-1]) > 0 and stack[-1][-1][0] == 'python':
-					if ln[1:1 + indent].strip() != '':
-						parse_error(nr, 'het hele Python-blok moet minstens zover ingesprongen zijn als de eerste regel ervan')
-						continue
-				else:
-					indent = len(ln) - len(ln[1:].strip()) - 1
-					finish_story_item()
-					stack[-1].append(['python', None, []])
-				stack[-1][-1][2].append(ln[1 + indent:])
-				continue
-			r = re.match(r'video\s+(.+)$', ln)
-			if r:
-				finish_story_item()
-				stack[-1].append(['video', None, r.group(1).strip()])
-				continue
-			r = re.match(r'(unit|short|long|longunit|longshort)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*$', ln)
-			if r:
-				finish_story_item()
-				stack[-1].append([r.group(1), None, r.group(2)])
-				continue
-			r = re.match(r'((long)?choices?)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*$', ln)
-			if r:
-				finish_story_item()
-				stack[-1].append([r.group(1), None, r.group(3)])
-				continue
-			r = re.match(r'option\s+(.*)$', ln)
-			if r:
-				if len(stack[-1]) < 1 or len(stack[-1][-1]) < 1 or stack[-1][-1][0] not in ('choice', 'choices', 'longchoice', 'longchoices'):
-					parse_error(nr, 'option moet direct achter choice(s) of longchoice(s) komen')
-					continue
-				stack[-1][-1].append(r.group(1).strip())
-				continue
-			r = re.match(r'hidden\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+(.*)$', ln)
-			if r:
-				if len(stack[-1]) > 0 and len(stack[-1][-1]) > 0 and stack[-1][-1][0] == 'story':
-					parse_error(nr, 'hidden mag niet in een tekstblok staan')
-					continue
-				stack[-1].append(['hidden', None, r.group(1), r.group(2)])
-				continue
-			r = re.match(r'(.*?)(?:\s+(.*?))?\s*:\s*(.*?)\s*$', ln)
-			if r and r.group(1) in characters:
-				name, imgs, ext = characters[r.group(1)]
-				if r.group(2) is not None:
-					add_story_item(['temp-image', r.group(1), r.group(2)])
-				add_story_item(['text', name, r.group(3), imgs + 'side' + ext if imgs else None])
-				if r.group(2) is not None:
-					pending_emote[0] = r.group(1)
-				if not r.group(3):
-					in_speech = True
-					istack.append(None)
-				continue
-			parse_error(nr, 'onbegrijpelijke regel: ' + ln)
-		for label, src in labels:
-			src[2] = index[label]
-	# Create all paths.
-	def make_paths(path, items):
-		for i, item in enumerate(items):
-			item[1] = path + (i,)
-			if item[0] == 'while':
-				make_paths(path + (i,), item[3])
-			elif item[0] == 'if':
-				for n, target in enumerate(item[2:-1]):
-					make_paths(path + (i, n), target[1])
-				if item[-1] is not None:
-					make_paths(path + (i, len(item) - 2), item[-1])
-	make_paths((), parts)
-	return parts, index, characters, errors
+		data = read_structure(f)
+	istack = [data]
+	ret = []
+	ostack = [ret]
+	index = {'label': {}, 'goto': {}}
+	while len(istack) > 0:
+		d = istack[-1].pop(0)
+		ln = d['line']
+		parse_line(d, ln, istack, ostack, index)
+		while len(istack) > 0 and len(istack[-1]) == 0:
+			istack.pop()
+			ostack.pop()
+	for label in index['goto']:
+		source = ret[index['goto'][label]]
+		if label not in index['label']:
+			parse_error(source['line'], 'undefined label')
+		else:
+			source['target'] = index['label'][label]
+	return ret, errors
 # }}}
 
 def get(group, section): # {{{
@@ -469,5 +342,32 @@ def get(group, section): # {{{
 		return [], {}
 	return get_file(group, section, filename)
 # }}}
+
+def load822(filename):
+	ret = {}
+	with open(filename) as f:
+		indent = False
+		current = None
+		for line in f:
+			if line.strip() == '':
+				continue
+			if len(line.lstrip()) != len(line):
+				assert indent is not False
+				if indent is not None:
+					assert line.startswith(indent)
+				else:
+					indent = line[:-len(line.lstrip())]
+				ret[current].append(line[len(indent):])
+			else:
+				if ':' in line.strip()[:-1]:
+					indent = False
+					key, value = line.split(':', 1)
+					ret[key.strip()] = [value.strip()]
+				else:
+					assert line.strip()[-1] == ':'
+					indent = None
+					current = line.strip()[:-1].strip()
+					ret[current] = []
+	return ret
 
 # vim: set foldmethod=marker :

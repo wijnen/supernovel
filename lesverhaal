@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+# vim: set fileencoding=utf-8 :
 
 # Imports and config. {{{
 import sys
@@ -22,7 +23,7 @@ fhs.option('port', 'network port to listen for players', default = '7000')
 fhs.option('admin-port', 'network port to listen for admin', default = '7001')
 fhs.option('sandbox-port', 'network port to listen for sandbox', default = '7002')
 fhs.option('content', 'url to regular content', default = 'content')
-fhs.option('sandbox', 'path to sandbox content, relative to <data path>/sandbox_html/', default = 'sandbox')
+fhs.option('sandbox', 'path to sandbox content, relative to <data path>/html/sandbox/', default = 'sandbox')
 fhs.option('lazysave', 'Only save when user logs out (default is on every change)', argtype = bool)
 fhs.option('secret', 'If set, key to log in as any user (including admin) without cookie', default = '')
 fhs.option('proxy', 'virtual proxy directory', default = 'lesverhaal')
@@ -151,29 +152,21 @@ class Admin_Connection: # {{{
 		'''Show questions for one section.'''
 		section = tuple(section)
 		self.refresh = lambda: self.show_section(group, section)
-		parts, index, characters, errors = content.get(group, section)
+		parts, errors = content.get(group, section)
 		questions = []
-		prev = ['']
 		def add_block(block):
 			for p in block:
-				if p[0] == 'while':
-					add_block(p[3])
-				elif p[0] == 'if':
-					for b in p[2:-1]:
+				if p['command'] == 'while':
+					add_block(p['code'])
+				elif p['command'] == 'if':
+					for b in p['code']:
 						add_block(b[1])
-					if p[-1] is not None:
-						add_block(p[-1])
-				elif p[0] == 'video':
-					questions.append((p[1], os.path.splitext(p[2])[0], 'video', p[0]))
-				elif p[0] == 'hidden':
-					questions.append((p[1], p[2], p[3], p[0]))
-				elif p[0] in ('unit', 'short', 'long', 'choice', 'longunit', 'longshort', 'longchoice'):
-					questions.append((p[1], p[2], prev[0], p[0]))
-					prev[0] = ''
-				elif p[0] == 'story':
-					prev[0] = str(p[2][-1])
+				elif p['command'] == 'video':
+					questions.append({'type': 'video', 'name': 'video', 'markdown': p['video'], 'option': None, 'line': p['line']})
+				elif p['command'] == 'question':
+					questions.append({'type': p['type'], 'name': p['variable'], 'markdown': p['markdown'], 'option': p['option'], 'line': p['line']})
 		add_block(parts)
-		questions.append(((len(parts),), '', '', 'end'))
+		questions.append({'type': 'end', 'name': '', 'markdown': '', 'option': None, 'line': p['line']})
 		students = []
 		def make_field(student, question):
 			active = student['section'] == section and len(student['run_stack'][-1][0]) > student['run_stack'][-1][1] and student['run_stack'][-1][0][student['run_stack'][-1][1]][1] == question[0]
@@ -412,11 +405,10 @@ class Connection: # {{{
 		if 'cookie' not in u:
 			u['cookie'] = ''.join(chr(random.randrange(ord('a'), ord('z') + 1)) for _ in range(32))
 		if 'section' not in u:
-			u['text_buffer'] = []
-			u['full_section'] = []
+			u['program'] = []
 			u['run_stack'] = []
 			u['section'] = None	# Current section.
-			u['last_path'] = None
+			u['question'] = None
 		self.remote.cookie.event(u['filename'], group.lower(), u['cookie'])
 		self.remote.contents.event(content.list(group))
 		self.remote.main.event()
@@ -459,24 +451,10 @@ class Connection: # {{{
 				result += (yield from self._safe_eval(wake, m.group(1), as_str = True))
 		return result
 	# }}}
-	def _add_text(self, wake, text): # {{{
-		'''Prepare text for displaying.'''
-		#debug(3, 'running story item %s' % text)
-		if not isinstance(text, str):
-			if text[0] == 'text':
-				self.user['text_buffer'].append((text[0], '' if text[1] is None else (yield from self._parse_text(wake, text[1])), (yield from self._parse_text(wake, text[2])), text[3]))
-			else:
-				self.user['text_buffer'].append(text)
-			return
-		if len(self.user['text_buffer']) > 0 and isinstance(self.user['text_buffer'][-1], str):
-			self.user['text_buffer'][-1] += '\n' + (yield from self._parse_text(wake, text))
-		else:
-			self.user['text_buffer'].append((yield from self._parse_text(wake, text)))
-	# }}}
 	def _answer(self, wake, key, value = None): # {{{
 		'''Set style for last answer.
 		With only one argument, the style of the background is set.'''
-		if self.user['last_path'] is None:
+		if self.user['question'] is None:
 			debug(1, 'answer style given before a question was answered')
 			return
 		if value is None:
@@ -486,7 +464,7 @@ class Connection: # {{{
 			key = 'background'
 		key = (yield from self._parse_text(wake, key))
 		value = (yield from self._parse_text(wake, value))
-		self.user['answers'][self.user['section']][self.user['last_path']][-1]['style'].append((key.strip(), value.strip()))
+		self.user['answers'][self.user['section']][self.user['question']][-1]['style'].append((key.strip(), value.strip()))
 		user.refresh_admins()
 	# }}}
 	def _home(self): # {{{
@@ -514,52 +492,51 @@ class Connection: # {{{
 		self.busy = False
 	# }}}
 	def _start(self, wake, section, section_content, send_errors): # {{{
-		self.user['full_section'], self.index, characters, errors = section_content
+		self.user['program'], errors = section_content
 		if send_errors:
 			if len(errors) > 0:
-				errors = markdown('#Fouten\n' + '\n\n'.join(errors))
+				errors = markdown('# Errors:\n' + '\n\n'.join(errors))
 			else:
 				errors = ''
 			self.remote.error.event(errors)
-		self.user['run_stack'] = [[self.user['full_section'], 0]]
-		self.user['characters'] = {}
-		self.user['last_path'] = None
-		def goto(label):
+		self.user['run_stack'] = [[self.user['program'], 0]]
+		self.user['sprite'] = {}
+		self.user['pending'] = []
+		self.user['question'] = None
+		def goto(line):
 			while len(self.user['run_stack']) > 1:
 				self.user['run_stack'].pop()
-			self.user['run_stack'][-1][1] = self.index(label)
+			self.user['run_stack'][-1][1] = line
 		self.user['python'] = Python()
 		self.user['python'].set('name', self.user['name'])
 		self.user['python'].set('group', self.user['group'])
-		startup = fhs.read_data('startup.py')
+		startup = fhs.read_data(os.path.join('include', 'startup.py'))
 		if startup is not None:
 			try:
 				yield from self.user['python'].run(wake, startup.read(), False)
 			except:
 				debug(1, 'Error in startup script')
 				traceback.print_exc()
-		for c in characters:
-			self._add_character(c, *characters[c])
 		yield from self._run(wake)
 	# }}}
-	def _question(self, wake, qtype, last_answer = None, params = ()): # {{{
+	def _question(self, wake, qtype, last_answer, markdown, options): # {{{
 		if qtype == 'unit':
 			qtype = 'short'
 		if qtype == 'longunit':
 			qtype = 'longshort'
-		p = []
-		for x in params:
-			p.append((yield from self._parse_text(wake, x)))
-		self._handle_story(qtype, self.user['text_buffer'], last_answer, p)
+		qtext = (yield from self._parse_text(wake, markdown))
+		parsed_options = []
+		for x in options:
+			parsed_options.append((yield from self._parse_text(wake, x)))
+		debug(1, repr((self.user['pending'], qtext, qtype, parsed_options)))
+		self.remote.question.event(self.user['pending'], qtext, qtype, parsed_options, last_answer)
+		self.user['pending'] = []
 		self.breaking = True
 		return True
 	# }}}
 	def _add_character(self, code, name, imgs, ext): # {{{
 		self.user['characters'][code] = {'name': name, 'imgs': imgs, 'ext': ext, 'mood': 'default', 'x': 0, 'y': 0}
 		c = self.user['characters'][code]
-	# }}}
-	def _say(self, wake, name, text, image = None): # {{{
-		self.user['text_buffer'].append(('text', name, (yield from self._parse_text(wake, text)), image))
 	# }}}
 	def _show(self, tag, mood = None, at = 'center', transition = None, timing = None): # {{{
 		yield from self._run_item(wake, ['story', None, content.showhide(True, tag, mood, at, transition, timing, False, None)])
@@ -568,28 +545,24 @@ class Connection: # {{{
 		yield from self._run_item(wake, ['story', None, content.showhide(False, tag, None, at, transition, timing, False, None)])
 	# }}}
 	def _run(self, wake): # {{{
-		self.user['text_buffer'] = []
 		watchdog = 0
 		while len(self.user['run_stack']) > 0:
 			watchdog += 1
 			if watchdog > 1000:
 				debug(1, 'hanging script detected: {}; killing it'.format(self.user['section']))
-				self._handle_story('text', 'Het verhaal bevat helaas een fout en is gestopt.')
-				self.user['text_buffer'] = []
-				self.user['run_stack'] = [[self.user['full_section'], len(self.user['full_section'])]]
+				self.remote.error.event(['Script stopped working and was killed.'])
+				self.user['run_stack'] = [[self.user['program'], len(self.user['program'])]]
 				user.refresh_admins()
 				return
 			# Pop off stack levels until there's an instruction.
 			while len(self.user['run_stack'][-1][0]) <= self.user['run_stack'][-1][1]:
 				self.user['run_stack'].pop()
 				if len(self.user['run_stack']) == 0:
-					if len(self.user['text_buffer']) > 0:
-						self._handle_story('text', self.user['text_buffer'])
-						self.user['text_buffer'] = []
-						self.user['run_stack'] = [[self.user['full_section'], len(self.user['full_section'])]]
-						user.refresh_admins()
-						return
-					self._home()
+					# Send final "question".
+					self.remote.question.event(self.user['pending'], '', 'choice', ['Done'])
+					self.user['pending'] = []
+					self.breaking = True
+					user.refresh_admins()
 					return
 			# Run instructions.
 			if (yield from self._run_item(wake, self.user['run_stack'][-1][0][self.user['run_stack'][-1][1]])):
@@ -598,74 +571,232 @@ class Connection: # {{{
 	# }}}
 	def _run_item(self, wake, code): # {{{
 		debug(3, '{}:{} running item {}'.format(self.user['name'], self.user['group'], repr(code)))
-		if code[0] == 'label':
+		if code['command'] == 'label':
 			pass
-		elif code[0] == 'story':
-			for item in code[2]:
-				yield from self._add_text(wake, item)
-		elif code[0] == 'answer':
-			yield from self._answer(wake, code[2], code[3])
-		elif code[0] == 'if':
+		elif code['command'] == 'answer':
+			yield from self._answer(wake, 'background', code['answer'])
+		elif code['command'] == 'if':
 			self.user['run_stack'][-1][1] += 1
-			for expr, target in code[2:-1]:
-				if (yield from self._safe_eval(wake, expr, as_str = False)):
+			for expr, target in code['code']:
+				if expr is None or (yield from self._safe_eval(wake, expr, as_str = False)):
 					self.user['run_stack'].append([target, 0])
 					break
-			else:
-				if code[-1] is not None:
-					self.user['run_stack'].append([code[-1], 0])
 			return False
-		elif code[0] == 'while':
+		elif code['command'] == 'while':
 			# Don't increment instruction pointer, so the loop restarts.
-			if (yield from self._safe_eval(wake, code[2], as_str = False)):
-				self.user['run_stack'].append([code[3], 0])
+			if (yield from self._safe_eval(wake, code['test'], as_str = False)):
+				self.user['run_stack'].append([code['code'], 0])
 			else:
+				# exit the while loop.
+				self.user['run_stack'][-1][1] += 1
+				# handle else clause, if present.
+				if code['else'] is not None:
+					self.user['run_stack'].append([code['else'], 0])
+			return False
+		elif code['command'] in ('continue', 'break'):
+			while self.user['run_stack'][-1][1] >= len(self.user['run_stack'][-1][0]) or self.user['run_stack'][-1][0][self.user['run_stack'][-1][1]]['command'] != 'while':
+				self.user['run_stack'].pop()
+			if code['command'] == 'break':
 				self.user['run_stack'][-1][1] += 1
 			return False
-		elif code[0] == 'continue':
-			while self.user['run_stack'][-1][1] >= len(self.user['run_stack'][-1][0]) or self.user['run_stack'][-1][0][self.user['run_stack'][-1][1]][0] != 'while':
-				self.user['run_stack'].pop()
-			return False
-		elif code[0] == 'break':
-			while self.user['run_stack'][-1][1] >= len(self.user['run_stack'][-1][0]) or self.user['run_stack'][-1][0][self.user['run_stack'][-1][1]][0] != 'while':
-				self.user['run_stack'].pop()
-			self.user['run_stack'][-1][1] += 1
-			return False
-		elif code[0] == 'goto':
+		elif code['command'] == 'goto':
 			# Break to top level and jump to requested label.
 			while len(self.user['run_stack']) > 1:
 				self.user['run_stack'].pop()
-			self.user['run_stack'][-1][1] = code[2]
+			self.user['run_stack'][-1][1] = code['target']
 			return False
-		elif code[0] == 'python':
+		elif code['command'] == 'python':
 			self.breaking = False
 			self.user['run_stack'][-1][1] += 1	# Do this before running the code, so goto works.
 			try:
-				new_commands = (yield from self.user['python'].run(wake, '\n'.join(code[2])))
+				new_commands = (yield from self.user['python'].run(wake, '\n'.join(code['code'])))
 				if len(new_commands) > 0:
 					self.user['run_stack'].append([new_commands, 0])
 			except:
-				debug(0, 'Error in script: {}'.format(code[2]))
+				debug(0, 'Error in script: {}'.format(code['code']))
 				traceback.print_exc()
+				self.remote.error.event(code['code'])
 			return self.breaking
-		elif code[0] == 'video':
-			if len(self.user['text_buffer']) > 0:
-				self._handle_story('text', self.user['text_buffer'])
-				self.user['text_buffer'] = []
-			else:
-				self.remote.video.event(config['content'] + '/' + self.user['group'].lower() + '/' + self.user['section'][0] + '/' + self.user['section'][1] + '/' + code[2])
+		elif code['command'] == 'video':
+			url = config['content'] + '/' + self.user['group'].lower() + '/' + self.user['section'][0] + '/' + self.user['section'][1] + '/' + code['video']
+			self.remote.video.event(self.user['pending'], url)
+			self.user['pending'] = []
 			return True
-		elif code[0] == 'hidden':
-			self._store_answer(code[2], (yield from self._safe_eval(wake, code[3], as_str = True)))
-		else:
-			# Question.
-			if self.user['section'] in self.user['answers'] and code[2] in self.user['answers'][self.user['section']]:
-				last_answer = self.user['answers'][self.user['section']][code[2]][-1]['raw']
+		elif code['command'] == 'sprite':
+			self._load_sprite(code['sprite'])
+		elif code['command'] == 'kinetic':
+			def build_kinetic(wake, item):
+				if item['action'] == 'speech':
+					speaker = None if item['speaker'] is None else self.user['sprite'].get(item['speaker'], '(' + item['speaker'] + ')')
+					return {'action': 'speech', 'speaker': speaker, 'text': markdown((yield from self._parse_text(wake, item['markdown'])))})
+				if item['action'] in ('serial', 'parallel'):
+					actions = []
+					for x in item['actions']:
+						actions.append((yield from build_kinetic(wake, x)))
+					return {'action': item['action'], 'args': item['args'], 'actions': actions}
+				args = {}
+				if item['args']['with'] is None:
+					args['with'] = None
+				else:
+					w = (yield from self._parse_text(wake, item['args']['with']))
+					if w not in ('jump', 'dissolve', 'move'):
+						debug(0, 'invalid transition {}'.format(w))
+						args['with'] = None
+					else:
+						args['with'] = w
+				if item['args']['in'] is None:
+					args['in'] = None
+				else:
+					i = (yield from self._parse_text(wake, item['args']['in'])).strip()
+					r = re.match(r'([-+.e0-9]+)\s*(m?)s$', i)
+					if r is None:
+						args['in'] = None
+					else:
+						try:
+							num = float(r.group(1))
+							if r.group(2) == 'm':
+								num /= 1e3
+							args['in'] = num
+						except ValueError:
+							debug(0, 'error parsing time {}'.format(i))
+							args['in'] = None
+				def parse_location(wake, loc, use_names = True):
+					if loc is None:
+						return None
+					l = [x.strip() for x in (yield from self._parse_text(wake, loc)).split()]
+					if l[0] == 'outleft':
+						l[0] = (1, 0)
+					elif l[0] == 'inleft':
+						l[0] = (-1, 0)
+					elif l[0] == 'outright':
+						l[0] = (-1, 1)
+					elif l[0] == 'inright':
+						l[0] = (1, 1)
+					elif l[0] == 'left':
+						l[0] = (0, .2)
+					elif l[0] == 'center':
+						l[0] = (0, .5)
+					elif l[0] == 'right':
+						l[0] = (0, .8)
+					else:
+						try:
+							l[0] = (0, float(l[0]))
+						except:
+							l[0] = (0, .5)
+					if len(l) == 1:
+						l.append((0, 0))
+					elif l[1] == 'outbottom':
+						l[1] = (1, -1)
+					elif l[1] == 'inbottom':
+						l[1] = (-1, -1)
+					elif l[1] == 'outtop':
+						l[1] = (-1, 1)
+					elif l[1] == 'intop':
+						l[1] = (1, 1)
+					elif l[1] == 'bottom':
+						l[1] = (0, -1)
+					elif l[1] == 'base':
+						l[1] = (0, 0)
+					elif l[1] == 'low':
+						l[1] = (0, .2)
+					elif l[1] == 'middle':
+						l[1] = (0, .5)
+					elif l[1] == 'high':
+						l[1] = (0, .8)
+					elif l[1] == 'top':
+						l[1] = (0, 1)
+					else:
+						try:
+							l[1] = (0, float(l[1]))
+						except:
+							l[1] = (0, 0)
+					if len(l) == 2:
+						l.append(None)
+					else:
+						try:
+							l[2] = int(l[2])
+						except:
+							l[2] = None
+					return l
+				args['to'] = (yield from parse_location(wake, item['args']['to']))
+				args['from'] = (yield from parse_location(wake, item['args']['from']))
+				args['around'] = (yield from parse_location(wake, item['args']['around'], False))
+				if item['args']['scale'] is None:
+					args['scale'] = None
+				else:
+					s = [x.strip() for x in (yield from self._parse_text(wake, item['args']['scale'])).split()]
+					try:
+						s = [float(x) for x in s]
+						if len(s) == 1:
+							s.append(s[0])
+						elif len(s) > 2:
+							s = [s[0], s[1]]
+					except:
+						debug(0, 'error parsing scale {}'.format(s))
+						s = None
+					args['scale'] = r
+				if item['args']['rotate'] is None:
+					args['rotate'] = None
+				else:
+					r = (yield from self._parse_text(wake, item['args']['rotate'])).strip()
+					if r.endswith('°'):
+						f = 360
+						r = r[:-1]
+					else:
+						f = 1
+					try:
+						r = float(r) / f
+					except:
+						debug(0, 'error parsing rotation {}'.format(r))
+						r = None
+					args['rotate'] = r
+				if item['target'] is None:
+					target = None
+				else:
+					target = (yield from self._parse_text(wake, item['target']))
+				return {'action': item['action'], 'target': target, 'args': args}
+			actions = []
+			for x in code['kinetic']['actions']:
+				actions.append((yield from build_kinetic(wake, x)))
+			self.user['pending'].append({'type': 'kinetic', 'kinetic': actions})
+		elif code['command'] == 'question':
+			if code['type'] == 'hidden':
+				self._store_answer(code['variable'], (yield from self._safe_eval(wake, code['markdown'], as_str = True)))
 			else:
-				last_answer = None
-			return (yield from self._question(wake, code[0], last_answer, code[3:]))
+				# Question.
+				if self.user['section'] in self.user['answers'] and code['variable'] in self.user['answers'][self.user['section']]:
+					last_answer = self.user['answers'][self.user['section']][code['variable']][-1]['raw']
+				else:
+					last_answer = None
+				return (yield from self._question(wake, code['type'], last_answer, code['markdown'], code['option']))
+		else:
+			debug(0, 'invalid command {}'.format(code))
 		self.user['run_stack'][-1][1] += 1
 		return False
+	# }}}
+	def _get_filename(self, name, type): # {{{
+		parts = name.split('/')
+		if parts[0] == 'common':
+			return os.path.join('common', type, *parts[1:])
+		else:
+			return os.path.join('users', self.user['group'], 'Content', self.user['section'][0], type, *parts)
+	# }}}
+	def _load_sprite(self, name): # {{{
+		filename = self._get_filename(name, 'sprite')
+		data = content.load822(filename)
+		ret = {'base': os.path.dirname(filename), 'style': {}}
+		if 'name' in data:
+			ret['name'] = data.pop('name')
+		else:
+			ret['name'] = name.capitalize()
+		if 'image' in data:
+			for f in data:
+				base = f.split('/')[-1]
+				tag = base.rsplit('.', 1)[0]
+				ret['style'][tag] = f.strip()
+			data.pop('image')
+		assert len(data) == 0
+		return ret
 	# }}}
 	def _update_sprite(self, tag, data): # {{{
 		for item in ('x', 'y', 'mood'):
@@ -673,36 +804,6 @@ class Connection: # {{{
 				self.user['characters'][tag][item] = data[item]
 		c = self.user['characters'][tag]
 		data['url'] = c['imgs'] + (data.pop('mood') if 'mood' in data else 'default') + c['ext']
-	# }}}
-	def _handle_story(self, q, text_buffer, last_answer = None, *args): # {{{
-		def handle(item):
-			if isinstance(item, str):
-				return markdown(item)
-
-			# ('text', text, image_url)
-			if item[0] == 'text':
-				return (item[0], item[1], markdown(item[2]), item[3])
-
-			# ('sprite', tag, {x, y, rotation, scale, mood, animation})
-			if item[0] == 'sprite':
-				if item[2] is None:
-					data = None
-				else:
-					data = item[2].copy()
-					self._update_sprite(item[1], data)
-				return (item[0], item[1], data)
-			if item[0].endswith('image'):
-				c = self.user['characters'][item[1]]
-				if item[0] == 'temp-image':
-					return ('sprite', item[1], {'url': item[2] and c['imgs'] + item[2] + c['ext']})
-				elif item[0] == 'restore-image':
-					return ('sprite', item[1], {'url': 'default' and c['imgs'] + 'default' + c['ext']})
-
-			# ('scene', url)
-			# ('animation', tag, anim)
-			# ('wait', seconds)
-			return item
-		self.remote.story.event(q, [handle(x) for x in text_buffer], last_answer, *args)
 	# }}}
 	def _store_answer(self, question, answer, store = True): # {{{
 		self.user['python'].set(question, answer)
@@ -713,11 +814,11 @@ class Connection: # {{{
 				self.user['answers'][self.user['section']][question] = []
 			if len(self.user['answers'][self.user['section']][question]) == 0 or answer != self.user['answers'][self.user['section']][question][-1]:
 				self.user['answers'][self.user['section']][question].append(answer)
-			self.user['last_path'] = question
+			self.user['question'] = question
 			if not config['lazysave']:
 				user.save(self.user)
 		else:
-			self.user['last_path'] = None
+			self.user['question'] = None
 	# }}}
 	def answer(self, answer): # {{{
 		wake = (yield)
@@ -842,7 +943,7 @@ class Connection: # {{{
 		if not self.user['sandbox']:
 			debug(1, 'User {}:{} is not allowed to use sandbox'.format(self.user['name'], self.user['group']))
 			raise PermissionError('User is not allowed to use sandbox')
-		basedir = os.path.join(config['data'], 'sandbox_html', config['sandbox'], self.user['group'].lower(), self.user['name'].lower())
+		basedir = os.path.join(config['data'], 'html', 'sandbox', config['sandbox'], self.user['group'].lower(), self.user['name'].lower())
 		if not os.path.exists(basedir):
 			return []
 		def make_list(base, current):
@@ -865,7 +966,7 @@ class Connection: # {{{
 		if not self.user['sandbox']:
 			debug(1, 'User is not allowed to use sandbox')
 			raise PermissionError('User is not allowed to use sandbox')
-		basedir = os.path.join(config['data'], 'sandbox_html', config['sandbox'], self.user['group'].lower(), self.user['name'].lower())
+		basedir = os.path.join(config['data'], 'html', 'sandbox', config['sandbox'], self.user['group'].lower(), self.user['name'].lower())
 		d = os.path.dirname(name)
 		assert '.' not in d and os.path.exists(os.path.join(basedir, name))
 		os.unlink(os.path.join(basedir, name))
@@ -878,7 +979,7 @@ class Connection: # {{{
 		if not self.user['sandbox']:
 			debug(1, 'User is not allowed to use sandbox')
 			raise PermissionError('User is not allowed to use sandbox')
-		basedir = os.path.join(config['data'], 'sandbox_html', config['sandbox'], self.user['group'].lower(), self.user['name'].lower())
+		basedir = os.path.join(config['data'], 'html', 'sandbox', config['sandbox'], self.user['group'].lower(), self.user['name'].lower())
 		d = os.path.dirname(scriptname)
 		assert '.' not in d and os.path.exists(os.path.join(basedir, scriptname))
 		self.user['section'] = ('sandbox', self.user['name'].lower())
@@ -893,7 +994,7 @@ class Connection: # {{{
 		if not self.user['sandbox']:
 			debug(1, 'User is not allowed to use sandbox')
 			raise PermissionError('User is not allowed to use sandbox')
-		basedir = os.path.join(config['data'], 'sandbox_html', config['sandbox'], self.user['group'].lower(), self.user['name'].lower())
+		basedir = os.path.join(config['data'], 'html', 'sandbox', config['sandbox'], self.user['group'].lower(), self.user['name'].lower())
 		d = os.path.dirname(name)
 		assert '.' not in d and os.path.exists(os.path.join(basedir, name))
 		return open(os.path.join(basedir, name)).read()
@@ -905,7 +1006,7 @@ class Connection: # {{{
 		if not self.user['sandbox']:
 			debug(1, 'User is not allowed to use sandbox')
 			raise PermissionError('User is not allowed to use sandbox')
-		basedir = os.path.join(config['data'], 'sandbox_html', config['sandbox'], self.user['group'].lower(), self.user['name'].lower())
+		basedir = os.path.join(config['data'], 'html', 'sandbox', config['sandbox'], self.user['group'].lower(), self.user['name'].lower())
 		d = os.path.dirname(name)
 		assert '.' not in d
 		os.makedirs(basedir, exist_ok = True)
@@ -936,7 +1037,7 @@ def sandbox_post(connection): # {{{
 		sandboxserver.reply(connection, 403, b'User is not allowed to use sandbox', 'text/plain;charset=utf-8')
 		return False
 	# Credentials are good, save the files.
-	basedir = os.path.join(config['data'], 'sandbox_html', config['sandbox'], kv['group'].lower(), kv['name'].lower())
+	basedir = os.path.join(config['data'], 'html', 'sandbox', config['sandbox'], kv['group'].lower(), kv['name'].lower())
 	for f in connection.post[1]['file']:
 		basename = os.path.basename(f[1]).split('.')
 		if len(basename) > 1:
@@ -958,9 +1059,9 @@ def sandbox_post(connection): # {{{
 # }}}
 
 # Main program {{{
-server = websocketd.RPChttpd(config['port'], Connection, httpdirs = ['html'], tls = False, proxy = config['proxy'])
-adminserver = websocketd.RPChttpd(config['admin-port'], Admin_Connection, httpdirs = ['admin_html'], proxy = config['proxy-admin'], tls = False)
-sandboxserver = websocketd.RPChttpd(config['sandbox-port'], Connection, httpdirs = ['sandbox_html'], tls = False, proxy = config['proxy-sandbox'] or ())
+server = websocketd.RPChttpd(config['port'], Connection, httpdirs = [os.path.join('html', 'main')], tls = False, proxy = config['proxy'])
+adminserver = websocketd.RPChttpd(config['admin-port'], Admin_Connection, httpdirs = [os.path.join('html', 'admin')], proxy = config['proxy-admin'], tls = False)
+sandboxserver = websocketd.RPChttpd(config['sandbox-port'], Connection, httpdirs = [os.path.join('html', 'sandbox')], tls = False, proxy = config['proxy-sandbox'] or ())
 sandboxserver.post = sandbox_post
 print('servers are running on ports {}, {} and {}'.format(config['port'], config['admin-port'], config['sandbox-port']))
 websocketd.fgloop()

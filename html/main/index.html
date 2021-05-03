@@ -38,16 +38,16 @@
 			<button onclick='video_done()'>Continue</button>
 		</div>
 		<div id='navigation'>
-			<button type='button' class='navbutton' onclick='prev_kinetic(true)'>&#x21e4;</button>
-			<button type='button' class='navbutton' onclick='prev_kinetic()'>&#x2190;</button>
-			<button type='button' class='navbutton' onclick='home()'>&#x2191;</button>
-			<button type='button' class='navbutton' onclick='next_kinetic()'>&#x2192;</button>
-			<button type='button' class='navbutton' onclick='next_kinetic("finish")'>&#x21e5;</button>
+			<button type='button' class='navbutton' id='navfirst' onclick='prev_kinetic(true)'>&#x21e4;</button>
+			<button type='button' class='navbutton' id='navprev' onclick='prev_kinetic()'>&#x2190;</button>
+			<button type='button' class='navbutton' id='navhome' onclick='home()'>&#x2191;</button>
+			<button type='button' class='navbutton' id='navnext' onclick='next_kinetic()'>&#x2192;</button>
+			<button type='button' class='navbutton' id='navlast' onclick='next_kinetic("finish")'>&#x21e5;</button>
 		</div>
 		<div id='spritebox'></div>
 		<div id='speechbox'>
 			<span id='speaker'></span><br/>
-			<img id='photo'/>
+			<img id='side'/>
 			<div id='speech'></div>
 		</div>
 		<div id='question'></div>

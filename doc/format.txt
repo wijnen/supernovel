@@ -1,54 +1,83 @@
-#commentaar
-label naam
-goto label
-$ python-code
+# This is a comment; indentation is irrelevant.
+comment: also a comment. Indentation must be valid
+comment:
+	(Possibly) multi-line comment.
+	Indentation must also be valid.
+	  Extra indentation within the comment is allowed.
+
+# labels are only allowed at top level.
+label <labelname>
+goto <labelname>
+$ single line Python code
+python: single line Python code
+python:
+	(Possibly) multi line Python code.
 video filename
-'''Page text
-which must be multiple lines
-long.'''
-'single line string'
-"Or like this"
-"""Multiple strings after each other are treated as a longer string
-This also works if there are other commands in between.
-All strings are used when a video or question is encountered, or the input ends.
-Strings can contain ${substitution expressions}."""
+question short variable Single line question
+question hidden variable value
+question choice variable:
+	(Possibly) multi-line question
+	Text substitutions are performed on the question text.
+option first option
+option second option
 # Question types:
-short variable		-> {'text': str}
-long variable		-> {'text': str}
-choice variable		-> {'index': int, 'text': str}
-unit variable		-> {'quantity': str | None, 'unit': str, 'digits': int, 'value': float}	(all are None if unparsable)
+# short: single line answer -> {'text': str}
+# long: multi-line answer -> {'text': str}
+# choice: single option chosen from list -> {'index': int, 'text': str}
+# unit -> {'quantity': str | None, 'unit': str, 'digits': int, 'value': float}	(all are None if unparsable)
+# hidden: not passed to the user; substitutions are performed on question text and it is stored as answer value.
 # Notes:
 #	all contain 'raw'
 #	all contain 'style', which is for internal use
 #	all long<thing> are identical to <thing>, with 'long' added
-#	longlong does not exist
+#	longlong and longhidden do not exist
 while expr:
 	code
-	'''Strings in an indented block
-	must also be indented.'''
-	continue
-	break
+	continue	# TODO
+	break	# TODO
+else:
+	code
+
 if expr:
 	code
 elif expr:
 	code
 else:
 	code
+# Instead of a block, a single line may be given inline.
+if expr: single line code	# XXX
 
-answer css_key value	# Style is applied to span that contains last answer on admin page.
+answer value	# Style is applied to background of span that contains last answer on admin page.
 
-character e Emi
-e [mod]: text
-e [mod]:
-	text
-scene
-scene image
-show e [mod] [at position] [with transition]
-hide e [mod] [with transition]
-# Use with to run multiple transitions at the same time.
-with transition:
-	show ...
-	# Use a different transition for this action.
-	show ... with other_transition
-	etc
+# Load a sprite file by the name of anja in the common/ directory and store it in the variable anja.
+# For more complex actions, use sprite() from Python code.
+sprite common/anja
+anja [style]: text
+anja [style]:
+	multi-line text
 
+animation [args]:
+	<animation actions>
+serial [args]:
+	<animation actions>
+# If animation actions are given without an animation or serial parent command, a serial parent is implied.
+
+# Animation actions are:
+animation [args]:
+serial [args]:
+scene [filename] [args]
+show [style] [args]
+hide [style] [args]
+move [style] [args]
+music [filename]	# TODO
+sound [filename]	# TODO
+
+# Styles are defined in the sprite.
+# Args can be:
+#	with <transition>	# jump, move, dissolve
+#	in <time>		# in seconds
+#	to <location>		# array of 3 items, either fractions or special string values. Z axis point out of screen.
+#	from <location>
+#	scale <scale>		# array of 2 items, or single number for uniform scale.
+#	rotate <revolutions>
+#	around <location>	# center of rotation for rotate or move transition

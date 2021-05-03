@@ -73,7 +73,7 @@ button.not(#navbutton) {
 	background: white;
 }
 
-#photo {
+#side {
 	float: left;
 	height: 6em;
 	padding: 1ex 1ex
