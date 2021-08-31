@@ -52,8 +52,8 @@ answer value	# Style is applied to background of span that contains last answer 
 # Load a sprite file by the name of anja in the common/ directory and store it in the variable anja.
 # For more complex actions, use sprite() from Python code.
 sprite common/anja
-anja [style]: text
-anja [style]:
+anja,[style]: text
+anja,[style]:
 	multi-line text
 
 animation [args]:
@@ -66,9 +66,9 @@ serial [args]:
 animation [args]:
 serial [args]:
 scene [filename] [args]
-show [style] [args]
-hide [style] [args]
-move [style] [args]
+show <sprite>[,style] [args]
+hide <sprite>[,style] [args]
+move <sprite>[,style] [args]
 music [filename]	# TODO
 sound [filename]	# TODO
 

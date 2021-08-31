@@ -4,9 +4,10 @@ body {
 	background-position: center center;
 	background-repeat: no-repeat;
 	background-size: cover;
+	overflow: hidden;
 }
 
-#login, #video, #question {
+#login, #videodiv, #question {
 	display: none;
 	position: absolute;
 	left: 0px;
@@ -73,7 +74,7 @@ button.not(#navbutton) {
 	background: white;
 }
 
-#side {
+#speaker_image {
 	float: left;
 	height: 6em;
 	padding: 1ex 1ex
@@ -125,4 +126,12 @@ ul {
 .active {
 	background-color: blue;
 	color: white;
+}
+
+#game {
+	position: fixed;
+	overflow: hidden;
+}
+.hidden {
+	display: none;
 }

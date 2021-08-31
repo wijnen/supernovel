@@ -45,11 +45,11 @@ def read_structure(f): # {{{
 	for line in f:
 		ln += 1
 		l = line.lstrip()
-		if l == '':
+		if l == '' or l.startswith('#'):
 			continue
 		i = line[:len(line) - len(l)]
 		if len(i) > len(indentstack[-1]):
-			# Indentation was increased.
+			# Indentation has increased.
 			if len(stack[-1]) == 0:
 				parse_error(ln, 'first line of file must not be indented')
 				continue
@@ -57,14 +57,15 @@ def read_structure(f): # {{{
 				parse_error(ln, 'indentation changed during increase')
 			stack.append(stack[-1][-1]['children'])
 			indentstack.append(i)
-		while indentstack[-1] is not None and len(i) < len(indentstack[-1]):
-			# Indentation was decreased.
+		while len(i) < len(indentstack[-1]):
+			# Indentation has decreased.
 			stack.pop()
 			indentstack.pop()
 		if indentstack[-1] != i:
 			parse_error(ln, 'indentation changed')
 		stack[-1].append({'line': ln, 'code': line.strip(), 'children': [], 'rawchildren': ''})
-		for frames, indent in zip(stack[:-1], indentstack[:-1]):
+		# Add line to all raw children. Use indent of next level (which is the child's level).
+		for frames, indent in zip(stack[:-1], indentstack[1:]):
 			frames[-1]['rawchildren'] += line[len(indent):]
 	return stack[0]
 # }}}
@@ -78,10 +79,12 @@ def parse_raw(ln, d, firstline):
 
 def parse_anim_args(ln, a, parent_args):
 	args = {'with': None, 'in': None, 'to': None, 'from': None, 'scale': None, 'rotate': None, 'around': None}
+	if a is None:
+		return args
 	while len(a) > 0:
 		ra = re.match(r'.*\b((with|in|to|from|scale|rotate|around)\s+(.+?))$', a)
 		if ra is None:
-			print(repr(a))
+			print('error string:', repr(a))
 			parse_error(ln, 'syntax error parsing animation arguments')
 			return None
 		full = ra.group(1)
@@ -122,10 +125,10 @@ def parse_anim_element(ln, c, d, parent_args):
 	# speech
 	r = re.match(r'(\S*)(?:\s+(\S*))?\s*:\s*(.*?)\s*$', c)
 	if r is not None:
-		return {'action': 'speech', 'line': ln, 'speaker': r.group(1), 'style': r.group(2), 'markdown': parse_raw(ln, d, r.group(3))})
+		return {'action': 'speech', 'line': ln, 'speaker': r.group(1), 'image': r.group(2), 'markdown': parse_raw(ln, d, r.group(3))}
 	
 	# scene, show, hide, move
-	r = re.match(r'(scene|show|hide|move)\s*(?:\s(\S*))?\s*(.*?)\s*$', c)
+	r = re.match(r'(scene|show|hide|move)\s*(?:\s(\S+(?:\s*,\s*\S+)?)\s*(?:\s(\S.*?)\s*)?)?$', c)
 	if r is None:
 		return None
 
@@ -140,7 +143,18 @@ def parse_anim_element(ln, c, d, parent_args):
 		# There was an error.
 		return False
 
-	return {'action': r.group(1), 'target': r.group(2), 'args': args, 'line': ln}
+	t = r.group(2)
+	if t != 'scene':
+		if ',' in t:
+			target, mood = map(str.strip, t.split(',', 1))
+		else:
+			target = t
+			mood = None
+	else:
+		target = t
+		mood = None
+
+	return {'action': r.group(1), 'target': target, 'mood': mood, 'args': args, 'line': ln}
 
 def parse_anim(ln, c, d, ostack):
 	'''Check if a line is an animation command. Parse it and return True if it is.'''
@@ -244,9 +258,6 @@ def parse_line(d, ln, istack, ostack, index):
 		ostack[-1][-1]['option'].append(parse_raw(ln, d, r.group(1)))
 		return True
 
-	if parse_anim(ln, c, d, ostack):
-		return True
-
 	# python
 	r = re.match(r'python\s*:\s*(.*?)\s*$', c)
 	if r is not None:
@@ -257,6 +268,9 @@ def parse_line(d, ln, istack, ostack, index):
 			ostack[-1].append({'command': 'python', 'line': ln, 'code': r.group(1)})
 			return True
 		ostack[-1].append({'command': 'python', 'line': ln, 'code': parse_raw(ln, d, r.group(1))})
+		return True
+
+	if parse_anim(ln, c, d, ostack):
 		return True
 
 	if len(d['children']) > 0:
@@ -300,9 +314,11 @@ def parse_line(d, ln, istack, ostack, index):
 		return True
 
 	# sprite
-	r = re.match(r'sprite\s*(.*)\s*$', c)
+	r = re.match(r'sprite\s*(.*?)(?:\s+as\s+(\S+))?\s*$', c)
 	if r is not None:
-		ostack[-1].append({'command': 'sprite', 'line': ln, 'sprite': r.group(1)})
+		sprite = r.group(1)
+		tag = r.group(2) or sprite.rsplit('/', 1)[1]
+		ostack[-1].append({'command': 'sprite', 'line': ln, 'sprite': sprite, 'tag': tag})
 		return True
 
 	parse_error(ln, 'syntax error')
@@ -344,29 +360,40 @@ def get(group, section): # {{{
 # }}}
 
 def load822(filename):
+	'''Read a file in RFC 822 format.
+	Returns a dict of str keys and list[str] values.'''
 	ret = {}
 	with open(filename) as f:
 		indent = False
 		current = None
 		for line in f:
-			if line.strip() == '':
+			if line.strip() == '' or line.startswith('#'):
 				continue
+			# Handle indentation: start long value.
 			if len(line.lstrip()) != len(line):
 				assert indent is not False
 				if indent is not None:
+					# Existing indentation.
 					assert line.startswith(indent)
 				else:
+					# New indentation (first line of indented block).
 					indent = line[:-len(line.lstrip())]
+				# Add line to current value.
 				ret[current].append(line[len(indent):])
 			else:
+				# New key.
 				if ':' in line.strip()[:-1]:
-					indent = False
+					# Line contains ':', so this is a single line value.
+					indent = False	# Don't allow indented block.
 					key, value = line.split(':', 1)
+					# Insert value as single element list.
 					ret[key.strip()] = [value.strip()]
 				else:
+					# Line does not contain ':', so it must be at the end: expect indeted block.
 					assert line.strip()[-1] == ':'
 					indent = None
 					current = line.strip()[:-1].strip()
+					# Insert empty value, which is filled by indented block.
 					ret[current] = []
 	return ret
 

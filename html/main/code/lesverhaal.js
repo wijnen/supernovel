@@ -1,111 +1,436 @@
-var error, login, videodiv, video, contents, contentslist, question, navigation, spritebox, sandbox, speechbox, speaker, speaker_image, speech;
-var music, sound;
-var is_replaced;
-var server;
-var thread = {};
-var sprite = {};
-var history = [];
-var show_question = false;
-var now;
-var speech = [];
-var animating = false;
+"use strict";
+// Globals. {{{
 
-function new_thread(script, cb, name, now) {
+var server;	// Handle for server communication.
+var sprite = {};	// All screen sprites.
+var img_cache = {};	// Cache of loaded images; keys are urls, values are data urls.
+
+// DOM elements.
+var error, login, videodiv, video;
+var contents, contentslist, question, navigation;
+var spritebox, sandbox, speechbox, speaker, speaker_image, speech, bg, game;
+var music, sound;
+
+// Threads.
+var state, prev_states;
+
+// Flags.
+var is_replaced;	// Flag to avoid stealing back the connection after replacing it.
+var animating = false;	// Flag to disable animation handling when there is nothing to animate.
+
+// }}}
+
+function SpriteState(ref) { // {{{
+	// Class that holds the state of a sprite and can interpolate.
+	// Construct with new.
+	if (ref === undefined) {
+		this.image = {url: '', size: null, hotspot: [.5, 0]}
+		this.position = [[0, 0], [0, 0], 0];
+		this.rotation = 0;
+		this.around = null;
+		this.scale = [1, 1];
+	}
+	else {
+		var copy_array = function(src) {
+			if (src === null)
+				return null;
+			var ret = [];
+			for (var i = 0; i < src.length; ++i)
+				ret.push(src[i]);
+			return ret;
+		};
+		this.image = ref.image;
+		this.position = [copy_array(ref.position[0]), copy_array(ref.position[1]), ref.position[2]];
+		this.rotation = ref.rotation;
+		this.around = copy_array(ref.around);
+		this.scale = copy_array(ref.scale);
+	}
+	var mix_num = function(phase, a, b) {
+		if (b === null)
+			return a;
+		if (a === null)
+			return b;
+		return a + (b - a) * phase;
+	};
+	var mix_array = function(phase, a, b) {
+		if (b === null)
+			return a;
+		if (a === null)
+			return b;
+		var ret = [];
+		for (var i = 0; i < a.length; ++i)
+			ret.push(mix_num(phase, a[i], b[i]));
+		return ret;
+	};
+	this.mix = function(phase, to) {
+		// TODO: handle non-linear interpolation ("with").
+		var ret = new SpriteState();
+		ret.position = [mix_array(phase, this.position[0], to.position[0]), mix_array(phase, this.position[1], to.position[1]), mix_num(phase, this.position[2], to.position[2])];
+		ret.rotation = mix_num(phase, this.rotation, to.rotation);
+		ret.around = mix_array(phase, this.around, to.around);
+		ret.scale = mix_array(phase, this.scale, to.scale);
+		ret.image = to.image;
+		//console.info(phase, this.position[0], to.position[0], ret.position[0]);
+		return ret;
+	};
+} // }}}
+
+function Sprite(ref) { // {{{
+	// Class that defines one sprite in a state. It does not contain display parts.
+	// Construct with new.
+	if (ref) {
+		this.start_time = ref.start_time;
+		this.duration = ref.duration;
+		this.method = ref.method;
+		this.from = new SpriteState(ref.from);
+		this.to = new SpriteState(ref.to);
+		this.cb = ref.cb;
+		this.size = ref.size;
+	}
+	else {
+		this.start_time = null;
+		this.duration = null;
+		this.method = null;
+		this.from = new SpriteState();
+		this.to = new SpriteState();
+		this.cb = null;
+		this.size = null;
+	}
+	this.state = function(now) {
+		// Compute current state at time now.
+		var ret;
+		if (this.start_time === null || this.duration === null || this.method === null) {
+			ret = new SpriteState(this.from);
+			ret.extra = null;
+		}
+		else {
+			animating = true;
+			var phase = (now - this.start_time) / this.duration;
+			if (phase >= 1) {
+				ret = new SpriteState(this.to);
+				ret.extra = now - this.start_time - this.duration;
+				this.start_time = null;
+				this.duration = null;
+				this.method = null;
+				this.from = new SpriteState(this.to);
+			}
+			else {
+				ret = this.from.mix(phase, this.to);
+				ret.extra = null;
+			}
+		}
+		return ret;
+	};
+} // }}}
+
+function get_img(url, cb) { // {{{
+	// Get an image from the cache, or load it if it wasn't in the cache yet.
+	// Call cb when the image is loaded. Its argument is the image with attributes url (the data url) and size (w x h).
+	// Returns undefined.
+	if (img_cache[url] !== undefined) {
+		setTimeout(function() { cb(img_cache[url]); }, 0);
+		return;
+	}
+	var xhr = new XMLHttpRequest();
+	xhr.AddEvent('loadend', function() {
+		var reader = new FileReader();
+		reader.AddEvent('load', function() {
+			var tmp = Create('img');
+			tmp.src = reader.result;
+			var w = tmp.width;
+			var h = tmp.height;
+			var img = {url: reader.result, size: [w, h]};
+			img_cache[url] = img;
+			cb(img);
+		});
+		reader.readAsDataURL(xhr.response);
+	});
+	xhr.responseType = 'blob';
+	xhr.open('GET', url, true);
+	xhr.send();
+} // }}}
+
+function DisplaySprite() { // {{{
+	// Class that defines one sprite that is currently displayed.
+	// Construct with new.
+	var me = this;
+	this.div = spritebox.AddElement('div', 'sprite');
+	this.img = this.div.AddElement('img');
+	this.update = function(sprite, now) {
+		// Update this sprite according to a state Sprite.
+		this.cb = sprite.cb;
+		var sprite_state = sprite.state(now);
+		me.div.style.zIndex = sprite_state.position[2];
+		//console.info(sprite_state.image, sprite_state.position[0], sprite_state.position[1]);
+		get_img(sprite_state.image.url, function(img) {
+			me.img.src = img.url;
+			var size;
+			if (sprite_state.image.size !== null)
+				size = sprite_state.image.size;
+			else
+				size = [img.size[0] / state.background.size[0], img.size[1] / state.background.size[1]];
+			var hotspot = [];
+			for (var i = 0; i < 2; ++i) {
+				if (sprite_state.position[i][0] == 0)
+					hotspot.push(sprite_state.image.hotspot[i]);
+				else
+					hotspot.push(sprite_state.position[i][0]);
+			}
+			var x = (sprite_state.position[0][1] + 1) / 2 * 100;
+			var hx = (hotspot[0] + 1) / 2 * size[0] * 100;
+			var y = sprite_state.position[1][1] * 100;
+			var hy = hotspot[1] * size[1] * 100;
+			me.div.style.left = (x - hx) + '%';
+			me.div.style.bottom = (y - hy) + '%';
+		});
+		return sprite_state.extra !== null;
+	};
+	this.remove = function() {
+		spritebox.removeChild(this.div);
+	};
+} // }}}
+
+function State(ref) { // {{{
+	// Class that holds an animation state. Construct with new. Main methods:
+	// draw: update interface using this state.
+	// constructor: create a copy for storing in history, or from restoring from history.
+	this.thread = {};	// All running (and paused) threads.
+	this.waiting_threads = [];	// Stack of threads that are currently waiting for next_kinetic. Usually length 0 or 1.
+	this.show_question = false;	// Flag for next_kinetic to be disabled when a question is shown.
+	this.background = (state && state.background ? state.background : {url: '', size: [1280, 1024]});
+	this.sprite = {};
+	this.speaker = {name: null, image: null, text: null};
+	if (ref !== undefined) {
+		for (var t in ref.thread)
+			this.thread[t] = ref.thread[t];
+		for (var w = 0; w < this.waiting_threads.length; ++w)
+			this.waiting_threads.push(ref.waiting_threads[w]);
+		this.show_question = ref.show_question;
+		this.background = ref.background;
+		for (var s in ref.sprite)
+			this.sprite[s] = new Sprite(ref.sprite[s]);
+		this.speaker = {name: ref.speaker.name, image: ref.speaker.image, text: ref.speaker.text};
+	}
+	this.draw = function(now) { // {{{
+		// Update the current screen to this state.
+		// Returns undefined.
+
+		// Background.
+		if (!this.background)
+			this.background = {url: '', size: [1280, 1024]};
+		bg.src = this.background.url;
+		if (this.background.url)
+			bg.RemoveClass('hidden');
+		else
+			bg.AddClass('hidden');
+		resize();
+
+		// Speech.
+		speechbox.style.display = 'block';
+		if (this.speaker.name) {
+			speaker.style.display = 'inline';
+			speaker.innerHTML = this.speaker.name;
+		}
+		else
+			speaker.style.display = 'none';
+		speech.innerHTML = this.speaker.text;
+		if (this.speaker.image) {
+			speaker_image.style.display = 'block';
+			speaker_image.src = this.speaker.image.url;
+		}
+		else
+			speaker_image.style.display = 'none';
+
+		// Sprites.
+		for (var s in sprite) {
+			if (this.sprite[s] === undefined)
+				sprite[s].remove();
+		}
+		for (var s in this.sprite) {
+			if (sprite[s] === undefined)
+				sprite[s] = new DisplaySprite();
+			if (sprite[s].update(this.sprite[s], now)) {
+				// Animation done; call cb.
+				if (sprite[s].cb)
+					setTimeout(sprite[s].cb(now, sprite[s].extra), 0);
+			}
+		}
+	}; // }}}
+}; // }}}
+
+// Thread handling. {{{
+function new_thread(script, cb, name, start) { // {{{
+	// Create a new thread.
+	// script: the code for the thread.
+	// cb: the callback to be called when done.
+	// name: the name of the thread (optional).
+	// start: the start time (in the past). Defaults to now.
+	// returns the actual name of the thread. This is equal to name if it was provided.
 	if (name === undefined) {
 		n = 0;
-		while (thread[String(n)] !== undefined)
+		while (state.thread[String(n)] !== undefined)
 			n += 1;
 		name = String(n);
 	}
-	thread[name] = {'script': script, 'pos': 0, 'start': now || performance.now(), 'cb': cb || null};
+	console.assert(state.thread[name] === undefined, 'thread name already exists');
+	state.thread[name] = {'script': script, 'pos': 0, 'start': start || performance.now(), 'cb': cb || null};
+	//console.info('new thread', name, state.thread[name]);
 	activate(name);
 	if (!animating)
 		animate();
 	return name;
-}
+} // }}}
 
-function activate(name, start_time) {
-	var current = thread[name];
-	var action = current['script'][current['pos']];
-	if (action['action'] == 'speech') {
-		speech.push(name);
-		speaker.innerHTML = action['speaker'];
-		speaker.style.display = (action['speaker'] ? 'inline' : 'none');
-		speech.innerHTML = action['speech'];
-		speaker_image.style.display = (action['image'] ? 'block' : 'none');
-		speaker_image.src = action['image'] ? action['image'] : '';
-		// Record state. TODO
+function activate(name, now, extra) { // {{{
+	// Run a thread. This is called when starting a new thread, and when resuming it after a delay or from next_kinetic.
+	// name: the thread to activate.
+	// now: the time that this activation is supposed to run. This may be (slightly) in the past. (optional)
+	// Returns undefined.
+	var current = state.thread[name];
+	if (now === undefined) {
+		now = performance.now();
+		current.start = now;
 	}
-	else if (action['action'] == 'music') {
-		// TODO.
-	}
-	else if (action['action'] == 'sound') {
-		// TODO.
-	}
-	else if (action['action'] == 'serial') {
-		new_thread(action['actions'], function(extra) {
-			activate(name, extra);
-		}, newname, now - start_time);
-	}
-	else if (action['action'] == 'parallel') {
-		var wait = action['actions'].length;
-		for (var a = 0; a < action['actions'].length; ++a) {
-			new_thread([action['actions'][a]], function(extra) {
-				if (--wait == 0) {
-					activate(name, extra);
+	if (extra === undefined)
+		extra = 0;
+	now -= extra;
+	while (true) {
+		var action = current.script[current.pos];
+		if (action === undefined) {
+			if (current.cb)
+				current.cb(now - current.start);
+			return;
+		}
+		current.pos += 1;
+		console.info('activating', name, 'action', action);
+		if (action.action == 'speech') {
+			state.waiting_threads.push(name);
+			state.speaker.name = action.speaker;
+			state.speaker.text = action.text;
+			state.speaker.image = action.image;
+			if (action.image !== null) {
+				// TODO.
+			}
+			prev_states.push(new State(state));
+			state.draw(now);
+			return;
+		}
+		else if (action.action == 'music') {
+			// TODO.
+		}
+		else if (action.action == 'sound') {
+			// TODO.
+		}
+		else if (action.action == 'serial') {
+			new_thread(action.actions, function(extra) {
+				activate(name, extra);
+			}, name + '+', now);
+			return;
+		}
+		else if (action.action == 'parallel') {
+			var wait = action.actions.length;
+			for (var a = 0; a < action.actions.length; ++a) {
+				new_thread([action.actions[a]], function(extra) {
+					if (--wait == 0) {
+						activate(name, extra);
+					}
+				}, name + '+' + a, now)
+			}
+			return;
+		}
+		else if (action.action == 'scene') {
+			// TODO: transitions.
+			get_img('content/' + action.target, function(img) {
+				state.background = img;
+				resize();
+				activate(name, now, 0);
+			});
+			return;
+		}
+		else {
+			var target = action.target;
+			var image = action.image;
+			var args = action.args;
+			var sprite;
+			if (action.action == 'show') {
+				if (state.sprite[action.target] === undefined) {
+					sprite = new Sprite();
+					state.sprite[action.target] = sprite;
+					sprite.from.position = args.from;
+					sprite.from.image = image;
 				}
-			}, newname, now - start_time)
+			}
+			else if (action.action == 'hide') {
+				// TODO
+				sprite = state.sprite[action.target];
+			}
+			else {
+				console.assert(action.action == 'move', 'action must be show, hide, or move; not ' + action.action, action);
+				sprite = state.sprite[action.target];
+			}
+			sprite.to.position = args.to;
+			sprite.to.image = image;
+			sprite.start_time = now;
+			sprite.method = args['with'];
+			sprite.size = action.size;
+			if (args['in'] !== null) {
+				console.assert(typeof args['in'] == 'number');
+				sprite.duration = args['in'] * 1000;
+				sprite.cb = function(now, extra) { activate(name, now, extra); };
+				animate(true);
+				return;
+			}
 		}
 	}
-	else if (action['action'] == 'scene') {
-		// TODO: transitions.
-		background.src = action['target']
-	}
-	else {
-		var from, to, finish;
-		if (action['action'] == 'show') {
-			// TODO
-		}
-		else if (action['action'] == 'hide') {
-			// TODO
-		}
-		else
-			console.assert(action['action'] == 'move');
-		// TODO: if from != to, move, then finish and activate next item.
-	}
-}
+} // }}}
 
-function run_story(story, cb) {
+function run_story(story, cb) { // {{{
+	// Start a new story (single chunk from server: story between two questions).
+	// story: code for main thread.
+	// cb: callback to be called when story is done.
+	// Returns undefined.
+	// TODO: fill image cache.
 	question.style.display = 'none';
 	videodiv.style.display = 'none';
 	contents.style.display = 'none';
-	speechbox.style.display = 'block';
-	navigation.style.display = 'block';
-	spritebox.style.display = 'block';
+	game.style.display = '';
+	speechbox.style.display = 'none';
 	sandbox.style.display = 'none';
 	question.innerHTML = '';
 	video.pause();
-	show_question = false;
-	history = [];
-	speech = [];
+	state = new State();
+	prev_states = [];
 	new_thread(story, cb, '');
-}
+} // }}}
+// }}}
 
-function animate(running) {
+// Animation. {{{
+function animate(running) { // {{{
+	// Start or stop running animations.
+	// running: if true, animations will run.
+	// Returns undefined.
 	if (running == animating)
 		return;
 	animating = running;
 	if (running)
 		requestAnimationFrame(update_screen);
-}
+} // }}}
 
-function update_screen() {
+function update_screen() { // {{{
+	// Handle the screen update.
+	// Reschedules itself if animations are still running.
+	// Returns undefined.
 	if (!animating)
 		return;
-	// TODO
-}
+	animating = false;
+	state.draw(performance.now());
+	if (animating)
+		requestAnimationFrame(update_screen);
+} // }}}
+// }}}
 
-var Connection = {
+// Server communication. {{{
+var Connection = { // {{{
 	replaced: function() {	// Connection has been replaced by new connection.
 		is_replaced = true;
 		alert('De verbinding is overgenomen door een nieuwe login');
@@ -115,15 +440,12 @@ var Connection = {
 		init();
 	},
 	login: function() {	// Player needs to log in.
-		kinetic_script = null;
 		error.style.display = 'none';
 		login.style.display = 'block';
 		videodiv.style.display = 'none';
 		contents.style.display = 'none';
 		question.style.display = 'none';
-		speechbox.style.display = 'none';
-		navigation.style.display = 'none';
-		spritebox.style.display = 'none';
+		game.style.display = 'none';
 		sandbox.style.display = 'none';
 		video.pause();
 		music.pause();
@@ -159,30 +481,25 @@ var Connection = {
 		}
 	},
 	main: function() {	// Show chapter and section selection.
-		document.getElementsByTagName('body')[0].style.backgroundImage = '';
-		animations = {};
-		kinetic_script = null;
+		bg.AddClass('hidden');
 		error.style.display = 'none';
 		login.style.display = 'none';
 		videodiv.style.display = 'none';
 		contents.style.display = 'block';
 		question.style.display = 'none';
-		speechbox.style.display = 'none';
-		navigation.style.display = 'none';
-		spritebox.style.display = 'none';
+		game.style.display = 'none';
 		sandbox.style.display = 'none';
 		video.pause();
 		music.pause();
 		sound.pause();
-		for (var s in question.style)
-			delete question.style[s];
 	},
 	question: function(story, text, type, options, last_answer) {
 		run_story(story, function() {
-			if (show_question)
+			if (state.show_question)
 				return;
-			show_question = true;
+			state.show_question = true;
 			speechbox.style.display = 'none';
+			question.innerHTML = text;
 			question.style.display = 'block';
 			// Clear speech so the old text cannot reappear by accident.
 			speaker.style.display = 'none';
@@ -324,9 +641,7 @@ var Connection = {
 			videodiv.style.display = 'block';
 			contents.style.display = 'none';
 			question.style.display = 'none';
-			speechbox.style.display = 'none';
-			navigation.style.display = 'none';
-			spritebox.style.display = 'none';
+			game.style.display = 'none';
 			sandbox.style.display = 'none';
 			speed(); // Set playback speed.
 			video.play();
@@ -337,158 +652,173 @@ var Connection = {
 		document.cookie = 'group=' + encodeURIComponent(g) + '; sameSite=Strict';
 		document.cookie = 'key=' + encodeURIComponent(c) + '; sameSite=Strict';
 	},
-};
+}; // }}}
 
-function home() {
+function init() { // {{{
+	// Initialize everything.
+	// Returns undefined.
+
+	// Fill global variables.
+	var varnames = ['error', 'login', 'videodiv', 'video', 'contents', 'chapters', 'sections', 'question', 'speechbox', 'navigation', 'spritebox', 'sandbox', 'speaker', 'speaker_image', 'speech', 'bg', 'game', 'music', 'sound'];
+	for (var i = 0; i < varnames.length; ++i)
+		window[varnames[i]] = document.getElementById(varnames[i]);
+
+	video.pause();
+	music.pause();
+	sound.pause();
+
+	error.style.display = 'block';
+	login.style.display = 'none';
+	videodiv.style.display = 'none';
+	contents.style.display = 'none';
+	question.style.display = 'none';
+	game.style.display = 'none';
+	sandbox.style.display = 'none';
+	speaker.style.display = 'none';
+
+	// Handle clicks on screen for progression.
+	spritebox.AddEvent('click', function(event) {
+		if (event.button != 0)
+			return;
+		if (state.show_question || state.waiting_threads.length == 0)
+			return;
+		event.preventDefault();
+		next_kinetic();
+	});
+	
+	// Parse cookie.
+	var c = document.cookie.split(';');
+	var crumbs = {};
+	for (var i = 0; i < c.length; ++i) {
+		var item = c[i].split('=');
+		for (var j = 0; j < item.length; ++j)
+			item[j] = item[j].replace(/^\s*|\s*$/g, '');	// strip whitespace.
+		crumbs[item[0]] = decodeURIComponent(item[1]);
+	}
+	// Set credentials from cookie if they were empty.
+	var loginname = document.getElementById('loginname');
+	var group = document.getElementById('class');
+	if ('name' in crumbs && loginname.value == '')
+		loginname.value = crumbs.name;
+	if ('group' in crumbs && group.value == '')
+		group.value = crumbs.group;
+	var connection_lost = function() { // {{{
+		bg.AddClass('hidden');
+		if (is_replaced)
+			return;
+		try {
+			error.style.display = 'block';
+			login.style.display = 'none';
+			videodiv.style.display = 'none';
+			contents.style.display = 'none';
+			question.style.display = 'none';
+			game.style.display = 'none';
+			sandbox.style.display = 'none';
+			video.pause();
+			music.pause();
+			sound.pause();
+			server = Rpc(Connection, null, connection_lost);
+		}
+		catch (err) {
+			try {
+				alert('De verbinding met de server is verbroken en kan niet worden hersteld.');
+			}
+			catch (err) {
+			}
+		}
+	} // }}}
+	server = Rpc(Connection, null, connection_lost);
+} // }}}
+window.AddEvent('load', init);
+
+function resize() {
+	if (state === undefined)
+		state = new State();
+	var scale = Math.min(window.innerWidth / state.background.size[0], window.innerHeight / state.background.size[1]);
+	game.style.left = (window.innerWidth - state.background.size[0] * scale) / 2 + 'px';
+	game.style.top = (window.innerHeight - state.background.size[1] * scale) / 2 + 'px';
+	game.style.width = state.background.size[0] * scale + 'px';
+	game.style.height = state.background.size[1] * scale + 'px';
+}
+window.AddEvent('resize', resize);
+
+function log_in() { // {{{
+	// The log in button is clicked.
+	// Always returns false, to prevent the form from submitting.
+	var loginname = document.getElementById('loginname').value;
+	var group = document.getElementById('class').value;
+	var password = document.getElementById('password').value;
+	server.call('login', [loginname, group, password], {}, function(error) {
+		if (error)
+			alert('Inloggen is mislukt: ' + error);
+	});
+	return false;
+} // }}}
+
+function log_out() { // {{{
+	// The log out button is clicked.
+	// Returns undefined.
+	bg.AddClass('hidden');
+	Connection.cookie('', '', '');
+	Connection.login();
+} // }}}
+// }}}
+
+// UI callbacks. {{{
+function home() { // {{{
+	// The home button was clicked.
+	// Returns undefined.
 	server.call('home');
-}
+} // }}}
 
-function next_kinetic() {
+function next_kinetic() { // {{{
+	// The next button was clicked, or the screen was clicked, or the spacebar was pressed.
+	// Returns undefined.
 	if (document.activeElement != document.body)
 		document.activeElement.blur();
-	if (show_question || story[main] === undefined)
+	if (state.show_question || state.waiting_threads.length == 0)
 		return;
-	var script = story[main]['script'];
-	var pos = story[main]['pos'];
-	if (script[pos] === undefined || script[pos]['action'] != 'speech')
-		return;
-	pos += 1;
-	story[main]['pos'] = pos;
-	if (script[pos] === undefined) {
-		// Main thread ended.
-		story[main]['cb']();	// There is always a cb defined for the main thread.
-		return;
-	}
-	while (kinetic_script !== null && kinetic_pos < kinetic_script.length) {
-		var cmd = kinetic_script[kinetic_pos++];
-		//console.info('kinetic', force, cmd);
-		if (typeof cmd == 'string') {
-			question.innerHTML = cmd;
-			continue;
-		}
-		speechbox.style.display = 'block';
-		question.style.display = 'none';
-		switch (cmd[0]) {
-			case 'text':
-				speaker.innerHTML = cmd[1];
-				speaker.style.display = (cmd[1] ? 'inline' : 'none');
-				speech.innerHTML = cmd[2];
-				speaker_image.style.display = (cmd[3] ? 'block' : 'none');
-				speaker_image.src = cmd[3] ? cmd[3] : '';
-				in_kinetic = false;
-				// Record state.
-				var sprites = {};
-				for (var s in kinetic_sprites)
-					sprites[s] = store_sprite(s);
-				var bg = document.getElementsByTagName('body')[0].style.backgroundImage;
-				kinetic_history.push([bg, sprites, kinetic_pos - 1]);
-				if (force != 'finish')
-					return;
-				break;
-			case 'scene':
-				var sprites = [];
-				for (var s in kinetic_sprites)
-					sprites.push(s);
-				for (var i = 0; i < sprites.length; ++i)
-					kill_sprite(sprites[i]);
-				//console.info('scene', cmd[1]);
-				document.getElementsByTagName('body')[0].style.backgroundImage = cmd[1] === null ? '' : 'url(' + encodeURI(cmd[1]) + ')';
-				break;
-			case 'sprite':
-				var d = new Date();
-				var n = d.getTime() / 1000;
-				//console.info('changing sprite', cmd[1], 'to', cmd[2]);
-				if (cmd[2] === null) {
-					// Hide sprite.
-					kill_sprite(cmd[1]);
-					break;
-				}
-				if (kinetic_sprites[cmd[1]] === undefined)
-					new_sprite(cmd[1]);
-				cmd[2].time = 0;
-				var anim = null;
-				if (!rewind && cmd[2].animation !== undefined)
-					anim = cmd[2].animation;
-				var initial = {time: n};
-				for (var p in defaults) {
-					initial[p] = kinetic_sprites[cmd[1]].props[p];
-				}
-				kinetic_sprites[cmd[1]].anim = [initial, cmd[2], anim];
-				if (!doing_animation)
-					screen_update();
-				break;
-			case 'animation':
-				animations[cmd[1]] = cmd[2];
-				break;
-			case 'wait':
-				setTimeout(function() {
-					next_kinetic(true);
-				}, cmd[1] * 1000);
-				return;
-			case 'music':
-				music.pause();
-				if (cmd[1] !== null) {
-					music.src = cmd[1];
-					music.play();
-				}
-				break;
-			case 'sound':
-				sound.pause();
-				if (cmd[1]) {
-					sound.src = cmd[1];
-					sound.play();
-				}
-				break;
-			default:
-				console.error('invalid kinetic command', cmd);
-		}
-	}
-	in_kinetic = false;
-	if (kinetic_script !== null && kinetic_pos >= kinetic_script.length) {
-		if (kinetic_end) {
-			kinetic_end();
-		}
-	}
-}
+	activate(state.waiting_threads.pop());
+} // }}}
 
-function prev_kinetic(full) {
-	if (document.activeElement != document.body)
-		document.activeElement.blur();
-	show_question = false;
-	// Throw out the current frame, if there is one.
-	if (kinetic_pos < kinetic_script.length)
-		kinetic_history.pop();
-	// Use last frame, or if there is none, go back to start.
-	// The last frame will be rebuilt, so remove it from the stack.
-	var data;
-	if (!full && kinetic_history.length > 0)
-		data = kinetic_history.pop();
-	else {
-		// Full rewind: remove all history.
-		kinetic_history = [];
-		data = ['', {}, 0];
-	}
-	// Remove all sprites.
-	var sprites = [];
-	for (var s in kinetic_sprites)
-		sprites.push(s);
-	for (var i = 0; i < sprites.length; ++i)
-		kill_sprite(sprites[i]);
-	// Set the background.
-	document.getElementsByTagName('body')[0].style.backgroundImage = data[0];
-	// Create all sprites.
-	for (var spr in data[1]) {
-		new_sprite(spr);
-		kinetic_sprites[spr].src = data[1][spr][0];
-		kinetic_sprites[spr].style.left = data[1][spr][1];
-		kinetic_sprites[spr].style.bottom = data[1][spr][2];
-	}
-	// Set story position.
-	kinetic_pos = data[2];
-	next_kinetic(true, true);
-}
+function prev_kinetic(full) { // {{{
+	// The prev button was clicked, or backspace was pressed.
+	return; // TODO
+} // }}}
 
-function new_sprite(tag) {
+function keypress(event) { // {{{
+	// Key press handler. If the key is space or backspace, do next or prev kinetic.
+	// Returns undefined.
+	//console.info(event);
+	if (state === undefined || state.show_question || (event.charCode != 32 && event.keyCode != 8))
+		return;
+	if (state.waiting_threads.length == 0)
+		return;
+	event.preventDefault();
+	if (event.charCode == 32)
+		next_kinetic();
+	else
+		prev_kinetic();
+} // }}}
+
+function speed() { // {{{
+	// Playback speed was changed.
+	// Returns undefined.
+	var factor = Number(document.getElementById('speed').value) / 100;
+	if (factor > 0)
+		video.playbackRate = factor;
+} // }}}
+
+function video_done() { // {{{
+	// Video was done playing, or done was forced by player.
+	// Returns undefined.
+	video.pause();
+	server.call('video_done', []);
+} // }}}
+// }}}
+
+// Sprites. None of this is currenly called. {{{
+function new_sprite(tag) { // {{{
 	//console.info('new sprite', tag);
 	kinetic_sprites[tag] = spritebox.AddElement('img', 'sprite');
 	kinetic_sprites[tag].props = {};
@@ -498,288 +828,18 @@ function new_sprite(tag) {
 	kinetic_sprites[tag].AddEvent('load', function() {
 		kinetic_sprites[tag].style.marginLeft = '-' + (kinetic_sprites[tag].width / 2) + 'px';
 	});
-}
+} // }}}
 
-function kill_sprite(tag) {
+function kill_sprite(tag) { // {{{
 	//console.info('killing', tag, kinetic_sprites);
 	spritebox.removeChild(kinetic_sprites[tag]);
 	delete kinetic_sprites[tag];
-}
+} // }}}
 
-function store_sprite(tag) {
+function store_sprite(tag) { // {{{
 	var s = kinetic_sprites[tag].style;
 	return [kinetic_sprites[tag].src, s.left, s.bottom];
-}
+} // }}}
+// }}}
 
-function strip(str) {
-	return str.replace(/^\s*|\s*$/g, '');
-}
-
-function init() {
-	error = document.getElementById('error');
-	login = document.getElementById('login');
-	videodiv = document.getElementById('video');
-	video = document.getElementsByTagName('video')[0];
-	contents = document.getElementById('contents');
-	chapters = document.getElementById('chapters');
-	sections = document.getElementById('sections');
-	question = document.getElementById('question');
-	speechbox = document.getElementById('speechbox');
-	navigation = document.getElementById('navigation');
-	spritebox = document.getElementById('spritebox');
-	sandbox = document.getElementById('sandbox');
-	speaker = document.getElementById('speaker');
-	speaker_image = document.getElementById('speaker_image');
-	speech = document.getElementById('speech');
-	music = document.getElementById('music');
-	sound = document.getElementById('sound');
-	video.pause();
-	music.pause();
-	sound.pause();
-	server = Rpc(Connection, null, connection_lost);
-	kinetic_script = null;
-	kinetic_pos = 0;
-	kinetic_sprites = {};
-
-	error.style.display = 'block';
-	login.style.display = 'none';
-	videodiv.style.display = 'none';
-	contents.style.display = 'none';
-	question.style.display = 'none';
-	speechbox.style.display = 'none';
-	navigation.style.display = 'none';
-	spritebox.style.display = 'none';
-	sandbox.style.display = 'none';
-	speaker.style.display = 'none';
-
-	spritebox.AddEvent('click', function(event) {
-		if (event.button != 0)
-			return;
-		if (story[''] === undefined)
-			return;
-		event.preventDefault();
-		next_kinetic();
-	});
-	
-	var c = document.cookie.split(';');
-	var crumbs = {};
-	for (var i = 0; i < c.length; ++i) {
-		var item = c[i].split('=');
-		for (var j = 0; j < item.length; ++j)
-			item[j] = strip(item[j]);
-		crumbs[item[0]] = decodeURIComponent(item[1]);
-	}
-	var loginname = document.getElementById('loginname');
-	var group = document.getElementById('class');
-	if ('name' in crumbs && loginname.value == '')
-		loginname.value = crumbs.name;
-	if ('group' in crumbs && group.value == '')
-		group.value = crumbs.group;
-}
-window.AddEvent('load', init);
-
-function keypress(event) {
-	//console.info(event);
-	if (show_question || (event.charCode != 32 && event.keyCode != 8))
-		return;
-	if (kinetic_script === null)
-		return;
-	event.preventDefault();
-	if (event.charCode == 32)
-		next_kinetic();
-	else
-		prev_kinetic();
-}
-
-function connection_lost() {
-	if (is_replaced)
-		return;
-	try {
-		error.style.display = 'block';
-		login.style.display = 'none';
-		videodiv.style.display = 'none';
-		contents.style.display = 'none';
-		question.style.display = 'none';
-		speechbox.style.display = 'none';
-		navigation.style.display = 'none';
-		spritebox.style.display = 'none';
-		sandbox.style.display = 'none';
-		video.pause();
-		music.pause();
-		sound.pause();
-		server = Rpc(Connection, null, connection_lost);
-	}
-	catch (err) {
-		try {
-			alert('De verbinding met de server is verbroken en kan niet worden hersteld.');
-		}
-		catch (err) {
-		}
-	}
-}
-
-function log_in() {
-	var loginname = document.getElementById('loginname').value;
-	var group = document.getElementById('class').value;
-	var password = document.getElementById('password').value;
-	server.call('login', [loginname, group, password], {}, function(error) {
-		if (error)
-			alert('Inloggen is mislukt: ' + error);
-	});
-	return false;
-}
-
-function log_out() {
-	Connection.cookie('', '', '');
-	Connection.login();
-}
-
-function speed() {
-	var factor = Number(document.getElementById('speed').value) / 100;
-	if (factor > 0)
-		video.playbackRate = factor;
-}
-
-function video_done() {
-	video.pause();
-	server.call('video_done', []);
-}
-
-function Anim(sprite, time, tag) {
-	//console.info('new animation', tag, 'for sprite', sprite);
-	var anim = animations[tag];
-	if (anim === undefined) {
-		console.error('using undefined animation', anim);
-		return null;
-	}
-	var ret = [{}];
-	for (var p in defaults) {
-		ret[0][p] = sprite.props[p];
-		//console.info('set', p, 'to', sprite.props[p]);
-	}
-	for (var a = 0; a < anim.length - 1; ++a) {
-		var segment = {};
-		for (var i in anim[a]) {
-			segment[i] = anim[a][i];
-			//console.info('segment', i, 'anim', a, 'value', segment[i]);
-		}
-		ret.push(segment);
-	}
-	ret[0].time = time;
-	ret.push(anim[anim.length - 1]);
-	return ret;
-}
-
-function screen_update() {
-	var d = new Date();
-	var n = d.getTime() / 1000;
-	doing_animation = false;
-	for (var s in kinetic_sprites) {
-		var sprite = kinetic_sprites[s];
-		if (sprite.anim === null)
-			continue;
-		//console.info(s, sprite.anim[0], sprite.anim[1], sprite.anim[2]);
-		// s = sprite tag; sprite.anim = [{initial}, {time, url, x, y, rotation, scale}, ..., next_animation]
-		// time is the duration of this segment.
-		while (sprite.anim.length > 2 && sprite.anim[0].time + sprite.anim[1].time <= n) {
-			// Go to next animation segment.
-			// First set sprite to the end values of this segment.
-			var old = sprite.anim[0];
-			var current = sprite.anim[1];
-			//console.info(s, 'frame done, move to next', current, sprite.anim[0].time, sprite.anim[1].time, n);
-			current.time += old.time;
-			if (current.x !== undefined) {
-				sprite.style.left = current.x + '%';
-			}
-			if (current.y !== undefined) {
-				sprite.style.bottom = current.y + '%';
-			}
-			var transform = '';
-			if (current.rotation !== undefined) {
-				transform += 'rotate(' + current.rotation + 'deg) ';
-			}
-			if (current.scale !== undefined) {
-				transform += 'scale(' + current.scale + ')';
-			}
-			if (transform != '')
-				sprite.style.transform = transform;
-			if (current.url !== undefined) {
-				sprite.src = current.url;
-			}
-			for (var p in defaults) {
-				if (current[p] === undefined)
-					current[p] = old[p];
-				sprite.props[p] = current[p];
-			}
-			sprite.anim.splice(0, 1);
-		}
-		if (sprite.anim.length > 2) {
-			doing_animation = true;
-			var old = sprite.anim[0];
-			var current = sprite.anim[1];
-			var f = (n - old.time) / current.time;
-			//console.info(f, old.x, current.x, old.x + (current.x - old.x) * f + '%');
-			if (current.x !== undefined) {
-				if (old.x !== undefined) {
-					// x = old + f * (current - old).
-					sprite.style.left = old.x + (current.x - old.x) * f + '%';
-				}
-				else {
-					sprite.style.left = current.x + '%';
-				}
-			}
-			if (current.y !== undefined) {
-				if (old.y !== undefined) {
-					// y = old + f * (current - old).
-					sprite.style.bottom = old.y + (current.y - old.y) * f + '%';
-				}
-				else {
-					sprite.style.bottom = current.y + '%';
-				}
-			}
-			var transform = '';
-			if ( current.rotation !== undefined) {
-				if (old.rotation !== undefined) {
-					// rot = old + f * (current - old).
-					transform += 'rotate(' + (old.rotation + (current.rotation - old.rotation) * f) + 'deg) ';
-				}
-				else {
-					transform += 'rotate(' + current.rotation + 'deg) ';
-				}
-			}
-			if (current.scale !== undefined) {
-				if (old.scale !== undefined) {
-					// scale = old + f * (current - old).
-					transform += 'scale(' + (old.scale + (current.scale - old.scale) * f) + ')';
-				}
-				else {
-					transform += 'scale(' + current.scale + ')';
-				}
-			}
-			if (transform != '')
-				sprite.style.transform = transform;
-			if (current.url !== undefined) {
-				if (old.url !== undefined) {
-					// Handle dissolve transform.
-				}
-				else {
-					sprite.src = current.url;
-				}
-			}
-		}
-		else {
-			var next = sprite.anim[1];
-			if (next === null) {
-				sprite.anim = null;
-				continue;
-			}
-			sprite.anim = Anim(sprite, n, next);
-			if (sprite.anim !== null)
-				doing_animation = true;
-		}
-	}
-	if (doing_animation)
-		requestAnimationFrame(screen_update);
-}
-
-// vim: set foldmethod=marker foldmarker={,} :
+// vim: set foldmethod=marker :

@@ -50,7 +50,7 @@ function richinput(element) {
 	element.AddElement('br');
 	for (var a = 0; a < actions.length; ++a) {
 		var button;
-		if (this.action[3]) {
+		if (actions[a][3]) {
 			var label = element.AddElement('label');
 			button = label.AddElement('input');
 			button.type = 'checkbox';

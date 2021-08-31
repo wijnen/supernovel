@@ -169,7 +169,7 @@ class Admin_Connection: # {{{
 		questions.append({'type': 'end', 'name': '', 'markdown': '', 'option': None, 'line': p['line']})
 		students = []
 		def make_field(student, question):
-			active = student['section'] == section and len(student['run_stack'][-1][0]) > student['run_stack'][-1][1] and student['run_stack'][-1][0][student['run_stack'][-1][1]][1] == question[0]
+			active = student['section'] == section and len(student['run_stack'][-1]['program']) > student['run_stack'][-1]['current'] and student['run_stack'][-1]['program'][student['run_stack'][-1]['current']][1] == question[0]
 			return (active, student['answers'][section][question[1]] if question[3] not in ('video', 'end') and section in student['answers'] and question[1] in student['answers'][section] else None)
 		def make_other_field(student, question):
 			return (False, student['answers'][section][question[1]] if question[3] not in ('video', 'end') and section in student['answers'] and question[1] in student['answers'][section] else None)
@@ -233,6 +233,7 @@ class Python_local: # {{{
 	def run(self, wake, script, allow_ui = True):
 		if allow_ui:
 			self.pending = []
+		print('running', repr(script))
 		exec(script, self.variables)
 		if allow_ui:
 			ret = self.pending
@@ -351,7 +352,7 @@ class Connection: # {{{
 				kv = {x[0]: x[1] for x in kv}
 				if 'name' in kv and 'group' in kv and 'key' in kv and (kv['name'], kv['group']) in user.users and user.users[(kv['name'], kv['group'])]['cookie'] == kv['key']:
 					if self._login(kv['name'], kv['group']):
-						websocketd.add_idle(self._finish_login)
+						websocketd.add_idle(lambda: websocketd.call(None, self._finish_login))
 						return
 		except IndexError:
 			pass
@@ -359,7 +360,7 @@ class Connection: # {{{
 		keys = ('name', 'group', 'secret')
 		if config['secret'] != '' and all(x in q for x in keys) and q['secret'][0] == config['secret']:
 			if self._login(q['name'][0], q['group'][0]):
-				websocketd.add_idle(self._finish_login)
+				websocketd.add_idle(lambda: websocketd.call(None, self._finish_login))
 				return
 		self.remote.login.event()
 	# }}}
@@ -419,7 +420,7 @@ class Connection: # {{{
 		if wake is None:
 			wake = (yield)
 		if self.user['section'] is not None:
-			if len(self.user['run_stack']) > 0 and len(self.user['run_stack'][-1]) > 1 and not (yield from self._run_item(wake, self.user['run_stack'][-1][0][self.user['run_stack'][-1][1]])):
+			if len(self.user['run_stack']) > 0 and len(self.user['run_stack'][-1]['program']) > 1 and not (yield from self._run_item(wake, self.user['run_stack'][-1]['program'][self.user['run_stack'][-1]['current']])):
 				debug(0, 'Bug: saved state of user {}:{} was not a waiting state'.format(name, group))
 				yield from self._run(wake)
 	# }}}
@@ -439,6 +440,8 @@ class Connection: # {{{
 		return str(ret) if as_str else ret
 	# }}}
 	def _parse_text(self, wake, text): # {{{
+		if text is None:
+			return None
 		if self.user['section'] is not None and self.user['section'][0] == 'sandbox':
 			filetarget = config['sandbox'] + '/' + self.user['group'].lower() + '/' + self.user['name'].lower() + '/'
 		else:
@@ -499,17 +502,18 @@ class Connection: # {{{
 			else:
 				errors = ''
 			self.remote.error.event(errors)
-		self.user['run_stack'] = [[self.user['program'], 0]]
+		self.user['run_stack'] = [{'program': self.user['program'], 'current': 0}]
 		self.user['sprite'] = {}
-		self.user['pending'] = []
+		self.user['_pending'] = []
 		self.user['question'] = None
 		def goto(line):
 			while len(self.user['run_stack']) > 1:
 				self.user['run_stack'].pop()
-			self.user['run_stack'][-1][1] = line
+			self.user['run_stack'][-1]['current'] = line
 		self.user['python'] = Python()
 		self.user['python'].set('name', self.user['name'])
 		self.user['python'].set('group', self.user['group'])
+		self._load_sprite('common/invalid', '')
 		startup = fhs.read_data(os.path.join('include', 'startup.py'))
 		if startup is not None:
 			try:
@@ -526,11 +530,10 @@ class Connection: # {{{
 			qtype = 'longshort'
 		qtext = (yield from self._parse_text(wake, markdown))
 		parsed_options = []
-		for x in options:
-			parsed_options.append((yield from self._parse_text(wake, x)))
-		debug(1, repr((self.user['pending'], qtext, qtype, parsed_options)))
-		self.remote.question.event(self.user['pending'], qtext, qtype, parsed_options, last_answer)
-		self.user['pending'] = []
+		if options is not None:
+			for x in options:
+				parsed_options.append((yield from self._parse_text(wake, x)))
+		self.remote.question.event(self.user['_pending'], qtext, qtype, parsed_options, last_answer)
 		self.breaking = True
 		return True
 	# }}}
@@ -551,21 +554,20 @@ class Connection: # {{{
 			if watchdog > 1000:
 				debug(1, 'hanging script detected: {}; killing it'.format(self.user['section']))
 				self.remote.error.event(['Script stopped working and was killed.'])
-				self.user['run_stack'] = [[self.user['program'], len(self.user['program'])]]
+				self.user['run_stack'] = [{'program': self.user['program'], 'current': len(self.user['program'])}]
 				user.refresh_admins()
 				return
 			# Pop off stack levels until there's an instruction.
-			while len(self.user['run_stack'][-1][0]) <= self.user['run_stack'][-1][1]:
+			while len(self.user['run_stack'][-1]['program']) <= self.user['run_stack'][-1]['current']:
 				self.user['run_stack'].pop()
 				if len(self.user['run_stack']) == 0:
 					# Send final "question".
-					self.remote.question.event(self.user['pending'], '', 'choice', ['Done'])
-					self.user['pending'] = []
+					self.remote.question.event(self.user['_pending'], '', 'choice', ['Done'])
 					self.breaking = True
 					user.refresh_admins()
 					return
 			# Run instructions.
-			if (yield from self._run_item(wake, self.user['run_stack'][-1][0][self.user['run_stack'][-1][1]])):
+			if (yield from self._run_item(wake, self.user['run_stack'][-1]['program'][self.user['run_stack'][-1]['current']])):
 				break
 		user.refresh_admins()
 	# }}}
@@ -576,42 +578,42 @@ class Connection: # {{{
 		elif code['command'] == 'answer':
 			yield from self._answer(wake, 'background', code['answer'])
 		elif code['command'] == 'if':
-			self.user['run_stack'][-1][1] += 1
+			self.user['run_stack'][-1]['current'] += 1
 			for expr, target in code['code']:
 				if expr is None or (yield from self._safe_eval(wake, expr, as_str = False)):
-					self.user['run_stack'].append([target, 0])
+					self.user['run_stack'].append({'program': target, 'current': 0})
 					break
 			return False
 		elif code['command'] == 'while':
 			# Don't increment instruction pointer, so the loop restarts.
 			if (yield from self._safe_eval(wake, code['test'], as_str = False)):
-				self.user['run_stack'].append([code['code'], 0])
+				self.user['run_stack'].append({'program': code['code'], 'current': 0})
 			else:
 				# exit the while loop.
-				self.user['run_stack'][-1][1] += 1
+				self.user['run_stack'][-1]['current'] += 1
 				# handle else clause, if present.
 				if code['else'] is not None:
-					self.user['run_stack'].append([code['else'], 0])
+					self.user['run_stack'].append({'program': code['else'], 'current': 0})
 			return False
 		elif code['command'] in ('continue', 'break'):
-			while self.user['run_stack'][-1][1] >= len(self.user['run_stack'][-1][0]) or self.user['run_stack'][-1][0][self.user['run_stack'][-1][1]]['command'] != 'while':
+			while self.user['run_stack'][-1]['current'] >= len(self.user['run_stack'][-1]['program']) or self.user['run_stack'][-1]['program'][self.user['run_stack'][-1]['current']]['command'] != 'while':
 				self.user['run_stack'].pop()
 			if code['command'] == 'break':
-				self.user['run_stack'][-1][1] += 1
+				self.user['run_stack'][-1]['current'] += 1
 			return False
 		elif code['command'] == 'goto':
 			# Break to top level and jump to requested label.
 			while len(self.user['run_stack']) > 1:
 				self.user['run_stack'].pop()
-			self.user['run_stack'][-1][1] = code['target']
+			self.user['run_stack'][-1]['current'] = code['target']
 			return False
 		elif code['command'] == 'python':
 			self.breaking = False
-			self.user['run_stack'][-1][1] += 1	# Do this before running the code, so goto works.
+			self.user['run_stack'][-1]['current'] += 1	# Do this before running the code, so goto works.
 			try:
-				new_commands = (yield from self.user['python'].run(wake, '\n'.join(code['code'])))
+				new_commands = (yield from self.user['python'].run(wake, code['code']))
 				if len(new_commands) > 0:
-					self.user['run_stack'].append([new_commands, 0])
+					self.user['run_stack'].append({'program': new_commands, 'current': 0})
 			except:
 				debug(0, 'Error in script: {}'.format(code['code']))
 				traceback.print_exc()
@@ -619,16 +621,28 @@ class Connection: # {{{
 			return self.breaking
 		elif code['command'] == 'video':
 			url = config['content'] + '/' + self.user['group'].lower() + '/' + self.user['section'][0] + '/' + self.user['section'][1] + '/' + code['video']
-			self.remote.video.event(self.user['pending'], url)
-			self.user['pending'] = []
+			self.remote.video.event(self.user['_pending'], url)
 			return True
 		elif code['command'] == 'sprite':
-			self._load_sprite(code['sprite'])
+			self._load_sprite(code['sprite'], code['tag'])
 		elif code['command'] == 'kinetic':
 			def build_kinetic(wake, item):
 				if item['action'] == 'speech':
-					speaker = None if item['speaker'] is None else self.user['sprite'].get(item['speaker'], '(' + item['speaker'] + ')')
-					return {'action': 'speech', 'speaker': speaker, 'text': markdown((yield from self._parse_text(wake, item['markdown'])))})
+					target = item['speaker']
+					speaker = None if target is None else self.user['sprite'][target]['name'] if target in self.user['sprite'] else '(' + target + ')'
+					if target in self.user['sprite']:
+						if item['image'] not in self.user['sprite'][target]['style']:
+							if item['image'] is not None:
+								debug(0, 'ignoring invalid image %s for %s' % (item['image'], target))
+								mood = self.user['sprite'][target]['mood']
+							else:
+								mood = item['image']
+						else:
+							mood = None
+						style = self._get_sprite_style(target, mood)
+					else:
+						style = {'url': None, 'size': None, 'hotspot': (.5, 0)}
+					return {'action': 'speech', 'speaker': speaker, 'target': target, 'image': style, 'text': markdown((yield from self._parse_text(wake, item['markdown'])))}
 				if item['action'] in ('serial', 'parallel'):
 					actions = []
 					for x in item['actions']:
@@ -752,13 +766,20 @@ class Connection: # {{{
 					args['rotate'] = r
 				if item['target'] is None:
 					target = None
+					image = None
 				else:
 					target = (yield from self._parse_text(wake, item['target']))
-				return {'action': item['action'], 'target': target, 'args': args}
+					if item['action'] != 'scene':
+						mood = (yield from self._parse_text(wake, item['mood']))
+						style = self._get_sprite_style(target, mood)
+					else:
+						style = {'url': None, 'size': None, 'hotspot': (.5, 0)}
+				return {'action': item['action'], 'target': target, 'image': style, 'args': args}
 			actions = []
+			debug(0, 'code %s' % code)
 			for x in code['kinetic']['actions']:
 				actions.append((yield from build_kinetic(wake, x)))
-			self.user['pending'].append({'type': 'kinetic', 'kinetic': actions})
+			self.user['_pending'].extend(actions)
 		elif code['command'] == 'question':
 			if code['type'] == 'hidden':
 				self._store_answer(code['variable'], (yield from self._safe_eval(wake, code['markdown'], as_str = True)))
@@ -771,32 +792,72 @@ class Connection: # {{{
 				return (yield from self._question(wake, code['type'], last_answer, code['markdown'], code['option']))
 		else:
 			debug(0, 'invalid command {}'.format(code))
-		self.user['run_stack'][-1][1] += 1
+		self.user['run_stack'][-1]['current'] += 1
 		return False
 	# }}}
 	def _get_filename(self, name, type): # {{{
+		'''Get a filename for a local (non-web) file. Returns the filename and if it is in common/.'''
 		parts = name.split('/')
+		debug(0, repr(parts))
 		if parts[0] == 'common':
-			return os.path.join('common', type, *parts[1:])
+			return os.path.join('common', type, *parts[1:]), True
 		else:
-			return os.path.join('users', self.user['group'], 'Content', self.user['section'][0], type, *parts)
+			return os.path.join('users', self.user['group'], 'Content', self.user['section'][0], type, *parts), False
 	# }}}
-	def _load_sprite(self, name): # {{{
-		filename = self._get_filename(name, 'sprite')
+	def _load_sprite(self, loadname, tag): # {{{
+		filename, is_common = self._get_filename(loadname, 'sprite')
 		data = content.load822(filename)
-		ret = {'base': os.path.dirname(filename), 'style': {}}
+		ret = {'base': os.path.dirname(filename), 'tag': tag, 'style': {}, 'mood': None, 'common': is_common}
 		if 'name' in data:
-			ret['name'] = data.pop('name')
+			# If name is a multi-line value, make that work in markdown notation.
+			ret['name'] = '\n\n'.join(data.pop('name'))
 		else:
-			ret['name'] = name.capitalize()
+			ret['name'] = tag.capitalize()
 		if 'image' in data:
-			for f in data:
-				base = f.split('/')[-1]
-				tag = base.rsplit('.', 1)[0]
-				ret['style'][tag] = f.strip()
+			for f in data['image']:
+				r = re.match('^\s*(\S+)(?:\s+(\d+)\s+(\d+)(?:\s+(\d+)\s+(\d+))?)?\s*$', f)
+				if r is None:
+					debug(0, 'invalid image line in %s: %s' % (loadname, f))
+					continue
+				base = r.group(1).strip().split('/')[-1]	# Base name (everything except directory)
+				imgtag = base.rsplit('.', 1)[0]	# base name without extension.
+				if r.group(3) is not None:
+					hotspot = float(r.group(2)), float(r.group(3))
+				else:
+					hotspot = .5, 0
+				if r.group(5) is not None:
+					size = float(r.group(4)), float(r.group(5))
+				else:
+					size = None
+				ret['style'][imgtag] = {'image': r.group(1), 'size': size, 'hotspot': hotspot}
+				if ret['mood'] is None:
+					ret['mood'] = imgtag
 			data.pop('image')
 		assert len(data) == 0
+		self.user['sprite'][tag] = ret
 		return ret
+	# }}}
+	def _get_sprite_style(self, tag, style): # {{{
+		if tag is None:
+			return None
+		if tag not in self.user['sprite']:
+			debug(0, 'getting style %s for unknown sprite %s.' % (style, tag))
+			tag = ''
+			style = 'default'
+		sprite = self.user['sprite'][tag]
+		if style not in sprite['style']:
+			if style is not None:
+				debug(0, 'getting unknown style %s for sprite %s.' % (style, tag))
+			style = sprite['mood']
+			if style not in sprite['style']:
+				debug(0, 'current mood %s is not a valid style for sprite %s.' % (style, tag))
+				tag = ''
+				style = 'default'
+		if sprite['common']:
+			r = sprite['style'][style]
+			return {'url': 'content/common/' + tag + '/' + r['image'], 'size': r['size'], 'hotspot': r['hotspot']}
+		else:
+			return {'url': 'content/' + self.user['group'] + '/' + self.user['section'][0] + '/sprite/' + tag + '/' + r['image'], 'size': r['size'], 'hotspot': r['hotspot']}
 	# }}}
 	def _update_sprite(self, tag, data): # {{{
 		for item in ('x', 'y', 'mood'):
@@ -825,17 +886,18 @@ class Connection: # {{{
 		if self.busy:
 			log('attempt to answer while busy')
 			return
+		self.user['_pending'] = []
 		debug(3, '{}:{} answers {}'.format(self.user['name'], self.user['group'], answer))
-		if self.user['run_stack'][-1][1] >= len(self.user['run_stack'][-1][0]):
+		if self.user['run_stack'][-1]['current'] >= len(self.user['run_stack'][-1]['program']):
 			self.busy = True
 			yield from self._run(wake)
 			self.busy = False
 			return
-		current = self.user['run_stack'][-1][0][self.user['run_stack'][-1][1]]
-		if current[0] not in ('short', 'long', 'choice', 'unit', 'longshort', 'longunit', 'longchoice'):
+		current = self.user['run_stack'][-1]['program'][self.user['run_stack'][-1]['current']]
+		if current['type'] not in ('short', 'long', 'choice', 'unit', 'longshort', 'longunit', 'longchoice'):
 			debug(1, 'answer given by {}:{} for non-question: {}'.format(self.remote.socket.remote[0], self.remote.socket.remote[1], current))
 			return
-		store = not current[2].startswith('_')
+		store = not current['variable'].startswith('_')
 		def parse_unit(src):
 			r = re.match(r'\s*(?:(\S+)\s*=\s*)?([+-]?[0-9]*(?:[.,]\d*)?)(?:·10([⁻⁺]?[⁰¹²³⁴⁵⁶⁷⁸⁹]+))?\s*(\S*)\s*$', src)
 			# groups:
@@ -860,23 +922,23 @@ class Connection: # {{{
 			debug(3, 'unit-split answer: {}'.format(answer))
 			return answer
 		raw = answer
-		if current[0] == 'choice':
-			if isinstance(answer, int) and 0 <= answer < len(current) - 3:
-				answer = {'index': answer, 'text': current[3 + answer]}
+		if current['type'] == 'choice':
+			if isinstance(answer, int) and 0 <= answer < len(current['option']):
+				answer = {'index': answer, 'text': current['option'][answer]}
 			else:
 				answer = {}
-			if len(current) == 3:
+			if len(current['option']) <= 1:
 				store = False
-		elif current[0] == 'longchoice':
-			if isinstance(answer[0], int) and 0 <= answer[0] < len(current) - 3:
-				answer = {'index': answer[0], 'text': current[3 + answer[0]], 'long': str(answer[1]).strip()}
+		elif current['type'] == 'longchoice':
+			if isinstance(answer[0], int) and 0 <= answer[0] < len(current['option']):
+				answer = {'index': answer[0], 'text': current['option'][answer[0]], 'long': str(answer[1]).strip()}
 			else:
 				# Leave answer string as is (but force str); this only happens when users are messing with the js.
 				debug(2, 'unparsable longchoice answer: {}'.format(answer))
 				answer = {'choice': None, 'long': str(answer).strip()}
-		elif current[0] == 'unit':
+		elif current['type'] == 'unit':
 			answer = parse_unit(answer)
-		elif current[0] == 'longunit':
+		elif current['type'] == 'longunit':
 			l = answer[1]
 			try:
 				answer = parse_unit(answer[0])
@@ -885,7 +947,7 @@ class Connection: # {{{
 				# Leave answer string as is (but force str); this only happens when users are messing with the js.
 				debug(2, 'unparsable longunit answer: {}'.format(answer))
 				answer = {}
-		elif current[0].startswith('long') and current[0] != 'long':
+		elif current['type'].startswith('long') and current['type'] != 'long':
 			try:
 				answer = {'text': str(answer[0]).strip(), 'long': str(answer[1]).strip()}
 			except:
@@ -896,8 +958,8 @@ class Connection: # {{{
 			answer = {'text': answer}
 		answer['raw'] = raw
 		answer['style'] = []
-		self._store_answer(current[2], answer, store)
-		self.user['run_stack'][-1][1] += 1
+		self._store_answer(current['variable'], answer, store)
+		self.user['run_stack'][-1]['current'] += 1
 		self.busy = True
 		yield from self._run(wake)
 		self.busy = False
@@ -907,34 +969,18 @@ class Connection: # {{{
 		if self.busy:
 			log('attempt to finish video while busy')
 			return
-		if self.user['run_stack'][-1][1] >= len(self.user['run_stack'][-1][0]):
+		self.user['_pending'] = []
+		if self.user['run_stack'][-1]['current'] >= len(self.user['run_stack'][-1]['program']):
 			self.busy = True
 			yield from self._run(wake)
 			self.busy = False
 			return
-		current = self.user['run_stack'][-1][0][self.user['run_stack'][-1][1]]
+		current = self.user['run_stack'][-1]['program'][self.user['run_stack'][-1]['current']]
 		if current[0] == 'video':
-			self.user['run_stack'][-1][1] += 1
+			self.user['run_stack'][-1]['current'] += 1
 			self.busy = True
 			yield from self._run(wake)
 			self.busy = False
-	# }}}
-	def text_done(self): # {{{
-		wake = (yield)
-		if self.busy:
-			log('attempt to finish text while busy')
-			return
-		if self.user['run_stack'][-1][1] >= len(self.user['run_stack'][-1][0]):
-			self.busy = True
-			yield from self._run(wake)
-			self.busy = False
-			return
-		current = self.user['run_stack'][-1][0][self.user['run_stack'][-1][1]]
-		if current[0] == 'story':
-			self.user['run_stack'][-1][1] += 1
-		self.busy = True
-		yield from self._run(wake)
-		self.busy = False
 	# }}}
 	def sandbox_list(self): # {{{
 		if self.busy:

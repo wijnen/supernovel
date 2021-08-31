@@ -13,7 +13,7 @@ from debug import debug
 users = {}	# including admins.
 admins = {}
 # Keys which are never saved.
-unsaved = ['connection', 'text_buffer', 'full_section', 'run_stack', 'section', 'answers', 'variables', 'last_path', 'characters', 'cookie', 'python']
+unsaved = ['connection', 'text_buffer', 'full_section', 'run_stack', 'section', 'answers', 'variables', 'last_path', 'characters', 'cookie', 'python', 'program', 'sprite']
 default_user = lambda group, name: {'filename': name.lower(), 'name': name, 'group': group.lower(), 'connection': None, 'password': None, 'nosave': False, 'sandbox': False, 'score': 0, 'answers': {}}
 
 def load(name, group): # {{{
@@ -39,7 +39,7 @@ def load(name, group): # {{{
 		except ValueError:
 			log('Failed to parse line from user config for %s:%s: %s' % (name, group, ln.strip()))
 			continue
-		if key in unsaved:
+		if key.startswith('_') or key in unsaved:
 			# This key should not have been in the file.
 			continue
 		if key in ('nosave', 'sandbox'):
@@ -116,7 +116,7 @@ def save(user): # {{{
 	'''Save user information to disk.'''
 	with open(os.path.join(config['data'], 'users', user['group'].lower(), user['filename']), 'w', errors = 'replace') as f:
 		for key in user:
-			if user[key] is None or key in unsaved:
+			if user[key] is None or key.startswith('_') or key in unsaved:
 				continue
 			f.write('{}={}\n'.format(key, user[key]))
 		# Record answers.
