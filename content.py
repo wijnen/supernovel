@@ -78,11 +78,11 @@ def parse_raw(ln, d, firstline):
 	return d['rawchildren']
 
 def parse_anim_args(ln, a, parent_args):
-	args = {'with': None, 'in': None, 'to': None, 'from': None, 'scale': None, 'rotate': None, 'around': None}
+	args = {'with': None, 'in': None, 'to': None, 'from': None, 'scale': None, 'rotation': None, 'around': None}
 	if a is None:
 		return args
 	while len(a) > 0:
-		ra = re.match(r'.*\b((with|in|to|from|scale|rotate|around)\s+(.+?))$', a)
+		ra = re.match(r'.*\b((with|in|to|from|scale|rotation|around)\s+(.+?))$', a)
 		if ra is None:
 			print('error string:', repr(a))
 			parse_error(ln, 'syntax error parsing animation arguments')
@@ -127,16 +127,29 @@ def parse_anim_element(ln, c, d, parent_args):
 	if r is not None:
 		return {'action': 'speech', 'line': ln, 'speaker': r.group(1), 'image': r.group(2), 'markdown': parse_raw(ln, d, r.group(3))}
 	
-	# scene, show, hide, move
-	r = re.match(r'(scene|show|hide|move)\s*(?:\s(\S+(?:\s*,\s*\S+)?)\s*(?:\s(\S.*?)\s*)?)?$', c)
+	# wait
+	r = re.match(r'wait\s+(\S.*?)\s*$', c)
+	if r is not None:
+		return {'action': 'wait', 'line': ln, 'time': r.group(1)}
+
+	# scene, show, hide, move, sound, music
+	r = re.match(r'(scene|show|hide|move|sound|music)\s*(?:\s(\S+(?:\s*,\s*\S+)?)\s*(?:\s(\S.*?)\s*)?)?$', c)
 	if r is None:
 		return None
 
 	if len(d['children']) > 0:
 		parse_error(ln, 'command cannot have indented block argument')
+		return False
+
+	if r.group(1) in ('sound', 'music'):
+		if r.group(3):
+			parse_error(ln, 'command does not support animation arguments')
+			return False
+		return {'action': r.group(1), 'target': r.group(2)}
 
 	if r.group(1) != 'scene' and r.group(2) is None:
 		parse_error(ln, 'command needs a target')
+		return False
 
 	args = parse_anim_args(ln, r.group(3), parent_args)
 	if args is None:
@@ -166,12 +179,8 @@ def parse_anim(ln, c, d, ostack):
 		# There was an error, which has already been reported.
 		return True
 	if len(ostack[-1]) == 0 or ostack[-1][-1]['command'] != 'kinetic':
-		ostack[-1].append({'command': 'kinetic', 'line': ln, 'kinetic': action})
-		return True
-	if ostack[-1][-1]['kinetic']['action'] != 'serial':
-		prev = ostack[-1][-1]['kinetic']
-		ostack[-1][-1]['kinetic'] = {'action': 'serial', 'args': parse_anim_args(ln, '', None), 'actions': [prev]}
-	ostack[-1][-1]['kinetic']['actions'].append(action)
+		ostack[-1].append({'command': 'kinetic', 'line': ln, 'kinetic': []})
+	ostack[-1][-1]['kinetic'].append(action)
 	return True
 
 def parse_line(d, ln, istack, ostack, index):
@@ -250,7 +259,7 @@ def parse_line(d, ln, istack, ostack, index):
 		return True
 
 	# option
-	r = re.match(r'option\s*:\s*(.*?)$', c)
+	r = re.match(r'option\s*:\s*(.*?)\s*$', c)
 	if r is not None:
 		if ostack[-1][-1]['command'] != 'question' or 'choice' not in ostack[-1][-1]['type']:
 			parse_error(ln, 'option is only allowed after a multiple choice question')

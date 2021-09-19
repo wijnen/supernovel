@@ -2,8 +2,10 @@
 // Globals. {{{
 
 var server;	// Handle for server communication.
-var sprite = {};	// All screen sprites.
+var all_sprites = {};	// All screen sprites.
 var img_cache = {};	// Cache of loaded images; keys are urls, values are data urls.
+var screen_scale = 1;	// Scale for background and sprites.
+var pending_music = null;	// Delay starting music because browsers don't allow it.
 
 // DOM elements.
 var error, login, videodiv, video;
@@ -23,33 +25,42 @@ var animating = false;	// Flag to disable animation handling when there is nothi
 function SpriteState(ref) { // {{{
 	// Class that holds the state of a sprite and can interpolate.
 	// Construct with new.
+	this.copy_array = function(src) {
+		if (src === null)
+			return null;
+		var ret = [];
+		for (var i = 0; i < src.length; ++i)
+			ret.push(src[i]);
+		return ret;
+	};
 	if (ref === undefined) {
 		this.image = {url: '', size: null, hotspot: [.5, 0]}
 		this.position = [[0, 0], [0, 0], 0];
 		this.rotation = 0;
 		this.around = null;
 		this.scale = [1, 1];
+		this['with'] = null;
 	}
 	else {
-		var copy_array = function(src) {
-			if (src === null)
-				return null;
-			var ret = [];
-			for (var i = 0; i < src.length; ++i)
-				ret.push(src[i]);
-			return ret;
-		};
 		this.image = ref.image;
-		this.position = [copy_array(ref.position[0]), copy_array(ref.position[1]), ref.position[2]];
+		if (ref.position === null)
+			this.position = null;
+		else
+			this.position = [this.copy_array(ref.position[0]), this.copy_array(ref.position[1]), ref.position[2]];
 		this.rotation = ref.rotation;
-		this.around = copy_array(ref.around);
-		this.scale = copy_array(ref.scale);
+		this.around = this.copy_array(ref.around);
+		this.scale = this.copy_array(ref.scale);
+		this['with'] = ref['with'];
 	}
 	var mix_num = function(phase, a, b) {
 		if (b === null)
 			return a;
 		if (a === null)
 			return b;
+		if (typeof a == 'boolean')
+			return b;
+		if (typeof b == 'boolean')
+			return a;
 		return a + (b - a) * phase;
 	};
 	var mix_array = function(phase, a, b) {
@@ -62,14 +73,59 @@ function SpriteState(ref) { // {{{
 			ret.push(mix_num(phase, a[i], b[i]));
 		return ret;
 	};
-	this.mix = function(phase, to) {
-		// TODO: handle non-linear interpolation ("with").
+	this.mix = function(phase, to, with_) {
 		var ret = new SpriteState();
-		ret.position = [mix_array(phase, this.position[0], to.position[0]), mix_array(phase, this.position[1], to.position[1]), mix_num(phase, this.position[2], to.position[2])];
 		ret.rotation = mix_num(phase, this.rotation, to.rotation);
-		ret.around = mix_array(phase, this.around, to.around);
+		// Don't reuse previous around.
+		ret.around = this.copy_array(to.around);
 		ret.scale = mix_array(phase, this.scale, to.scale);
 		ret.image = to.image;
+		if (to.position === null)
+			ret.position = this.copy_array(this.position);
+		else if (this.position === null)
+			ret.position = this.copy_array(to.position);
+		else {
+			if (with_ == 'move') {
+				if (ret.around === null)
+					// No rotation: simple interposlation.
+					ret.position = [mix_array(phase, this.position[0], to.position[0]), mix_array(phase, this.position[1], to.position[1]), mix_num(phase, this.position[2], to.position[2])];
+				else {
+					var ratio = state.background.size[1] / state.background.size[0];
+					// Rotate around some point. Compute starting and ending angles and radii; mix those.
+					var from_vect = [this.position[0][1] - ret.around[0], (this.position[1][1] - ret.around[1]) / ratio];
+					var to_vect = [to.position[0][1] - ret.around[0], (to.position[1][1] - ret.around[1]) / ratio];
+					var from_angle = Math.atan2(from_vect[1], from_vect[0]);
+					var to_angle = Math.atan2(to_vect[1], to_vect[0]);
+					if (ret.around[2]) {
+						// Clockwise rotation; this means to_angle must be smaller than from_angle.
+						if (to_angle > from_angle)
+							to_angle -= 2 * Math.PI;
+					}
+					else {
+						// Counter clockwise rotation; this means to_angle must be greater than from_angle.
+						if (to_angle < from_angle)
+							to_angle += 2 * Math.PI;
+					}
+					var angle = mix_num(phase, from_angle, to_angle);
+					var from_radius = Math.sqrt(from_vect[0] * from_vect[0] + from_vect[1] * from_vect[1]);
+					var to_radius = Math.sqrt(to_vect[0] * to_vect[0] + to_vect[1] * to_vect[1]);
+					var radius = mix_num(phase, from_radius, to_radius);
+					//console.info(from_radius, from_angle, to_radius, to_angle, radius, angle, from_vect, to_vect, this.position, ret.around);
+					// Compute position.
+					var rpos = [];
+					for (var c = 0; c < 2; ++c)
+						rpos.push(mix_num(phase, this.position[c][0], to.position[c][0]));
+					var x = [rpos[0], ret.around[0] + radius * Math.cos(angle)];
+					var y = [rpos[1], ret.around[1] + radius * Math.sin(angle) * ratio];
+					var z = mix_num(phase, this.position[2], to.position[2]);
+					ret.position = [x, y, z];
+				}
+			}
+			else {
+				// TODO: handle non-linear interpolation ("with").
+				ret.position = this.copy_array(to.position);
+			}
+		}
 		//console.info(phase, this.position[0], to.position[0], ret.position[0]);
 		return ret;
 	};
@@ -81,7 +137,7 @@ function Sprite(ref) { // {{{
 	if (ref) {
 		this.start_time = ref.start_time;
 		this.duration = ref.duration;
-		this.method = ref.method;
+		this['with'] = ref['with'];
 		this.from = new SpriteState(ref.from);
 		this.to = new SpriteState(ref.to);
 		this.cb = ref.cb;
@@ -90,7 +146,7 @@ function Sprite(ref) { // {{{
 	else {
 		this.start_time = null;
 		this.duration = null;
-		this.method = null;
+		this['with'] = null;
 		this.from = new SpriteState();
 		this.to = new SpriteState();
 		this.cb = null;
@@ -99,23 +155,24 @@ function Sprite(ref) { // {{{
 	this.state = function(now) {
 		// Compute current state at time now.
 		var ret;
-		if (this.start_time === null || this.duration === null || this.method === null) {
+		if (this.start_time === null || this.duration === null || this['with'] === null) {
 			ret = new SpriteState(this.from);
 			ret.extra = null;
 		}
 		else {
-			animating = true;
+			setTimeout(function() { animate(true); }, 0);
 			var phase = (now - this.start_time) / this.duration;
 			if (phase >= 1) {
-				ret = new SpriteState(this.to);
+				// Don't just copy this.to, because position can be null.
+				ret = this.from.mix(1, this.to, null);
 				ret.extra = now - this.start_time - this.duration;
 				this.start_time = null;
 				this.duration = null;
-				this.method = null;
-				this.from = new SpriteState(this.to);
+				this['with'] = null;
+				this.from = new SpriteState(ret);
 			}
 			else {
-				ret = this.from.mix(phase, this.to);
+				ret = this.from.mix(phase, this.to, this['with']);
 				ret.extra = null;
 			}
 		}
@@ -156,10 +213,15 @@ function DisplaySprite() { // {{{
 	var me = this;
 	this.div = spritebox.AddElement('div', 'sprite');
 	this.img = this.div.AddElement('img');
-	this.update = function(sprite, now) {
+	this.update = function(current_sprite, now) {
 		// Update this sprite according to a state Sprite.
-		this.cb = sprite.cb;
-		var sprite_state = sprite.state(now);
+		this.cb = current_sprite.cb;
+		var sprite_state = current_sprite.state(now);
+		//console.info(current_sprite, sprite_state);
+		if (sprite_state.position === null) {
+			console.warn('active sprite has null position', current_sprite);
+			return false;
+		}
 		me.div.style.zIndex = sprite_state.position[2];
 		//console.info(sprite_state.image, sprite_state.position[0], sprite_state.position[1]);
 		get_img(sprite_state.image.url, function(img) {
@@ -182,6 +244,10 @@ function DisplaySprite() { // {{{
 			var hy = hotspot[1] * size[1] * 100;
 			me.div.style.left = (x - hx) + '%';
 			me.div.style.bottom = (y - hy) + '%';
+			me.div.style.width = screen_scale * size[0] * state.background.size[0] + 'px';
+			me.div.style.height = screen_scale * size[1] * state.background.size[1] + 'px';
+			me.div.style.transformOrigin = hotspot[0] * 100 + '% ' + (1 - hotspot[1]) * 100 + '%';
+			me.div.style.transform = 'rotate(' + sprite_state.rotation * 360 + 'deg)';
 		});
 		return sprite_state.extra !== null;
 	};
@@ -196,22 +262,27 @@ function State(ref) { // {{{
 	// constructor: create a copy for storing in history, or from restoring from history.
 	this.thread = {};	// All running (and paused) threads.
 	this.waiting_threads = [];	// Stack of threads that are currently waiting for next_kinetic. Usually length 0 or 1.
+	this.sleeping_threads = [];	// Sorted list of threads that are in a wait instruction.
 	this.show_question = false;	// Flag for next_kinetic to be disabled when a question is shown.
 	this.background = (state && state.background ? state.background : {url: '', size: [1280, 1024]});
 	this.sprite = {};
 	this.speaker = {name: null, image: null, text: null};
+	this.music = null;
 	if (ref !== undefined) {
 		for (var t in ref.thread)
-			this.thread[t] = ref.thread[t];
-		for (var w = 0; w < this.waiting_threads.length; ++w)
+			this.thread[t] = {script: ref.thread[t].script, pos: ref.thread[t].pos, start: ref.thread[t].start, cb: ref.thread[t].cb};
+		for (var w = 0; w < ref.waiting_threads.length; ++w)
 			this.waiting_threads.push(ref.waiting_threads[w]);
+		for (var w = 0; w < ref.sleeping_threads.length; ++w)
+			this.sleeping_threads.push(ref.sleeping_threads[w]);
 		this.show_question = ref.show_question;
 		this.background = ref.background;
 		for (var s in ref.sprite)
 			this.sprite[s] = new Sprite(ref.sprite[s]);
 		this.speaker = {name: ref.speaker.name, image: ref.speaker.image, text: ref.speaker.text};
+		this.music = ref.music;
 	}
-	this.draw = function(now) { // {{{
+	this.draw = function(now, skip_resize) { // {{{
 		// Update the current screen to this state.
 		// Returns undefined.
 
@@ -223,10 +294,14 @@ function State(ref) { // {{{
 			bg.RemoveClass('hidden');
 		else
 			bg.AddClass('hidden');
-		resize();
+		if (!skip_resize)
+			resize();
 
 		// Speech.
-		speechbox.style.display = 'block';
+		if (this.speaker.name || this.speaker.text)
+			speechbox.style.display = 'block';
+		else
+			speechbox.style.display = 'none';
 		if (this.speaker.name) {
 			speaker.style.display = 'inline';
 			speaker.innerHTML = this.speaker.name;
@@ -242,24 +317,34 @@ function State(ref) { // {{{
 			speaker_image.style.display = 'none';
 
 		// Sprites.
-		for (var s in sprite) {
-			if (this.sprite[s] === undefined)
-				sprite[s].remove();
-		}
-		for (var s in this.sprite) {
-			if (sprite[s] === undefined)
-				sprite[s] = new DisplaySprite();
-			if (sprite[s].update(this.sprite[s], now)) {
-				// Animation done; call cb.
-				if (sprite[s].cb)
-					setTimeout(sprite[s].cb(now, sprite[s].extra), 0);
+		for (var s in all_sprites) {
+			if (this.sprite[s] === undefined) {
+				all_sprites[s].remove();
+				delete all_sprites[s];
 			}
 		}
+		for (var s in this.sprite) {
+			if (all_sprites[s] === undefined)
+				all_sprites[s] = new DisplaySprite();
+			if (all_sprites[s].update(this.sprite[s], now)) {
+				// Animation done; call cb.
+				if (all_sprites[s].cb)
+					setTimeout(function() { all_sprites[s].cb(now, all_sprites[s].extra); }, 0);
+			}
+		}
+
+		// If any sleeper is ready, run it.
+		while (this.sleeping_threads.length > 0 && this.sleeping_threads[0][0] < now) {
+			var w = this.sleeping_threads.splice(0, 1)[0];
+			(function (w) { setTimeout(function() { activate(w[1], now, now - w[0], false); }, 0); })(w);
+		}
+		if (this.sleeping_threads.length > 0)
+			setTimeout(function() { animate(true); }, 0);
 	}; // }}}
 }; // }}}
 
 // Thread handling. {{{
-function new_thread(script, cb, name, start) { // {{{
+function new_thread(script, cb, name, start, fast_forward) { // {{{
 	// Create a new thread.
 	// script: the code for the thread.
 	// cb: the callback to be called when done.
@@ -275,13 +360,11 @@ function new_thread(script, cb, name, start) { // {{{
 	console.assert(state.thread[name] === undefined, 'thread name already exists');
 	state.thread[name] = {'script': script, 'pos': 0, 'start': start || performance.now(), 'cb': cb || null};
 	//console.info('new thread', name, state.thread[name]);
-	activate(name);
-	if (!animating)
-		animate();
+	activate(name, undefined, undefined, fast_forward);
 	return name;
 } // }}}
 
-function activate(name, now, extra) { // {{{
+function activate(name, now, extra, fast_forward) { // {{{
 	// Run a thread. This is called when starting a new thread, and when resuming it after a delay or from next_kinetic.
 	// name: the thread to activate.
 	// now: the time that this activation is supposed to run. This may be (slightly) in the past. (optional)
@@ -297,12 +380,14 @@ function activate(name, now, extra) { // {{{
 	while (true) {
 		var action = current.script[current.pos];
 		if (action === undefined) {
+			delete state.thread[name];
 			if (current.cb)
 				current.cb(now - current.start);
-			return;
+			state.draw(now);
+			break;
 		}
 		current.pos += 1;
-		console.info('activating', name, 'action', action);
+		//console.info('activating', name, 'action', action);
 		if (action.action == 'speech') {
 			state.waiting_threads.push(name);
 			state.speaker.name = action.speaker;
@@ -311,20 +396,46 @@ function activate(name, now, extra) { // {{{
 			if (action.image !== null) {
 				// TODO.
 			}
+			//console.info('pushing new prev state; waiting:', state.waiting_threads.length);
 			prev_states.push(new State(state));
 			state.draw(now);
 			return;
 		}
+		else if (action.action == 'wait') {
+			if (!fast_forward) {
+				console.assert(typeof action.time == 'number', 'value of "time" must be a number');
+				state.sleeping_threads.push([now + action.time * 1000, name]);
+				state.sleeping_threads.sort();
+				break;
+			}
+			// If fast forwarding, ignore wait instructions.
+		}
 		else if (action.action == 'music') {
-			// TODO.
+			pending_music = null;
+			state.music = action.target;
+			if (action.target === null) {
+				delete music.src;
+				music.pause();
+			}
+			else {
+				music.src = action.target;
+				music.play();
+			}
 		}
 		else if (action.action == 'sound') {
-			// TODO.
+			if (action.target === null) {
+				delete sound.src;
+				sound.pause();
+			}
+			else {
+				sound.src = action.target;
+				sound.play();
+			}
 		}
 		else if (action.action == 'serial') {
 			new_thread(action.actions, function(extra) {
-				activate(name, extra);
-			}, name + '+', now);
+				activate(name, now, extra, fast_forward);
+			}, name + '+', now, fast_forward);
 			return;
 		}
 		else if (action.action == 'parallel') {
@@ -332,55 +443,83 @@ function activate(name, now, extra) { // {{{
 			for (var a = 0; a < action.actions.length; ++a) {
 				new_thread([action.actions[a]], function(extra) {
 					if (--wait == 0) {
-						activate(name, extra);
+						activate(name, now, extra, fast_forward);
 					}
-				}, name + '+' + a, now)
+				}, name + '+' + a, now, fast_forward)
 			}
 			return;
 		}
 		else if (action.action == 'scene') {
 			// TODO: transitions.
-			get_img('content/' + action.target, function(img) {
-				state.background = img;
+			// Remove all sprites.
+			for (var s in all_sprites)
+				all_sprites[s].remove();
+			all_sprites = [];
+			// Set new background.
+			if (action.target) {
+				get_img('content/' + action.target, function(img) {
+					state.background = img;
+					resize();
+					activate(name, now, 0, fast_forward);
+				});
+			}
+			else {
+				state.backgorund = null;
 				resize();
-				activate(name, now, 0);
-			});
+				activate(name, now, 0, fast_forward);
+			}
 			return;
 		}
 		else {
 			var target = action.target;
 			var image = action.image;
 			var args = action.args;
-			var sprite;
+			var current_sprite;
 			if (action.action == 'show') {
 				if (state.sprite[action.target] === undefined) {
-					sprite = new Sprite();
-					state.sprite[action.target] = sprite;
-					sprite.from.position = args.from;
-					sprite.from.image = image;
+					current_sprite = new Sprite();
+					state.sprite[action.target] = current_sprite;
+					current_sprite.from.position = args.from;
+					current_sprite.from.image = image;
 				}
 			}
 			else if (action.action == 'hide') {
 				// TODO
-				sprite = state.sprite[action.target];
 			}
 			else {
-				console.assert(action.action == 'move', 'action must be show, hide, or move; not ' + action.action, action);
-				sprite = state.sprite[action.target];
+				console.assert(action.action == 'move', 'invalid action "' + action.action + '"', action);
+				// Nothing to prepare; only common handling below is required.
 			}
-			sprite.to.position = args.to;
-			sprite.to.image = image;
-			sprite.start_time = now;
-			sprite.method = args['with'];
-			sprite.size = action.size;
-			if (args['in'] !== null) {
-				console.assert(typeof args['in'] == 'number');
-				sprite.duration = args['in'] * 1000;
-				sprite.cb = function(now, extra) { activate(name, now, extra); };
+			current_sprite = state.sprite[action.target];
+			current_sprite.to.position = args.to;
+			current_sprite.to.image = image;
+			current_sprite.to.scale = args.scale;
+			current_sprite.to.rotation = args.rotation;
+			current_sprite.to.around = args.around;
+			if (!fast_forward && args['in'] !== null) {
+				console.assert(typeof args['in'] == 'number', 'value of "in" must be a number');
+				current_sprite.start_time = now;
+				current_sprite['with'] = args['with'];
+				current_sprite.duration = args['in'] * 1000;
+				current_sprite.cb = function(now, extra) { activate(name, now, extra, fast_forward); };
 				animate(true);
-				return;
+				break;
+			}
+			else {
+				if (args.to !== null)
+					current_sprite.from.position = args.to;
+				if (args.scale !== null)
+					current_sprite.from.scale = args.scale;
+				current_sprite.from.image = image;
+				current_sprite.start_time = null;
+				current_sprite['with'] = null;
 			}
 		}
+	}
+	if (state.waiting_threads.length == 0) {
+		state.speaker.name = null;
+		state.speaker.text = '';
+		state.draw(now);
 	}
 } // }}}
 
@@ -398,8 +537,10 @@ function run_story(story, cb) { // {{{
 	sandbox.style.display = 'none';
 	question.innerHTML = '';
 	video.pause();
-	state = new State();
-	prev_states = [];
+	if (state === undefined)
+		state = new State();
+	prev_states = [{story: story, cb: cb, background: state.background, music: state.music}];
+	state.show_question = false;
 	new_thread(story, cb, '');
 } // }}}
 // }}}
@@ -424,8 +565,6 @@ function update_screen() { // {{{
 		return;
 	animating = false;
 	state.draw(performance.now());
-	if (animating)
-		requestAnimationFrame(update_screen);
 } // }}}
 // }}}
 
@@ -492,8 +631,20 @@ var Connection = { // {{{
 		video.pause();
 		music.pause();
 		sound.pause();
+		state = new State();
+		for (var s in all_sprites)
+			all_sprites[s].remove();
+		all_sprites = [];
+		prev_states = [];
+	},
+	kinetic: function(story, music) {
+		//console.info('setup kinetic', music, story)
+		server.lock();
+		pending_music = music;
+		run_story(story, function() { server.unlock(); });
 	},
 	question: function(story, text, type, options, last_answer) {
+		//console.info('question', text, type, story);
 		run_story(story, function() {
 			if (state.show_question)
 				return;
@@ -678,6 +829,11 @@ function init() { // {{{
 
 	// Handle clicks on screen for progression.
 	spritebox.AddEvent('click', function(event) {
+		if (pending_music !== null) {
+			music.src = pending_music;
+			pending_music = null;
+			music.play();
+		}
 		if (event.button != 0)
 			return;
 		if (state.show_question || state.waiting_threads.length == 0)
@@ -685,7 +841,7 @@ function init() { // {{{
 		event.preventDefault();
 		next_kinetic();
 	});
-	
+
 	// Parse cookie.
 	var c = document.cookie.split(';');
 	var crumbs = {};
@@ -731,15 +887,16 @@ function init() { // {{{
 } // }}}
 window.AddEvent('load', init);
 
-function resize() {
+function resize() { // {{{
 	if (state === undefined)
 		state = new State();
-	var scale = Math.min(window.innerWidth / state.background.size[0], window.innerHeight / state.background.size[1]);
-	game.style.left = (window.innerWidth - state.background.size[0] * scale) / 2 + 'px';
-	game.style.top = (window.innerHeight - state.background.size[1] * scale) / 2 + 'px';
-	game.style.width = state.background.size[0] * scale + 'px';
-	game.style.height = state.background.size[1] * scale + 'px';
-}
+	screen_scale = Math.min(window.innerWidth / state.background.size[0], window.innerHeight / state.background.size[1]);
+	game.style.left = (window.innerWidth - state.background.size[0] * screen_scale) / 2 + 'px';
+	game.style.top = (window.innerHeight - state.background.size[1] * screen_scale) / 2 + 'px';
+	game.style.width = state.background.size[0] * screen_scale + 'px';
+	game.style.height = state.background.size[1] * screen_scale + 'px';
+	state.draw(performance.now(), true);
+} // }}}
 window.AddEvent('resize', resize);
 
 function log_in() { // {{{
@@ -771,25 +928,64 @@ function home() { // {{{
 	server.call('home');
 } // }}}
 
-function next_kinetic() { // {{{
+function next_kinetic(finish) { // {{{
 	// The next button was clicked, or the screen was clicked, or the spacebar was pressed.
+	// The finish parameter is true if the "forward to end" button was clicked.
 	// Returns undefined.
 	if (document.activeElement != document.body)
 		document.activeElement.blur();
 	if (state.show_question || state.waiting_threads.length == 0)
 		return;
-	activate(state.waiting_threads.pop());
+	if (finish) {
+		while (state.sleeping_threads.length > 0)
+			activate(state.sleeping_threads.splice(0, 1)[1], now, 0, true);
+		while (!state.show_question && state.waiting_threads.length > 0)
+			activate(state.waiting_threads.pop(), undefined, undefined, true);
+	}
+	else
+		activate(state.waiting_threads.pop());
 } // }}}
 
 function prev_kinetic(full) { // {{{
 	// The prev button was clicked, or backspace was pressed.
-	return; // TODO
+	var prev_music = state.music;
+	if (full || prev_states.length < 2)
+		prev_states.length = 1;
+	else
+		prev_states.pop();
+	if (prev_states.length == 1) {
+		question.style.display = 'none';
+		state = new State();
+		state.background = prev_states[0].background;
+		state.music = prev_states[0].music;
+		new_thread(prev_states[0].story, prev_states[0].cb, '');
+	}
+	else {
+		state = new State(prev_states[prev_states.length - 1]);
+		question.style.display = state.show_question ? 'block' : 'none';
+	}
+	state.draw();
+	if (state.music != prev_music) {
+		if (state.music === null) {
+			music.pause();
+			delete music.src;
+		}
+		else {
+			music.src = state.music;
+			music.play();
+		}
+	}
 } // }}}
 
 function keypress(event) { // {{{
 	// Key press handler. If the key is space or backspace, do next or prev kinetic.
 	// Returns undefined.
 	//console.info(event);
+	if (pending_music !== null) {
+		music.src = pending_music;
+		pending_music = null;
+		music.play();
+	}
 	if (state === undefined || state.show_question || (event.charCode != 32 && event.keyCode != 8))
 		return;
 	if (state.waiting_threads.length == 0)

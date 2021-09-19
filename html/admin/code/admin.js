@@ -1,5 +1,5 @@
 var groups, table, single;
-var server_obj, server;
+var server;
 
 var ids = ['login', 'groups', 'tablediv', 'single'];
 
@@ -13,8 +13,7 @@ function init() {
 	table = document.getElementById('table');
 	single = document.getElementById('single');
 	show(null);
-	server_obj = Rpc(Connection, onopen, onclose);
-	server = server_obj.proxy;
+	server = Rpc(Connection, onopen, onclose);
 }
 window.AddEvent('load', init);
 
@@ -59,7 +58,7 @@ var Connection = {
 					last_chapter = chapter;
 				}
 				var a = current_ul.AddElement('li').AddElement('a').AddText(section + ' (' + group[s][1] + ')').AddEvent('click', function() {
-					server.show_section(this.group, this.section);
+					server.call('show_section', [this.group, this.section]);
 				});
 				a.group = group[0];
 				a.section = group[s][0];
@@ -68,27 +67,40 @@ var Connection = {
 	},
 	students_list: function(group, questions, students) {
 		// Show students with questions in a table.
+		//console.info('group', group, 'questions', questions, 'students', students);
 		show('tablediv');
 		table.ClearAll();
 		var tr = table.AddElement('tr');
 		tr.AddElement('th').AddText(group);
 		for (var q = 0; q < questions.length; ++q)
-			tr.AddElement('th').AddText(questions[q][1]).title = questions[q][2];
+			tr.AddElement('th').AddText(questions[q].name).title = questions[q].markdown;
 		for (var s = 0; s < students.length; ++s) {
 			// Fill a table row for a student.
 			tr = table.AddElement('tr');
-			var th = tr.AddElement('th').AddText(students[s][0][0]);
-			th.title = students[s][0][1];
-			th.style.color = students[s][1][0] ? '' : students[s][1][0] !== null ? 'blue' : 'grey';
-			th.style.background = students[s][1][1] ? '' : 'lightgrey';
-			for (var q = 2; q < students[s].length; ++q) {
+			var th = tr.AddElement('th');
+			if (students[s].password) {
+				// Substitute a button, but keep the variable name for setting the style below.
+				th = th.AddElement('button');
+				th.type = 'button';
+				th.student = students[s];
+				th.click = function() {
+					if (confirm('Do you want to reset the password for ' + this.student.name + ':' + group + '?'))
+						server.call('reset_password', [this.student.name, group]);
+				};
+				th.AddEvent('click', th.click);
+			}
+			th.AddText(students[s].name);
+			th.title = students[s].code[0];
+			th.style.color = students[s].login ? '' : students[s].login !== null ? 'blue' : 'grey';
+			th.style.background = students[s].connected ? '' : 'lightgrey';
+			for (var q = 0; q < students[s].answers.length; ++q) {
 				// Add all answers.
 				var td = tr.AddElement('td');
-				td.title = questions[q - 2][2];
-				var answers = students[s][q][1];
+				td.title = questions[q].markdown;
+				var answers = students[s].answers[q].attempts;
 				if (answers !== null && answers.length >= 1) {
 					// There is at least one answer: fill the cell.
-					// There are more answers: add the last one.
+					// If there are multiple answers: add the last one.
 					answer = answers[answers.length - 1];
 					span = td.AddText(answers.length + ':').AddElement('span').AddText(answer.raw);
 					for (var n = 0; n < answer['style'].length; ++n)
@@ -98,15 +110,10 @@ var Connection = {
 						t.push(answers[a].raw);
 					span.title = t;
 				}
-				td.style.background = (students[s][q][0] ? students[s][1][1] ? 'white' : 'grey' : '');
+				td.style.background = (students[s].answers[q].active ? students[s].login ? 'white' : 'grey' : '');
 			}
 		}
-	},
-	student_detail: function(group, student, questions, detail) {
-		// Show detailed progress for a single student.
-		show('single');
-		single.ClearAll();
-		// TODO: show student details.
+		// TODO: use popup for student details.
 	},
 	cookie: function(n, c) {
 		document.cookie = 'name=' + encodeURIComponent(n) + '; sameSite=Strict';
@@ -117,11 +124,11 @@ var Connection = {
 function log_in() {
 	var name = document.getElementById('name').value;
 	var password = document.getElementById('password').value;
-	server.login(name, password);
+	server.call('login', [name, password]);
 	return false;
 }
 
 function goback() {
 	// Callback for the "back" button in the table view.
-	server.list_groups();
+	server.call('list_groups');
 }

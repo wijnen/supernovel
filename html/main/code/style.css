@@ -13,6 +13,8 @@ body {
 	left: 0px;
 	top: 0px;
 	right: 0px;
+	bottom: 0px;
+	overflow: auto;
 	padding: 3em 3em 3em 3em;
 	margin: 3em 3em 3em 3em;
 	border-radius: 2ex;
@@ -29,7 +31,6 @@ button.not(#navbutton) {
 
 #navigation {
 	z-index: 3;
-	display: none;
 	text-align: justify;
 	position: fixed;
 	left: 0px;
@@ -45,11 +46,11 @@ button.not(#navbutton) {
 
 #spritebox {
 	z-index: 1;
-	position: fixed;
+	position: absolute;
 	left: 0px;
 	right: 0px;
-	bottom: 9em;
-	top: 2em;
+	bottom: 0px;
+	top: 0px;
 }
 
 #speechbox {
@@ -62,6 +63,7 @@ button.not(#navbutton) {
 	border: 2px black solid;
 	border-radius: 1em;
 	background-color: rgba(255, 255, 255, 0.9);
+	z-index: 2;
 }
 
 #speaker {
@@ -88,19 +90,17 @@ button.not(#navbutton) {
 	position: absolute;
 	bottom: 0%;
 }
+.sprite img, #game img {
+	width: inherit;
+	height: inherit;
+}
 
 #question {
 	background-color: rgba(255, 255, 255, .5);
 	box-sizing: border-box;
-	height: 90vh;
-	z-index: 2;
+	z-index: 4;
 }
 
-#next {
-	position: fixed;
-	top: 0px;
-	right: 0px;
-}
 .choicebuttons {
 	text-align: center;
 }
@@ -123,7 +123,7 @@ ul {
 	text-align: right;
 }
 
-.active {
+.active, .choicebutton:hover {
 	background-color: blue;
 	color: white;
 }
@@ -132,6 +132,7 @@ ul {
 	position: fixed;
 	overflow: hidden;
 }
+
 .hidden {
 	display: none;
 }

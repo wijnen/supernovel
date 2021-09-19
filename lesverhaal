@@ -4,6 +4,7 @@
 # Imports and config. {{{
 import sys
 import os
+import math
 import re
 try:
 	from crypt import crypt
@@ -133,6 +134,7 @@ class Admin_Connection: # {{{
 	# }}}
 	def list_groups(self): # {{{
 		'''Show selection of groups to choose.'''
+		assert self.user is not None
 		self.refresh = lambda: self.list_groups()
 		groups = []
 		for g in os.listdir(os.path.join(config['data'], 'users')):
@@ -150,6 +152,7 @@ class Admin_Connection: # {{{
 	# }}}
 	def show_section(self, group, section): # {{{
 		'''Show questions for one section.'''
+		assert self.user is not None
 		section = tuple(section)
 		self.refresh = lambda: self.show_section(group, section)
 		parts, errors = content.get(group, section)
@@ -166,18 +169,26 @@ class Admin_Connection: # {{{
 				elif p['command'] == 'question':
 					questions.append({'type': p['type'], 'name': p['variable'], 'markdown': p['markdown'], 'option': p['option'], 'line': p['line']})
 		add_block(parts)
-		questions.append({'type': 'end', 'name': '', 'markdown': '', 'option': None, 'line': p['line']})
+		questions.append({'type': 'end', 'name': '', 'markdown': '', 'option': None, 'line': math.nan})
 		students = []
 		def make_field(student, question):
-			active = student['section'] == section and len(student['run_stack'][-1]['program']) > student['run_stack'][-1]['current'] and student['run_stack'][-1]['program'][student['run_stack'][-1]['current']][1] == question[0]
-			return (active, student['answers'][section][question[1]] if question[3] not in ('video', 'end') and section in student['answers'] and question[1] in student['answers'][section] else None)
+			active = False
+			if student['section'] == section:
+				if len(student['run_stack']) > 0:
+					frame = student['run_stack'][-1]
+					if len(frame['program']) > frame['current']:
+						if frame['program'][frame['current']]['line'] == question['line']:
+							active = True
+				elif question['type'] == 'end':
+					active = True
+			return {'active': active, 'attempts': student['answers'][section][question['name']] if question['type'] not in ('video', 'end') and section in student['answers'] and question['name'] in student['answers'][section] else None}
 		def make_other_field(student, question):
-			return (False, student['answers'][section][question[1]] if question[3] not in ('video', 'end') and section in student['answers'] and question[1] in student['answers'][section] else None)
+			return {'active': False, 'attempts': student['answers'][section][question['name']] if question['type'] not in ('video', 'end') and section in student['answers'] and question['name'] in student['answers'][section] else None}
 		for s in user.users:
 			if user.users[s]['group'].lower() != group.lower():
 				continue
-			students.append(((user.users[s]['name'], s), (user.users[s]['section'] == section, user.users[s]['connection'] is not None)) + tuple(make_field(user.users[s], q) for q in questions))
-		students.sort(key = lambda s: (not s[1][0], s[0][0], s[0][1]))
+			students.append({'password': bool(user.users[s]['password']), 'name': user.users[s]['name'], 'code': s, 'login': user.users[s]['section'] == section, 'connected': user.users[s]['connection'] is not None, 'answers': tuple(make_field(user.users[s], q) for q in questions)})
+		students.sort(key = lambda s: (not s['login'], s['name'], s['code']))
 		# Add non-connected students to the list.
 		others = []
 		for u in user.list_group(group):
@@ -187,18 +198,20 @@ class Admin_Connection: # {{{
 			if student is None:
 				debug(0, 'student found but unloadable: {}:{}'.format(u, group))
 				continue
-			others.append(((student['name'], u), (None, False)) + tuple(make_other_field(student, q) for q in questions))
+			others.append({'password': bool(student['password']), 'name': student['name'], 'code': u, 'login': None, 'connected': False, 'answers': tuple(make_other_field(student, q) for q in questions)})
 		try:
-			others.sort()
+			others.sort(key = lambda s: (s['name'], s['code']))
 		except:
 			pass
 		students.extend(others)
 		self.remote.students_list.event(group, questions, students)
 	# }}}
-	def show_student(self, group, section, student): # {{{
-		'''Show single student with detailed results for one section.'''
-		self.refresh = lambda: self.show_student(group, section, student)
-		# TODO.
+	def reset_password(self, student, group): # {{{
+		assert self.user is not None
+		u = user.load(student, group)
+		assert u is not None
+		u['password'] = None
+		user.save(u)
 	# }}}
 # }}}
 
@@ -233,7 +246,6 @@ class Python_local: # {{{
 	def run(self, wake, script, allow_ui = True):
 		if allow_ui:
 			self.pending = []
-		print('running', repr(script))
 		exec(script, self.variables)
 		if allow_ui:
 			ret = self.pending
@@ -382,8 +394,10 @@ class Connection: # {{{
 			u['password'] = crypted
 			user.save(u)
 		self.busy = True
-		yield from self._finish_login(wake)
-		self.busy = False
+		try:
+			yield from self._finish_login(wake)
+		finally:
+			self.busy = False
 		return None
 	# }}}
 	def _login(self, name, group): # {{{
@@ -420,9 +434,18 @@ class Connection: # {{{
 		if wake is None:
 			wake = (yield)
 		if self.user['section'] is not None:
-			if len(self.user['run_stack']) > 0 and len(self.user['run_stack'][-1]['program']) > 1 and not (yield from self._run_item(wake, self.user['run_stack'][-1]['program'][self.user['run_stack'][-1]['current']])):
-				debug(0, 'Bug: saved state of user {}:{} was not a waiting state'.format(name, group))
-				yield from self._run(wake)
+			if len(self.user['run_stack']) > 0 and len(self.user['run_stack'][-1]['program']) > 1:
+				setup = []
+				state = self.user['_kinetic_state']
+				if state['background'] is not None:
+					setup.append({'action': 'scene', 'target': state['background'], 'args': {'with': None}})
+				for spr in state['sprite']:
+					s = state['sprite'][spr]
+					setup.append({'action': 'show', 'target': spr, 'image': s['image'], 'args': {'from': s['from'], 'to': s['to'], 'scale': s['scale'], 'rotation': s['rotation'], 'with': None, 'around': None, 'in': None}})
+				self.remote.kinetic.event(setup, state['music'])
+				if not (yield from self._run_item(wake, self.user['run_stack'][-1]['program'][self.user['run_stack'][-1]['current']])):
+					debug(0, 'Bug: saved state of user {}:{} was not a waiting state'.format(name, group))
+					yield from self._run(wake)
 	# }}}
 	def _closed(self): # {{{
 		self.remote.close()
@@ -454,6 +477,21 @@ class Connection: # {{{
 				result += (yield from self._safe_eval(wake, m.group(1), as_str = True))
 		return result
 	# }}}
+	def _parse_time(self, wake, t): # {{{
+		i = (yield from self._parse_text(wake, t)).strip()
+		r = re.match(r'([-+.e0-9]+)\s*(m?)s$', i)
+		if r is None:
+			return None
+		else:
+			try:
+				num = float(r.group(1))
+				if r.group(2) == 'm':
+					num /= 1e3
+				return num
+			except ValueError:
+				debug(0, 'error parsing time {}'.format(i))
+				return None
+	# }}}
 	def _answer(self, wake, key, value = None): # {{{
 		'''Set style for last answer.
 		With only one argument, the style of the background is set.'''
@@ -477,6 +515,36 @@ class Connection: # {{{
 		user.refresh_admins()
 		self.remote.main.event()
 	# }}}
+	def _clear_pending(self): # {{{
+		# update kinetic state.
+		def handle_action(action, state):
+			if action['action'] in ('speech', 'sound', 'wait'):
+				# Nothing to update.
+				pass
+			elif action['action'] == 'scene':
+				state['background'] = action['target']
+			elif action['action'] == 'music':
+				state['music'] = action['target']
+			elif action['action'] in ('serial', 'parallel'):
+				for a in action['actions']:
+					handle_action(a, state)
+			elif action['action'] == 'hide':
+				del state['sprite'][action['target']]
+			else:
+				assert action['action'] in ('show', 'move')
+				if action['target'] not in state['sprite']:
+					state['sprite'][action['target']] = {'from': [(0, 0), (0, 0), None], 'to': [(0, 0), (0, 0), None], 'scale': None, 'rotation': None, 'image': None}
+				target = state['sprite'][action['target']]
+				target['image'] = action['image']
+				args = action['args']
+				for prop in ('from', 'to', 'scale', 'rotation'):
+					if args[prop] is not None:
+						target[prop] = args[prop]
+		for action in self.user['_pending']:
+			handle_action(action, self.user['_kinetic_state'])
+		#debug(0, repr(self.user['_pending']))
+		self.user['_pending'] = []
+	# }}}
 	def home(self): # {{{
 		if self.busy and not force:
 			traceback.print_stack()
@@ -488,11 +556,15 @@ class Connection: # {{{
 		wake = (yield)
 		if self.busy:
 			log('attempt to start while busy')
+			traceback.print_stack()
 			return
 		self.user['section'] = tuple(section)
+		self.user['_kinetic_state'] = {'background': None, 'sprite': {}, 'music': None}
 		self.busy = True
-		yield from self._start(wake, section, content.get(self.user['group'], self.user['section']), False)
-		self.busy = False
+		try:
+			yield from self._start(wake, section, content.get(self.user['group'], self.user['section']), False)
+		finally:
+			self.busy = False
 	# }}}
 	def _start(self, wake, section, section_content, send_errors): # {{{
 		self.user['program'], errors = section_content
@@ -643,6 +715,11 @@ class Connection: # {{{
 					else:
 						style = {'url': None, 'size': None, 'hotspot': (.5, 0)}
 					return {'action': 'speech', 'speaker': speaker, 'target': target, 'image': style, 'text': markdown((yield from self._parse_text(wake, item['markdown'])))}
+				if item['action'] == 'wait':
+					return {'action': 'wait', 'time': (yield from self._parse_time(wake, item['time']))}
+				if item['action'] in ('sound', 'music'):
+					target = None if item['target'] is None else (yield from self._parse_text(wake, item['target']))
+					return {'action': item['action'], 'target': target}
 				if item['action'] in ('serial', 'parallel'):
 					actions = []
 					for x in item['actions']:
@@ -661,55 +738,41 @@ class Connection: # {{{
 				if item['args']['in'] is None:
 					args['in'] = None
 				else:
-					i = (yield from self._parse_text(wake, item['args']['in'])).strip()
-					r = re.match(r'([-+.e0-9]+)\s*(m?)s$', i)
-					if r is None:
-						args['in'] = None
-					else:
-						try:
-							num = float(r.group(1))
-							if r.group(2) == 'm':
-								num /= 1e3
-							args['in'] = num
-						except ValueError:
-							debug(0, 'error parsing time {}'.format(i))
-							args['in'] = None
-				def parse_location(wake, loc, use_names = True):
+					args['in'] = (yield from self._parse_time(wake, item['args']['in']))
+				def parse_location(wake, loc):
 					if loc is None:
 						return None
 					l = [x.strip() for x in (yield from self._parse_text(wake, loc)).split()]
 					if l[0] == 'outleft':
-						l[0] = (1, 0)
+						l[0] = (1, -1)
 					elif l[0] == 'inleft':
-						l[0] = (-1, 0)
+						l[0] = (-1, -1)
 					elif l[0] == 'outright':
 						l[0] = (-1, 1)
 					elif l[0] == 'inright':
 						l[0] = (1, 1)
 					elif l[0] == 'left':
-						l[0] = (0, .2)
+						l[0] = (0, -.4)
 					elif l[0] == 'center':
-						l[0] = (0, .5)
+						l[0] = (0, 0)
 					elif l[0] == 'right':
-						l[0] = (0, .8)
+						l[0] = (0, .4)
 					else:
 						try:
 							l[0] = (0, float(l[0]))
 						except:
-							l[0] = (0, .5)
+							l[0] = (0, 0)
 					if len(l) == 1:
 						l.append((0, 0))
 					elif l[1] == 'outbottom':
-						l[1] = (1, -1)
+						l[1] = (1, 0)
 					elif l[1] == 'inbottom':
-						l[1] = (-1, -1)
+						l[1] = (-1, 0)
 					elif l[1] == 'outtop':
 						l[1] = (-1, 1)
 					elif l[1] == 'intop':
 						l[1] = (1, 1)
 					elif l[1] == 'bottom':
-						l[1] = (0, -1)
-					elif l[1] == 'base':
 						l[1] = (0, 0)
 					elif l[1] == 'low':
 						l[1] = (0, .2)
@@ -732,9 +795,47 @@ class Connection: # {{{
 						except:
 							l[2] = None
 					return l
+				def parse_around(wake, loc):
+					if loc is None:
+						return None
+					l = [x.strip() for x in (yield from self._parse_text(wake, loc)).split()]
+					if l[-1] in ('cw', 'ccw'):
+						cw = l[-1] == 'cw'
+						l.pop()
+					else:
+						cw = False
+					if l[0] == 'left':
+						l[0] = -.4
+					elif l[0] == 'center':
+						l[0] = 0
+					elif l[0] == 'right':
+						l[0] = .4
+					else:
+						try:
+							l[0] = float(l[0])
+						except:
+							l[0] = 0
+					if len(l) == 1:
+						l.append(0)
+					elif l[1] == 'bottom':
+						l[1] = 0
+					elif l[1] == 'low':
+						l[1] = .2
+					elif l[1] == 'middle':
+						l[1] = .5
+					elif l[1] == 'high':
+						l[1] = .8
+					elif l[1] == 'top':
+						l[1] = 1
+					else:
+						try:
+							l[1] = float(l[1])
+						except:
+							l[1] = 0
+					return l[:2] + [cw]
 				args['to'] = (yield from parse_location(wake, item['args']['to']))
 				args['from'] = (yield from parse_location(wake, item['args']['from']))
-				args['around'] = (yield from parse_location(wake, item['args']['around'], False))
+				args['around'] = (yield from parse_around(wake, item['args']['around']))
 				if item['args']['scale'] is None:
 					args['scale'] = None
 				else:
@@ -749,10 +850,10 @@ class Connection: # {{{
 						debug(0, 'error parsing scale {}'.format(s))
 						s = None
 					args['scale'] = r
-				if item['args']['rotate'] is None:
-					args['rotate'] = None
+				if item['args']['rotation'] is None:
+					args['rotation'] = None
 				else:
-					r = (yield from self._parse_text(wake, item['args']['rotate'])).strip()
+					r = (yield from self._parse_text(wake, item['args']['rotation'])).strip()
 					if r.endswith('°'):
 						f = 360
 						r = r[:-1]
@@ -763,7 +864,7 @@ class Connection: # {{{
 					except:
 						debug(0, 'error parsing rotation {}'.format(r))
 						r = None
-					args['rotate'] = r
+					args['rotation'] = r
 				if item['target'] is None:
 					target = None
 					image = None
@@ -776,8 +877,7 @@ class Connection: # {{{
 						style = {'url': None, 'size': None, 'hotspot': (.5, 0)}
 				return {'action': item['action'], 'target': target, 'image': style, 'args': args}
 			actions = []
-			debug(0, 'code %s' % code)
-			for x in code['kinetic']['actions']:
+			for x in code['kinetic']:
 				actions.append((yield from build_kinetic(wake, x)))
 			self.user['_pending'].extend(actions)
 		elif code['command'] == 'question':
@@ -798,7 +898,6 @@ class Connection: # {{{
 	def _get_filename(self, name, type): # {{{
 		'''Get a filename for a local (non-web) file. Returns the filename and if it is in common/.'''
 		parts = name.split('/')
-		debug(0, repr(parts))
 		if parts[0] == 'common':
 			return os.path.join('common', type, *parts[1:]), True
 		else:
@@ -886,12 +985,18 @@ class Connection: # {{{
 		if self.busy:
 			log('attempt to answer while busy')
 			return
-		self.user['_pending'] = []
+		self._clear_pending()
 		debug(3, '{}:{} answers {}'.format(self.user['name'], self.user['group'], answer))
+		if len(self.user['run_stack']) == 0:
+			# Ignore answer for final "Done" button.
+			self._home()
+			return
 		if self.user['run_stack'][-1]['current'] >= len(self.user['run_stack'][-1]['program']):
 			self.busy = True
-			yield from self._run(wake)
-			self.busy = False
+			try:
+				yield from self._run(wake)
+			finally:
+				self.busy = False
 			return
 		current = self.user['run_stack'][-1]['program'][self.user['run_stack'][-1]['current']]
 		if current['type'] not in ('short', 'long', 'choice', 'unit', 'longshort', 'longunit', 'longchoice'):
@@ -961,26 +1066,32 @@ class Connection: # {{{
 		self._store_answer(current['variable'], answer, store)
 		self.user['run_stack'][-1]['current'] += 1
 		self.busy = True
-		yield from self._run(wake)
-		self.busy = False
+		try:
+			yield from self._run(wake)
+		finally:
+			self.busy = False
 	# }}}
 	def video_done(self): # {{{
 		wake = (yield)
 		if self.busy:
 			log('attempt to finish video while busy')
 			return
-		self.user['_pending'] = []
+		self._clear_pending()
 		if self.user['run_stack'][-1]['current'] >= len(self.user['run_stack'][-1]['program']):
 			self.busy = True
-			yield from self._run(wake)
-			self.busy = False
+			try:
+				yield from self._run(wake)
+			finally:
+				self.busy = False
 			return
 		current = self.user['run_stack'][-1]['program'][self.user['run_stack'][-1]['current']]
 		if current[0] == 'video':
 			self.user['run_stack'][-1]['current'] += 1
 			self.busy = True
-			yield from self._run(wake)
-			self.busy = False
+			try:
+				yield from self._run(wake)
+			finally:
+				self.busy = False
 	# }}}
 	def sandbox_list(self): # {{{
 		if self.busy:
@@ -1030,8 +1141,10 @@ class Connection: # {{{
 		assert '.' not in d and os.path.exists(os.path.join(basedir, scriptname))
 		self.user['section'] = ('sandbox', self.user['name'].lower())
 		self.busy = True
-		yield from self._start(wake, self.user['section'], content.get_file(self.user['group'], self.user['section'], os.path.join(basedir, scriptname)), True)
-		self.busy = False
+		try:
+			yield from self._start(wake, self.user['section'], content.get_file(self.user['group'], self.user['section'], os.path.join(basedir, scriptname)), True)
+		finally:
+			self.busy = False
 	# }}}
 	def sandbox_get(self, name): # {{{
 		if self.busy:

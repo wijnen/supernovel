@@ -16,7 +16,7 @@ function richinput(element) {
 	var actions = [
 		[function(e) { e.AddText('·10').AddElement('sup').AddText('x'); }, '·10', true, false],
 		[function(e) { e.AddText('n').AddElement('sup').AddText('x'); }, '', true, true],
-		[function(e) { e.AddText('n').AddElement('sub').AddText('x'); }, '', false, true]
+		[function(e) { e.AddText('n').AddElement('sub').AddText('x'); }, '', false, true],
 	];
 	input.AddEvent('keydown', function(event) {
 		// Cursor keys finish power mode.
@@ -59,7 +59,7 @@ function richinput(element) {
 			button.other = 3 - a;
 			actions[a][0](label);
 			actions[a].push(button);
-			button.AddEvent('change', function() {
+			button.change = function() {
 				if (this.checked) {
 					this.input.value += this.action[1];
 					this.input.power = this.action[2];
@@ -70,7 +70,8 @@ function richinput(element) {
 					this.actions[this.other][4].checked = false;
 				}
 				this.input.focus();
-			});
+			};
+			button.AddEvent('change', button.change);
 		}
 		else {
 			button = element.AddElement('button');
@@ -78,14 +79,17 @@ function richinput(element) {
 			button.input = input;
 			button.action = actions[a];
 			actions[a][0](button);
-			button.AddEvent('click', function() {
+			button.click = function() {
+				actions[1][4].checked = true;
+				actions[2][4].checked = false;
 				this.input.value += this.action[1];
 				this.input.power = this.action[2];
 				this.input.focus();
-			});
+			};
+			button.AddEvent('click', button.click);
 		}
 	}
-	var symbols = 'πμΔφηλρεσαβγ';
+	var symbols = '·°€πμΔφηλρεσαβγ';
 	for (var s = 0; s < symbols.length; ++s) {
 		if (s % 3 == 0)
 			element.AddElement('br');

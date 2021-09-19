@@ -1,1 +1,1 @@
-/usr/share/python3-websocketd/rpc.js
+/home/shevek/src/python-websocketd/rpc.js
