@@ -189,16 +189,24 @@ def parse_line(d, ln, istack, ostack, index):
 	# Note that True does not imply parsing was successfull. False is only returned if the error will likely cause a chain of useless errors.
 	c = d['code']
 
-	# if, elif, while
-	r = re.match(r'(if|elif|while)\b\s*(.*?)\s*:\s*(.*?)\s*$', c)
+	# end is ignored for allowing lua syntax.
+	if c == 'end':
+		return True
+
+	# if, elseif, while
+	r = re.match(r'(if|elseif|while)\b\s*(.*?)\s*\w(then|do)\w\s*(.*?)\s*$', c)
 	if r is not None:
 		cmd = r.group(1)
 		expr = r.group(2)
-		code = r.group(3)
+		thendo = r.group(3)
+		code = r.group(4)
+		if cmd == 'while' ^ thendo == 'do':
+			parse_error(ln, 'command %s does not match with tag %s' % (cmd, thendo))
+			return False
 		new_frame = []
 		if cmd == 'if':
 			ostack[-1].append({'command': 'if', 'line': ln, 'code': [(expr, new_frame)]})
-		elif cmd == 'elif':
+		elif cmd == 'elseif':
 			if ostack[-1][-1]['command'] != 'if':
 				parse_error(ln, 'elif without if')
 				return False
@@ -215,7 +223,7 @@ def parse_line(d, ln, istack, ostack, index):
 		return True
 
 	# else
-	r = re.match(r'else\s*:\s*(.*?)\s*$', c)
+	r = re.match(r'else\s*(.*?)\s*$', c)
 	if r is not None:
 		code = r.group(1)
 		if ostack[-1][-1]['command'] == 'if':
@@ -267,16 +275,16 @@ def parse_line(d, ln, istack, ostack, index):
 		ostack[-1][-1]['option'].append(parse_raw(ln, d, r.group(1)))
 		return True
 
-	# python
-	r = re.match(r'python\s*:\s*(.*?)\s*$', c)
+	# code
+	r = re.match(r'code\s*:\s*(.*?)\s*$', c)
 	if r is not None:
 		if len(r.group(1)) > 0:
 			if len(d['children']) > 0:
-				parse_error(ln, 'python command cannot have both inline and block code')
+				parse_error(ln, 'code command cannot have both inline and block code')
 				return True
-			ostack[-1].append({'command': 'python', 'line': ln, 'code': r.group(1)})
+			ostack[-1].append({'command': 'code', 'line': ln, 'code': r.group(1)})
 			return True
-		ostack[-1].append({'command': 'python', 'line': ln, 'code': parse_raw(ln, d, r.group(1))})
+		ostack[-1].append({'command': 'code', 'line': ln, 'code': parse_raw(ln, d, r.group(1))})
 		return True
 
 	if parse_anim(ln, c, d, ostack):
@@ -288,7 +296,7 @@ def parse_line(d, ln, istack, ostack, index):
 
 	# $
 	if c[0] == '$':
-		ostack[-1].append({'command': 'python', 'line': ln, 'code': c[1:].strip()})
+		ostack[-1].append({'command': 'code', 'line': ln, 'code': c[1:].strip()})
 		return True
 
 	# break, continue

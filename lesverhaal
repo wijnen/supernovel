@@ -32,8 +32,9 @@ fhs.option('proxy-admin', 'virtual proxy directory for admin', default = 'lesver
 fhs.option('proxy-sandbox', 'virtual proxy directory for sandbox', default = 'lesverhaal-sandbox')
 fhs.option('logfile', 'file for logging events', default = '')
 fhs.option('loglimit', 'maximum loglevel that is written to screen', default = 1)
-fhs.option('jail', 'command to run a worker jail', default = 'firejail --quiet --nonewprivs --chroot=chroot --net=none --noprofile /worker')
+fhs.option('python', 'use Python scripts (default is Lua)', argtype = bool)
 fhs.option('insecure', 'force the use of insecure Python handling (internal instead of chroot)', argtype = bool)
+fhs.option('jail', 'command to run a worker jail (only when --python is used and --insecure is not)', default = 'firejail --quiet --nonewprivs --chroot=chroot --net=none --noprofile /worker')
 config = fhs.init(help = 'Visual novel style tool for students to learn with teacher monitoring options', contact = 'Bas Wijnen <wijnen@debian.org>', version = '0.1')
 from debug import debug
 import content
@@ -217,8 +218,24 @@ class Admin_Connection: # {{{
 
 #'''
 
-# Class for handling Python commands. {{{
-class Python_local: # {{{
+# Class for handling user script commands. {{{
+# There are several implementations of te Environment class.
+# It needs to define:
+# - constructor with no arguments (or no constructor).
+# - set(self, key, value):
+#	Set a value in the game's namespace.
+# - run(self, wake, script, allow_ui = True):
+#	Run code in the game's namespace.
+#	If allow_ui is True, animation commands are allowed from the script.
+#	This function must be a generator.
+# - compute(self, wake, expr, as_str):
+#	Run code in the game's namespace and return a value.
+#	The value is a str if as_str is True, a bool otherwise.
+#	This function must be a generator.
+# - finish(self):
+#	Clean up the game's environment.
+
+class Python_local: # Run code using exec and eval. {{{
 	'''This class handles the userspace python environment.
 	This runs within this program and is therefore not suitable for untrusted code.
 	'''
@@ -241,7 +258,7 @@ class Python_local: # {{{
 			log('Error in expression %s: %s' % (expr, error_text))
 			ret = '[%s]' % error_text if as_str else False
 		return str(ret) if as_str else bool(ret)
-		# This version of Python does not support asynchronous operation, but it needs to be a generator.
+		# This version of Environment does not support asynchronous operation, but it needs to be a generator.
 		yield
 	def run(self, wake, script, allow_ui = True):
 		if allow_ui:
@@ -252,13 +269,13 @@ class Python_local: # {{{
 			self.pending = None
 			return ret
 		return []
-		# This version of Python does not support asynchronous operation, but it needs to be a generator.
+		# This version of Environment does not support asynchronous operation, but it needs to be a generator.
 		yield
 	def finish(self):
 		pass
 # }}}
 
-class Python_secure: # {{{
+class Python_secure: # Run code in a sandbox. {{{
 	'''This class handles the userspace python environment.
 	This should run a separate process in a firejail chroot without network access.
 	That needs to be set up externally. This class just runs a program that should do that.
@@ -335,16 +352,44 @@ class Python_secure: # {{{
 			raise ValueError('Unrecognized pending command received from worker')
 # }}}
 
+class Lua: # Run Lua code. {{{
+	'''This class handles the userspace lua environment.
+	It uses the lua library, which is safe for running untrusted code.
+	'''
+	def __init__(self):
+		self.lua = lua.lua()
+	def set(self, key, value):
+		self.lua.run(var = key, value = value)
+	def run(self, wake, script, allow_ui = True):
+		self.lua.run(script)
+		return
+		yield
+	def compute(self, wake, expr, as_str):
+		ret = self.lua.run('return ' + expr)
+		if as_str:
+			return str(ret)
+		else:
+			return bool(ret)
+		yield
+	def finish(self):
+		pass
+# }}}
+
+use_lua = not config['python']
 insecure = config['insecure'] or not os.path.exists('chroot')
-if insecure:
+if use_lua:
+	import lua
+elif insecure:
 	log('Warning: using insecure script parsing. Do not run untrusted scripts!')
 else:
 	import subprocess
 	import fcntl
 	import shlex
 
-def Python():
-	if insecure:
+def Environment():
+	if use_lua:
+		return Lua()
+	elif insecure:
 		return Python_local()
 	else:
 		return Python_secure()
@@ -459,7 +504,7 @@ class Connection: # {{{
 		user.refresh_admins()
 	# }}}
 	def _safe_eval(self, wake, expr, as_str): # {{{
-		ret = (yield from self.user['python'].compute(wake, expr, as_str))
+		ret = (yield from self.user['environment'].compute(wake, expr, as_str))
 		return str(ret) if as_str else ret
 	# }}}
 	def _parse_text(self, wake, text): # {{{
@@ -510,8 +555,8 @@ class Connection: # {{{
 	# }}}
 	def _home(self): # {{{
 		self.user['section'] = None
-		self.user['python'].finish()
-		del self.user['python']
+		self.user['environment'].finish()
+		del self.user['environment']
 		user.refresh_admins()
 		self.remote.main.event()
 	# }}}
@@ -582,14 +627,14 @@ class Connection: # {{{
 			while len(self.user['run_stack']) > 1:
 				self.user['run_stack'].pop()
 			self.user['run_stack'][-1]['current'] = line
-		self.user['python'] = Python()
-		self.user['python'].set('name', self.user['name'])
-		self.user['python'].set('group', self.user['group'])
+		self.user['environment'] = Environment()
+		self.user['environment'].set('name', self.user['name'])
+		self.user['environment'].set('group', self.user['group'])
 		self._load_sprite('common/invalid', '')
-		startup = fhs.read_data(os.path.join('include', 'startup.py'))
+		startup = fhs.read_data(os.path.join('include', 'startup.' + ('lua' if use_lua else 'py'))
 		if startup is not None:
 			try:
-				yield from self.user['python'].run(wake, startup.read(), False)
+				yield from self.user['environment'].run(wake, startup.read(), False)
 			except:
 				debug(1, 'Error in startup script')
 				traceback.print_exc()
@@ -679,11 +724,11 @@ class Connection: # {{{
 				self.user['run_stack'].pop()
 			self.user['run_stack'][-1]['current'] = code['target']
 			return False
-		elif code['command'] == 'python':
+		elif code['command'] == 'code':
 			self.breaking = False
 			self.user['run_stack'][-1]['current'] += 1	# Do this before running the code, so goto works.
 			try:
-				new_commands = (yield from self.user['python'].run(wake, code['code']))
+				new_commands = (yield from self.user['environment'].run(wake, code['code']))
 				if len(new_commands) > 0:
 					self.user['run_stack'].append({'program': new_commands, 'current': 0})
 			except:
@@ -966,7 +1011,7 @@ class Connection: # {{{
 		data['url'] = c['imgs'] + (data.pop('mood') if 'mood' in data else 'default') + c['ext']
 	# }}}
 	def _store_answer(self, question, answer, store = True): # {{{
-		self.user['python'].set(question, answer)
+		self.user['environment'].set(question, answer)
 		if store:
 			if self.user['section'] not in self.user['answers']:
 				self.user['answers'][self.user['section']] = {}
