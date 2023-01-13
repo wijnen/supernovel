@@ -570,6 +570,7 @@ function update_screen() { // {{{
 
 // Server communication. {{{
 var Connection = { // {{{
+	userdata_setup: userdata_setup,
 	replaced: function() {	// Connection has been replaced by new connection.
 		is_replaced = true;
 		alert('De verbinding is overgenomen door een nieuwe login');

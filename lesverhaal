@@ -1,25 +1,27 @@
 #!/usr/bin/python3
 # vim: set fileencoding=utf-8 :
 
+# TODO for moving to userdata storage.
+'''
+replace config['data'] in this file: only in admin and sandbox interfaces; low priority.
+replace config['data'] in content.py: list() and get().
+'''
+
 # Imports and config. {{{
 import sys
 import os
 import math
 import re
-try:
-	from crypt import crypt
-except:
-	print('Warning: crypt could not be imported; storing passwords in plain text', file = sys.stderr)
-	crypt = lambda pw, salt: pw
 import traceback
 import time
 import random
 import fhs
 import websocketd
 import json
+import userdata
 from markdown import markdown
 from websocketd import log
-fhs.option('data', 'path to user and game data', default = '.')
+
 fhs.option('port', 'network port to listen for players', default = '7000')
 fhs.option('admin-port', 'network port to listen for admin', default = '7001')
 fhs.option('sandbox-port', 'network port to listen for sandbox', default = '7002')
@@ -32,10 +34,7 @@ fhs.option('proxy-admin', 'virtual proxy directory for admin', default = 'lesver
 fhs.option('proxy-sandbox', 'virtual proxy directory for sandbox', default = 'lesverhaal-sandbox')
 fhs.option('logfile', 'file for logging events', default = '')
 fhs.option('loglimit', 'maximum loglevel that is written to screen', default = 1)
-fhs.option('python', 'use Python scripts (default is Lua)', argtype = bool)
-fhs.option('insecure', 'force the use of insecure Python handling (internal instead of chroot)', argtype = bool)
-fhs.option('jail', 'command to run a worker jail (only when --python is used and --insecure is not)', default = 'firejail --quiet --nonewprivs --chroot=chroot --net=none --noprofile /worker')
-config = fhs.init(help = 'Visual novel style tool for students to learn with teacher monitoring options', contact = 'Bas Wijnen <wijnen@debian.org>', version = '0.1')
+config = userdata.fhs_init('http://localhost:8879', 'lesverhaal', help = 'Visual novel style tool for students to learn with teacher monitoring options', contact = 'Bas Wijnen <wijnen@debian.org>', version = '0.2')
 from debug import debug
 import content
 import user
@@ -51,11 +50,11 @@ import user
 
 tosuper_dict = {'0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹', '-': '⁻', '+': '⁺', '=': '⁼', '(': '⁽', ')': '⁾', 'n': 'ⁿ'}
 def tosuper(src):
-	return ''.join(tosuper_dict[c] if c in tosuper_dict else c for c in src)
+	return ''.join(tosuper_dict.get(c, c) for c in src)
 
 fromsuper_dict = {v: k for k, v in tosuper_dict.items()}
 def fromsuper(src):
-	return ''.join(fromsuper_dict[c] if c in fromsuper_dict else c for c in src)
+	return ''.join(fromsuper_dict.get(c, c) for c in src)
 
 class Admin_Connection: # {{{
 	def __init__(self, remote): # {{{
@@ -219,7 +218,8 @@ class Admin_Connection: # {{{
 #'''
 
 # Class for handling user script commands. {{{
-# There are several implementations of te Environment class.
+# There can be multiple implementations of te Environment class.
+# Only Lua is defined. This is not expected to change.
 # It needs to define:
 # - constructor with no arguments (or no constructor).
 # - set(self, key, value):
@@ -234,123 +234,6 @@ class Admin_Connection: # {{{
 #	This function must be a generator.
 # - finish(self):
 #	Clean up the game's environment.
-
-class Python_local: # Run code using exec and eval. {{{
-	'''This class handles the userspace python environment.
-	This runs within this program and is therefore not suitable for untrusted code.
-	'''
-	def add_to_pending(self, item):
-		if self.pending is None:
-			raise ValueError('cannot use ui commands in this context')
-		self.pending.append(item)
-	def __init__(self):
-		self.pending = None
-		self.variables = {
-			'answer': lambda key, value = None: self.add_to_pending(['answer', key, value]),
-			}
-	def set(self, key, value):
-		self.variables[key] = value
-	def compute(self, wake, expr, as_str):
-		try:
-			ret = eval(expr, self.variables)
-		except:
-			error_text = str(sys.exc_info()[1])
-			log('Error in expression %s: %s' % (expr, error_text))
-			ret = '[%s]' % error_text if as_str else False
-		return str(ret) if as_str else bool(ret)
-		# This version of Environment does not support asynchronous operation, but it needs to be a generator.
-		yield
-	def run(self, wake, script, allow_ui = True):
-		if allow_ui:
-			self.pending = []
-		exec(script, self.variables)
-		if allow_ui:
-			ret = self.pending
-			self.pending = None
-			return ret
-		return []
-		# This version of Environment does not support asynchronous operation, but it needs to be a generator.
-		yield
-	def finish(self):
-		pass
-# }}}
-
-class Python_secure: # Run code in a sandbox. {{{
-	'''This class handles the userspace python environment.
-	This should run a separate process in a firejail chroot without network access.
-	That needs to be set up externally. This class just runs a program that should do that.
-	'''
-	def __init__(self):
-		self.worker = subprocess.Popen(shlex.split(config['jail']), stdin = subprocess.PIPE, stdout = subprocess.PIPE, stderr = sys.stderr, close_fds = True, encoding = 'utf-8')
-		flag = fcntl.fcntl(self.worker.stdout, fcntl.F_GETFL)
-		fcntl.fcntl(self.worker.stdout, fcntl.F_SETFL, flag | os.O_NONBLOCK)
-		self.data = ''
-	def set(self, key, value):
-		v = json.dumps(value)
-		self.worker.stdin.write(('set\t%s\t%s\n' % (key, v)))
-		self.worker.stdin.flush()
-	def read_line(self, wake, cmd):
-		self.worker.stdin.write(cmd)
-		self.worker.stdin.flush()
-		to_handle = None
-		def cb():
-			self.data += self.worker.stdout.read() 
-			if '\n' not in self.data:
-				return True
-			websocketd.remove_timeout(to_handle)
-			pos = self.data.index('\n')
-			line = self.data[:pos]
-			self.data = self.data[pos + 1:]
-			try:
-				err, ret = json.loads(line)
-			except:
-				err = 'Error: failed to parse result from worker'
-				ret = None
-			if err is not None:
-				log(err)
-			wake((err, ret))
-			return False
-		def error():
-			log('error on fd from script handler')
-			websocketd.remove_read(self.worker.stdout)
-			websocketd.remove_timeout(to_handle)
-			wake(('Error on fd from script handler', None))
-			return False
-		def timeout():
-			websocketd.remove_read(self.worker.stdout)
-			log('Error: timeout on fd from script handler')
-			wake(('Error: timeout on fd from script handler', None))
-			return False
-		websocketd.add_read(self.worker.stdout, cb, error)
-		to_handle = websocketd.add_timeout(time.time() + 10, timeout)
-		ret = (yield)
-		return ret
-	def compute(self, wake, expr, as_str):
-		err, ret = (yield from self.read_line(wake, '%s\t%s\n' % ('str' if as_str else 'bool', json.dumps(expr))))
-		if err is not None:
-			return str(err) if as_str else False
-		return str(ret) if as_str else bool(ret)
-	def run(self, wake, script, allow_pending = True):
-		err, ret = (yield from self.read_line(wake, '%s\t%s\n' % ('run' if allow_pending else 'init', json.dumps(script))))
-		if err is not None:
-			return []
-		try:
-			return [self.make_cmd(x) for x in ret]
-		except:
-			log('Error')
-			return []
-	def finish(self):
-		try:
-			self.worker.stdin.close()
-			self.worker.wait()
-		except:
-			pass
-	def make_cmd(self, x):
-		if x[0] == 'answer':
-			return ['answer', str(x[1]), None if x[2] is None else str(x[2])]
-		else:
-			raise ValueError('Unrecognized pending command received from worker')
-# }}}
 
 class Lua: # Run Lua code. {{{
 	'''This class handles the userspace lua environment.
@@ -375,24 +258,10 @@ class Lua: # Run Lua code. {{{
 		pass
 # }}}
 
-use_lua = not config['python']
-insecure = config['insecure'] or not os.path.exists('chroot')
-if use_lua:
-	import lua
-elif insecure:
-	log('Warning: using insecure script parsing. Do not run untrusted scripts!')
-else:
-	import subprocess
-	import fcntl
-	import shlex
+import lua
 
 def Environment():
-	if use_lua:
-		return Lua()
-	elif insecure:
-		return Python_local()
-	else:
-		return Python_secure()
+	return Lua()
 # }}}
 
 #'''
@@ -631,7 +500,7 @@ class Connection: # {{{
 		self.user['environment'].set('name', self.user['name'])
 		self.user['environment'].set('group', self.user['group'])
 		self._load_sprite('common/invalid', '')
-		startup = fhs.read_data(os.path.join('include', 'startup.' + ('lua' if use_lua else 'py'))
+		startup = fhs.read_data(os.path.join('include', 'startup.' + ('lua' if use_lua else 'py')))
 		if startup is not None:
 			try:
 				yield from self.user['environment'].run(wake, startup.read(), False)
