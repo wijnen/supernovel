@@ -1,12 +1,6 @@
 #!/usr/bin/python3
 # vim: set fileencoding=utf-8 :
 
-# TODO for moving to userdata storage.
-'''
-replace config['data'] in this file: only in admin and sandbox interfaces; low priority.
-replace config['data'] in content.py: list() and get().
-'''
-
 # Imports and config. {{{
 import sys
 import os
@@ -19,6 +13,7 @@ import fhs
 import websocketd
 import json
 import userdata
+import content
 from markdown import markdown
 from websocketd import log
 
@@ -28,7 +23,6 @@ fhs.option('sandbox-port', 'network port to listen for sandbox', default = '7002
 fhs.option('content', 'url to regular content', default = 'content')
 fhs.option('sandbox', 'path to sandbox content, relative to <data path>/html/sandbox/', default = 'sandbox')
 fhs.option('lazysave', 'Only save when user logs out (default is on every change)', argtype = bool)
-fhs.option('secret', 'If set, key to log in as any user (including admin) without cookie', default = '')
 fhs.option('proxy', 'virtual proxy directory', default = 'lesverhaal')
 fhs.option('proxy-admin', 'virtual proxy directory for admin', default = 'lesverhaal-admin')
 fhs.option('proxy-sandbox', 'virtual proxy directory for sandbox', default = 'lesverhaal-sandbox')
@@ -36,8 +30,6 @@ fhs.option('logfile', 'file for logging events', default = '')
 fhs.option('loglimit', 'maximum loglevel that is written to screen', default = 1)
 config = userdata.fhs_init('http://localhost:8879', 'lesverhaal', help = 'Visual novel style tool for students to learn with teacher monitoring options', contact = 'Bas Wijnen <wijnen@debian.org>', version = '0.2')
 from debug import debug
-import content
-import user
 # }}}
 
 ''' Log priorities: {{{
@@ -46,8 +38,8 @@ import user
 		2: Normal (communication notifications)
 		3: Debug
 }}} '''
-#'''
 
+# Sub-/superscript helpers. {{{
 tosuper_dict = {'0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹', '-': '⁻', '+': '⁺', '=': '⁼', '(': '⁽', ')': '⁾', 'n': 'ⁿ'}
 def tosuper(src):
 	return ''.join(tosuper_dict.get(c, c) for c in src)
@@ -55,27 +47,21 @@ def tosuper(src):
 fromsuper_dict = {v: k for k, v in tosuper_dict.items()}
 def fromsuper(src):
 	return ''.join(fromsuper_dict.get(c, c) for c in src)
+# }}}
 
-class Admin_Connection: # {{{
-	def __init__(self, remote): # {{{
-		self.remote = remote
-		remote.closed = self._closed
+# List of all currently logged in users.
+users = {}
+
+class Admin_Connection: # {{{ Class for handling admin connections.
+	def __init__(self, my_id, my_name, my_userdata, my_remote): # {{{
+		self.id = my_id
+		self.name = my_name
+		self.userdata = my_userdata
+		self.remote = my_remote
+		self.remote.closed = self._closed
+	# }}}
+	def _init(self, wake): # {{{
 		self.user = None
-		try:
-			if 'cookie' in self.remote.data['headers']:
-				c = self.remote.data['headers']['cookie']
-				kv = [chunk.strip().split('=', 1) for chunk in c.split(';')]
-				kv = {x[0]: x[1] for x in kv}
-				if 'name' in kv and 'key' in kv and (kv['name'], 'admin') in user.users and user.users[(kv['name'], 'admin')]['cookie'] == kv['key']:
-					if self._login(kv['name']):
-						return
-		except IndexError:
-			pass
-		q = remote.data['query']
-		keys = ('name', 'secret')
-		if config['secret'] != '' and all(x in q for x in keys) and q['secret'][0] == config['secret']:
-			if self._login(q['name'][0]):
-				return
 		self.refresh = lambda: self.remote.login.event()
 		self.remote.login.event()
 	# }}}
@@ -106,12 +92,9 @@ class Admin_Connection: # {{{
 			except:
 				pass
 			u['connection'].remote.close()
-		user.users[(u['filename'], 'admin')] = u
+		users[(u['filename'], 'admin')] = u
 		u['connection'] = self
 		self.user = u
-		if 'cookie' not in user.users[(u['filename'], 'admin')]:
-			user.users[(u['filename'], 'admin')]['cookie'] = ''.join(chr(random.randrange(ord('a'), ord('z') + 1)) for _ in range(32))
-		self.remote.cookie.event(u['filename'], user.users[(u['filename'], 'admin')]['cookie'])
 		debug(1, 'Admin {} logged in from {}:{}'.format(name, *self.remote.socket.remote))
 		user.admins[name.lower()] = self
 		self.list_groups()
@@ -124,7 +107,7 @@ class Admin_Connection: # {{{
 			return
 		debug(1, 'disconnecting admin {}'.format(self.user['name']))
 		try:
-			user.users.pop((self.user['filename'], 'admin'))
+			users.pop((self.user['filename'], 'admin'))
 		except:
 			pass
 		try:
@@ -141,21 +124,21 @@ class Admin_Connection: # {{{
 			if g == 'admin' or g.lower() != g:
 				continue
 			groups.append([g])
-			chapters = content.list(g)
+			chapters = content.list(wake, g)
 			keys = list(chapters.keys())
 			keys.sort()
 			for c in keys:
 				for s in chapters[c]:
-					groups[-1].append(((c, s), sum(user.users[u]['group'].lower() == g and user.users[u]['section'] == (c, s) for u in user.users)))
+					groups[-1].append(((c, s), sum(users[u]['group'].lower() == g and users[u]['chapter'] == (c, s) for u in users)))
 		groups.sort()
 		self.remote.group_list.event(groups)
 	# }}}
-	def show_section(self, group, section): # {{{
-		'''Show questions for one section.'''
+	def show_chapter(self, group, chapter): # {{{
+		'''Show questions for one chapter.'''
 		assert self.user is not None
-		section = tuple(section)
-		self.refresh = lambda: self.show_section(group, section)
-		parts, errors = content.get(group, section)
+		chapter = tuple(chapter)
+		self.refresh = lambda: self.show_chapter(group, chapter)
+		parts, errors = content.get(wake, group, chapter)
 		questions = []
 		def add_block(block):
 			for p in block:
@@ -173,7 +156,7 @@ class Admin_Connection: # {{{
 		students = []
 		def make_field(student, question):
 			active = False
-			if student['section'] == section:
+			if student['chapter'] == chapter:
 				if len(student['run_stack']) > 0:
 					frame = student['run_stack'][-1]
 					if len(frame['program']) > frame['current']:
@@ -181,18 +164,18 @@ class Admin_Connection: # {{{
 							active = True
 				elif question['type'] == 'end':
 					active = True
-			return {'active': active, 'attempts': student['answers'][section][question['name']] if question['type'] not in ('video', 'end') and section in student['answers'] and question['name'] in student['answers'][section] else None}
+			return {'active': active, 'attempts': student['answers'][chapter][question['name']] if question['type'] not in ('video', 'end') and chapter in student['answers'] and question['name'] in student['answers'][chapter] else None}
 		def make_other_field(student, question):
-			return {'active': False, 'attempts': student['answers'][section][question['name']] if question['type'] not in ('video', 'end') and section in student['answers'] and question['name'] in student['answers'][section] else None}
-		for s in user.users:
-			if user.users[s]['group'].lower() != group.lower():
+			return {'active': False, 'attempts': student['answers'][chapter][question['name']] if question['type'] not in ('video', 'end') and chapter in student['answers'] and question['name'] in student['answers'][chapter] else None}
+		for s in users:
+			if users[s]['group'].lower() != group.lower():
 				continue
-			students.append({'password': bool(user.users[s]['password']), 'name': user.users[s]['name'], 'code': s, 'login': user.users[s]['section'] == section, 'connected': user.users[s]['connection'] is not None, 'answers': tuple(make_field(user.users[s], q) for q in questions)})
+			students.append({'password': bool(users[s]['password']), 'name': users[s]['name'], 'code': s, 'login': users[s]['chapter'] == chapter, 'connected': users[s]['connection'] is not None, 'answers': tuple(make_field(users[s], q) for q in questions)})
 		students.sort(key = lambda s: (not s['login'], s['name'], s['code']))
 		# Add non-connected students to the list.
 		others = []
 		for u in user.list_group(group):
-			if (u, group) in user.users:
+			if (u, group) in users:
 				continue
 			student = user.load(u, group)
 			if student is None:
@@ -215,7 +198,10 @@ class Admin_Connection: # {{{
 	# }}}
 # }}}
 
-#'''
+def refresh_admins(): # {{{
+	# TODO: part of admin reimplementation.
+	pass
+# }}}
 
 # Class for handling user script commands. {{{
 # There can be multiple implementations of te Environment class.
@@ -240,7 +226,7 @@ class Lua: # Run Lua code. {{{
 	It uses the lua library, which is safe for running untrusted code.
 	'''
 	def __init__(self):
-		self.lua = lua.lua()
+		self.lua = lua.Lua()
 	def set(self, key, value):
 		self.lua.run(var = key, value = value)
 	def run(self, wake, script, allow_ui = True):
@@ -264,90 +250,257 @@ def Environment():
 	return Lua()
 # }}}
 
-#'''
-class Connection: # {{{
-	def __init__(self, remote): # {{{
-		debug(2, 'New connection from {}:{}'.format(*remote.socket.remote))
-		self.remote = remote
-		remote.closed = self._closed
-		self.busy = False
-		try:
-			if 'cookie' in self.remote.data['headers']:
-				c = self.remote.data['headers']['cookie']
-				kv = [chunk.strip().split('=', 1) for chunk in c.split(';')]
-				kv = {x[0]: x[1] for x in kv}
-				if 'name' in kv and 'group' in kv and 'key' in kv and (kv['name'], kv['group']) in user.users and user.users[(kv['name'], kv['group'])]['cookie'] == kv['key']:
-					if self._login(kv['name'], kv['group']):
-						websocketd.add_idle(lambda: websocketd.call(None, self._finish_login))
-						return
-		except IndexError:
-			pass
-		q = remote.data['query']
-		keys = ('name', 'group', 'secret')
-		if config['secret'] != '' and all(x in q for x in keys) and q['secret'][0] == config['secret']:
-			if self._login(q['name'][0], q['group'][0]):
-				websocketd.add_idle(lambda: websocketd.call(None, self._finish_login))
-				return
-		self.remote.login.event()
+class Content_Connection: # {{{ Class for handling content management.
+	def __init__(self, my_id, my_name, my_userdata, my_remote): # {{{
+		self.id = my_id
+		self.name = my_name
+		self.userdata = my_userdata
+		self.remote = my_remote
+	def _init(self, wake):
+		# TODO: Check that this user is allowed to edit content.
+		# Other than that, nothing to do here.
+		return
+		yield	# Make sure this is a generator.
 	# }}}
-	def login(self, name, group, password): # {{{
+	def get_post_token(self):
+		# TODO? use this token in a post request to upload files that way.
+		pass
+	# Groups {{{
+	def list_groups(self):
 		wake = (yield)
-		if self.busy:
-			return 'duplicate login attempt'
-		u = user.load(name.strip(), group.strip())
-		if u is None:
-			debug(2, 'Invalid user {}:{} on {}:{}'.format(name, group, *self.remote.socket.remote))
-			return 'deze naam is onbekend'
-		crypted = crypt(password, salt = u['password'])
-		if u['password'] is not None and crypted != u['password']:
-			debug(2, 'Invalid password for {}:{} on {}:{}'.format(name, group, *self.remote.socket.remote))
-			return 'dit wachtwoord is onjuist'
-		u = self._login(name.strip(), group.strip())
-		# In case the password is new, it needs to be stored.
-		if u:
-			u['password'] = crypted
-			user.save(u)
-		self.busy = True
-		try:
-			yield from self._finish_login(wake)
-		finally:
-			self.busy = False
-		return None
+		data = (yield from serverdata.select('group', ('id', 'name'), wake = wake))
+		return {d[0]: {'name': d[1]} for d in data}
+	def add_group(self, name):
+		wake = (yield)
+		yield from serverdata.insert('group', {'name': name}, wake = wake)
+	def update_group(self, groupid, name):
+		wake = (yield)
+		yield from serverdata.update('group', {'name': name}, ('=', 'id', groupid), wake = wake)
+	def remove_group(self, groupid):
+		wake = (yield)
+		yield from serverdata.delete('group', ('=', 'id', groupid), wake = wake)
 	# }}}
-	def _login(self, name, group): # {{{
-		u = user.load(name, group.lower())
-		if u is None:
-			debug(2, 'failed login for {}:{}'.format(name, group))
-			return None
-		if u['connection'] is not None:
-			debug(2, 'Replacing connection for ' + name)
-			try:
-				u['connection'].remote.replaced.event()
-			except:
-				pass
-			u['connection'].remote.close()
+	# Chapters {{{
+	def list_chapters(self):
+		wake = (yield)
+		data = (yield from serverdata.select('chapter', ('id', 'name'), wake = wake))
+		return {d[0]: {'name': d[1]} for d in data}
+	def add_chapter(self, name):
+		wake = (yield)
+		yield from serverdata.insert('chapter', {'name': name}, wake = wake)
+	def update_chapter(self, chapterid, name):
+		wake = (yield)
+		yield from serverdata.update('chapter', {'name': name}, ('=', 'id', chapterid), wake = wake)
+	def remove_chapter(self, chapterid):
+		wake = (yield)
+		yield from serverdata.delete('chapter', ('=', 'id', chapterid), wake = wake)
+	# }}}
+	# Access {{{
+	def list_access(self):
+		wake = (yield)
+		return (yield from serverdata.select('access', ('groupid', 'chapter'), wake = wake))
+	def add_access(self, groupid, chapterid):
+		wake = (yield)
+		present = (yield from serverdata.select('access', ('groupid',), ('and', ('=', 'groupid', groupid), ('=', 'chapter', chapterid)), wake = wake))
+		assert len(present) == 0
+		yield from serverdata.insert('access', {'groupid': groupid, 'chapter': chapterid}, wake = wake)
+	def remove_access(self, groupid, chapterid):
+		wake = (yield)
+		yield from serverdata.delete('access', ('and', ('=', 'groupid', groupid), ('=', 'chapter', chapterid)), wake = wake)
+	# }}}
+	# Scripts {{{
+	def list_scripts(self):
+		wake = (yield)
+		data = (yield from serverdata.select('script', ('id', 'name', 'chapter'), wake = wake))
+		return {d[0]: {'name': d[1], 'chapter': d[2]} for d in data}
+	def get_script(self, scriptid):
+		wake = (yield)
+		data = (yield from serverdata.select('script', ('script',), ('=', 'id', scriptid), wake = wake))
+		return None if len(data) == 0 else data[0][0]
+	def add_script(self, name, chapter, script):
+		wake = (yield)
+		yield from serverdata.insert('script', {'name': name, 'chapter': chapter, 'script': script}, wake = wake)
+	def update_script(self, scriptid, name, chapter, script):
+		wake = (yield)
+		if script is None:
+			yield from serverdata.update('script', {'name': name, 'chapter': chapter}, ('=', 'id', scriptid), wake = wake)
 		else:
-			user.users[(name.lower(), group.lower())] = u
+			yield from serverdata.update('script', {'name': name, 'chapter': chapter, 'script': script}, ('=', 'id', scriptid), wake = wake)
+	def remove_script(self, scriptid):
+		wake = (yield)
+		yield from serverdata.delete('script', ('=', 'id', scriptid), wake = wake)
+	# }}}
+	# Questions {{{
+	def list_questions(self):
+		wake = (yield)
+		data = (yield from serverdata.select('question', ('id', 'script', 'type', 'description'), wake = wake))
+		return {('%d:%s' % (d[1], d[0])): {'type': d[2], 'description': d[3]} for d in data}
+	def add_question(self, questionid, scriptid, type, description):
+		wake = (yield)
+		yield from serverdata.insert('question', {'id': questionid, 'script': scriptid, 'type': type, 'description': description}, wake = wake)
+	def update_question(self, questionid, scriptid, type, description):
+		wake = (yield)
+		yield from serverdata.update('question', {'type': type, 'description': description}, ('and', ('=', 'id', questionid), ('=', 'script', scriptid)), wake = wake)
+	def remove_question(self, questionid, scriptid):
+		wake = (yield)
+		yield from serverdata.delete('question', ('and', ('=', 'id', questionid), ('=', 'script', scriptid)), wake = wake)
+	# }}}
+	# Sprites {{{
+	def list_sprites(self):
+		wake = (yield)
+		data = (yield from serverdata.select('sprite', ('id', 'name', 'mood', 'image', 'next'), wake = wake))
+		return {d[0]: {'name': d[1], 'mood': d[2], 'image': d[3], 'next': d[4]} for d in data}
+	def add_sprite(self, spriteid, name, mood, image, nextsprite):
+		wake = (yield)
+		yield from serverdata.insert('sprite', {'id': spriteid, 'name': name, 'mood': mood, 'image': image, 'next': nextsprite}, wake = wake)
+	def update_sprite(self, spriteid, name, mood, image, nextsprite):
+		wake = (yield)
+		yield from serverdata.update('sprite', {'name': name, 'mood': mood, 'image': image, 'next': nextsprite}, ('=', 'id', spriteid), wake = wake)
+	def remove_sprite(self, spriteid):
+		wake = (yield)
+		yield from serverdata.delete('sprite', ('=', 'id', spriteid), wake = wake)
+	# }}}
+	# Images {{{
+	def list_images(self):
+		wake = (yield)
+		data = (yield from serverdata.select('image', ('id', 'width', 'height'), wake = wake))
+		return {d[0]: {'width': d[1], 'height': d[2]} for d in data}
+	def get_image(self, imageid):
+		wake = (yield)
+		data = (yield from serverdata.select('image', ('url',), ('=', 'id', imageid), wake = wake))
+		return None if len(data) == 0 else data[0][0]
+	def add_image(self, imageid, url, width, height):
+		wake = (yield)
+		yield from serverdata.insert('image', {'id': imageid, 'url': url, 'width': width, 'height': height}, wake = wake)
+	def update_image(self, imageid, url, width, height):
+		wake = (yield)
+		if url is None:
+			yield from serverdata.update('image', {'width': width, 'height': height}, ('=', 'id', imageid), wake = wake)
+		else:
+			yield from serverdata.update('image', {'url': url, 'width': width, 'height': height}, ('=', 'id', imageid), wake = wake)
+	def remove_image(self, imageid):
+		wake = (yield)
+		yield from serverdata.delete('image', ('=', 'id', imageid), wake = wake)
+	# }}}
+	# Audio {{{
+	def list_audio(self):
+		wake = (yield)
+		data = (yield from serverdata.select('audio', ('id', 'duration'), wake = wake))
+		return {d[0]: {'duration': d[1]} for d in data}
+	def get_audio(self, audioid):
+		wake = (yield)
+		data = (yield from serverdata.select('audio', ('url',), ('=', 'id', audioid), wake = wake))
+		return None if len(data) == 0 else data[0][0]
+	def add_audio(self, audioid, url, duration):
+		wake = (yield)
+		yield from serverdata.insert('audio', {'id': audioid, 'url': url, 'duration': duration}, wake = wake)
+		# TODO
+	def update_audio(self, audioid, url, duration):
+		wake = (yield)
+		if url is None:
+			yield from serverdata.update('audio', {'duration': duration}, ('=', 'id', audioid), wake = wake)
+		else:
+			yield from serverdata.update('audio', {'url': url, 'duration': duration}, ('=', 'id', audioid), wake = wake)
+		# TODO
+	def remove_audio(self, audioid):
+		wake = (yield)
+		yield from serverdata.delete('audio', ('=', 'id', audioid), wake = wake)
+		# TODO
+	# }}}
+
+def post(connection): # {{{ TODO Use this to send new content, or update it.
+	'''Upload a new file for the sandbox.
+	Credentials must be provided in the cookie. User must be allowed to use the sandbox.
+	''' # FIXME: cookies are removed.
+	if connection.busy:
+		log('attempt to post sandbox while busy')
+		return
+	if 'cookie' not in connection.headers or 'file' not in connection.post[1]:
+		debug(1, 'ignoring invalid POST request')
+		sandboxserver.reply(connection, 404, 'invalid POST request', 'text/plain;charset=utf-8')
+		return False
+	c = connection.headers['cookie']
+	kv = [chunk.strip().split('=', 1) for chunk in c.split(';')]
+	kv = {x[0]: x[1] for x in kv}
+	if 'name' not in kv or 'group' not in kv or 'key' not in kv or (kv['name'], kv['group']) not in users or users[(kv['name'], kv['group'])]['cookie'] != kv['key']:
+		debug(1, 'invalid cookie for POST')
+		sandboxserver.reply(connection, 403, b'invalid cookie for POST request', 'text/plain;charset=utf-8')
+		return False
+	u = users[(kv['name'], kv['group'])]
+	if not u['sandbox']:
+		debug(1, 'User is not allowed to use sandbox')
+		sandboxserver.reply(connection, 403, b'User is not allowed to use sandbox', 'text/plain;charset=utf-8')
+		return False
+	# Credentials are good, save the files.
+	basedir = os.path.join(config['data'], 'html', 'sandbox', config['sandbox'], kv['group'].lower(), kv['name'].lower())
+	for f in connection.post[1]['file']:
+		basename = os.path.basename(f[1]).split('.')
+		if len(basename) > 1:
+			basename[-2:] = [basename[-2] + '.' + basename[-1]]
+		filename = os.path.join(basedir, *basename)
+		os.makedirs(os.path.join(basedir, *basename[:-1]), exist_ok = True)
+		# Copy the file.
+		try:
+			with open(filename, 'wb') as w:
+				with open(f[0], 'rb') as r:
+					w.write(r.read())
+			debug(1, 'copied {} to {}'.format(f[0], filename))
+		except:
+			debug(1, 'unable to copy file')
+			traceback.print_exc()
+	sandboxserver.page(connection)
+	return False
+# }}}
+# }}}
+
+class Connection: # {{{
+	# Internals. {{{
+	def __init__(self, my_id, my_name, my_userdata, my_remote): # {{{
+		self.id = my_id
+		self.name = my_name
+		self.userdata = my_userdata
+		self.remote = my_remote
+	# }}}
+	def _init(self, wake): # {{{
+		# Delayed contructor. Must be a generator.
+		self.closed = refresh_admins
+		self.busy = False
+		debug(2, 'New connection from {}:{}'.format(*self.remote.socket.remote))
+		u = {}
+		users[self.id] = u
 		u['connection'] = self
 		self.user = u
-		debug(1, 'User {}:{} logged in from {}:{}'.format(name, group, *self.remote.socket.remote))
-		if 'cookie' not in u:
-			u['cookie'] = ''.join(chr(random.randrange(ord('a'), ord('z') + 1)) for _ in range(32))
-		if 'section' not in u:
-			u['program'] = []
-			u['run_stack'] = []
-			u['section'] = None	# Current section.
-			u['question'] = None
-		self.remote.cookie.event(u['filename'], group.lower(), u['cookie'])
-		self.remote.contents.event(content.list(group))
+		data = (yield from self.userdata.select('id', ('my_name', 'my_group'), wake = wake))
+		if len(data) == 0:
+			groupname = (yield from serverdata.select('group', ('name',), ('=', 'id', 1), wake = wake))
+			assert len(groupname) == 1
+			yield from self.userdata.insert('id', {'my_name': self.name, 'my_group': groupname[0][0]}, wake = wake) 
+			my_group = 1
+		else:
+			self.name = data[0][0]
+			g = (yield from serverdata.select('group', ('id',), ('=', 'name', data[0][1]), wake = wake))
+			if len(g) != 1:
+				my_group = 1
+			else:
+				my_group = g[0][0]
+		debug(1, 'User {}:{} logged in from {}:{}'.format(self.name, my_group, *self.remote.socket.remote))
+		u['name'] = self.name
+		u['group'] = my_group
+		u['program'] = []
+		u['run_stack'] = []
+		u['chapter'] = None	# Current chapter.
+		u['question'] = None	# Question that is currently being asked.
+		print('group', repr(my_group))
+		scripts = (yield from content.list(wake, my_group))
+		self.remote.contents.event(scripts)
 		self.remote.main.event()
-		user.refresh_admins()
-		return u
+		refresh_admins()
 	# }}}
 	def _finish_login(self, wake = None): # {{{
+		# TODO: This function is never called anymore. It should be called when (managed?) players reconnect.
 		if wake is None:
 			wake = (yield)
-		if self.user['section'] is not None:
+		if self.user['chapter'] is not None:
 			if len(self.user['run_stack']) > 0 and len(self.user['run_stack'][-1]['program']) > 1:
 				setup = []
 				state = self.user['_kinetic_state']
@@ -361,37 +514,27 @@ class Connection: # {{{
 					debug(0, 'Bug: saved state of user {}:{} was not a waiting state'.format(name, group))
 					yield from self._run(wake)
 	# }}}
-	def _closed(self): # {{{
-		self.remote.close()
-		if not hasattr(self, 'user'):
-			debug(2, 'connection to {}:{} lost before logging in'.format(*self.remote.socket.remote))
-			return
-		debug(1, 'disconnecting {}:{}'.format(self.user['name'], self.user['group']))
-		user.save(self.user)
-		self.user['connection'] = None
-		# TODO: schedule a timeout for discarding user data from memory.
-		user.refresh_admins()
-	# }}}
 	def _safe_eval(self, wake, expr, as_str): # {{{
+		'Evaluate an expression through Lua. This should be called using "yield from self._save_eval(...)".'
 		ret = (yield from self.user['environment'].compute(wake, expr, as_str))
 		return str(ret) if as_str else ret
 	# }}}
 	def _parse_text(self, wake, text): # {{{
+		'Do substitutions on a text that is going to be shown to the user. This should be called with "yield from".'
 		if text is None:
 			return None
-		if self.user['section'] is not None and self.user['section'][0] == 'sandbox':
-			filetarget = config['sandbox'] + '/' + self.user['group'].lower() + '/' + self.user['name'].lower() + '/'
-		else:
-			filetarget = config['content'] + '/' + self.user['group'].lower() + '/' + self.user['section'][0] + '/' + self.user['section'][1] + '/'
 		result = ''
 		for m in re.finditer('\${(.*?)}|[^$]+', text):
 			if m.group(1) is None:
+				# This is not a substitution; add the string to the result.
 				result += m.group(0)
 			else:
+				# This is a substitution; add the evaluated string to the result.
 				result += (yield from self._safe_eval(wake, m.group(1), as_str = True))
 		return result
 	# }}}
 	def _parse_time(self, wake, t): # {{{
+		'Parse a string (possibly including substitutions) as a time. Units of s for seconds or ms for milliseconds are required. This should be called with "yield from".'
 		i = (yield from self._parse_text(wake, t)).strip()
 		r = re.match(r'([-+.e0-9]+)\s*(m?)s$', i)
 		if r is None:
@@ -407,7 +550,7 @@ class Connection: # {{{
 				return None
 	# }}}
 	def _answer(self, wake, key, value = None): # {{{
-		'''Set style for last answer.
+		'''Set style for last answer. This should be called with "yield from".
 		With only one argument, the style of the background is set.'''
 		if self.user['question'] is None:
 			debug(1, 'answer style given before a question was answered')
@@ -419,14 +562,14 @@ class Connection: # {{{
 			key = 'background'
 		key = (yield from self._parse_text(wake, key))
 		value = (yield from self._parse_text(wake, value))
-		self.user['answers'][self.user['section']][self.user['question']][-1]['style'].append((key.strip(), value.strip()))
-		user.refresh_admins()
+		self.user['answers'][self.user['chapter']][self.user['question']][-1]['style'].append((key.strip(), value.strip()))
+		refresh_admins()
 	# }}}
 	def _home(self): # {{{
-		self.user['section'] = None
+		self.user['chapter'] = None
 		self.user['environment'].finish()
 		del self.user['environment']
-		user.refresh_admins()
+		refresh_admins()
 		self.remote.main.event()
 	# }}}
 	def _clear_pending(self): # {{{
@@ -459,29 +602,8 @@ class Connection: # {{{
 		#debug(0, repr(self.user['_pending']))
 		self.user['_pending'] = []
 	# }}}
-	def home(self): # {{{
-		if self.busy and not force:
-			traceback.print_stack()
-			log('attempt to home while busy')
-			return
-		self._home()
-	# }}}
-	def start(self, section): # {{{
-		wake = (yield)
-		if self.busy:
-			log('attempt to start while busy')
-			traceback.print_stack()
-			return
-		self.user['section'] = tuple(section)
-		self.user['_kinetic_state'] = {'background': None, 'sprite': {}, 'music': None}
-		self.busy = True
-		try:
-			yield from self._start(wake, section, content.get(self.user['group'], self.user['section']), False)
-		finally:
-			self.busy = False
-	# }}}
-	def _start(self, wake, section, section_content, send_errors): # {{{
-		self.user['program'], errors = section_content
+	def _start(self, wake, script_content, send_errors): # {{{
+		self.user['program'], errors = script_content
 		if send_errors:
 			if len(errors) > 0:
 				errors = markdown('# Errors:\n' + '\n\n'.join(errors))
@@ -499,8 +621,9 @@ class Connection: # {{{
 		self.user['environment'] = Environment()
 		self.user['environment'].set('name', self.user['name'])
 		self.user['environment'].set('group', self.user['group'])
+		self.user['environment'].run(wake, 'sprite = {}', False);
 		self._load_sprite('common/invalid', '')
-		startup = fhs.read_data(os.path.join('include', 'startup.' + ('lua' if use_lua else 'py')))
+		startup = fhs.read_data(os.path.join('include', 'startup.lua'))
 		if startup is not None:
 			try:
 				yield from self.user['environment'].run(wake, startup.read(), False)
@@ -538,10 +661,10 @@ class Connection: # {{{
 		while len(self.user['run_stack']) > 0:
 			watchdog += 1
 			if watchdog > 1000:
-				debug(1, 'hanging script detected: {}; killing it'.format(self.user['section']))
+				debug(1, 'hanging script detected: {}; killing it'.format(self.user['chapter']))
 				self.remote.error.event(['Script stopped working and was killed.'])
 				self.user['run_stack'] = [{'program': self.user['program'], 'current': len(self.user['program'])}]
-				user.refresh_admins()
+				refresh_admins()
 				return
 			# Pop off stack levels until there's an instruction.
 			while len(self.user['run_stack'][-1]['program']) <= self.user['run_stack'][-1]['current']:
@@ -550,12 +673,12 @@ class Connection: # {{{
 					# Send final "question".
 					self.remote.question.event(self.user['_pending'], '', 'choice', ['Done'])
 					self.breaking = True
-					user.refresh_admins()
+					refresh_admins()
 					return
 			# Run instructions.
 			if (yield from self._run_item(wake, self.user['run_stack'][-1]['program'][self.user['run_stack'][-1]['current']])):
 				break
-		user.refresh_admins()
+		refresh_admins()
 	# }}}
 	def _run_item(self, wake, code): # {{{
 		debug(3, '{}:{} running item {}'.format(self.user['name'], self.user['group'], repr(code)))
@@ -606,7 +729,7 @@ class Connection: # {{{
 				self.remote.error.event(code['code'])
 			return self.breaking
 		elif code['command'] == 'video':
-			url = config['content'] + '/' + self.user['group'].lower() + '/' + self.user['section'][0] + '/' + self.user['section'][1] + '/' + code['video']
+			url = config['content'] + '/' + self.user['group'].lower() + '/' + self.user['chapter'][0] + '/' + self.user['chapter'][1] + '/' + code['video']
 			self.remote.video.event(self.user['_pending'], url)
 			return True
 		elif code['command'] == 'sprite':
@@ -799,8 +922,8 @@ class Connection: # {{{
 				self._store_answer(code['variable'], (yield from self._safe_eval(wake, code['markdown'], as_str = True)))
 			else:
 				# Question.
-				if self.user['section'] in self.user['answers'] and code['variable'] in self.user['answers'][self.user['section']]:
-					last_answer = self.user['answers'][self.user['section']][code['variable']][-1]['raw']
+				if self.user['chapter'] in self.user['answers'] and code['variable'] in self.user['answers'][self.user['chapter']]:
+					last_answer = self.user['answers'][self.user['chapter']][code['variable']][-1]['raw']
 				else:
 					last_answer = None
 				return (yield from self._question(wake, code['type'], last_answer, code['markdown'], code['option']))
@@ -810,14 +933,17 @@ class Connection: # {{{
 		return False
 	# }}}
 	def _get_filename(self, name, type): # {{{
-		'''Get a filename for a local (non-web) file. Returns the filename and if it is in common/.'''
+		# FIXME: This is reading files from disk. It should read them from the database.
+		'''Get a filename for a resource. Returns the filename and if it is in common/.
+		Resource files are only used by Python code. Client resources are passed as data urls over the websocket.'''
 		parts = name.split('/')
 		if parts[0] == 'common':
 			return os.path.join('common', type, *parts[1:]), True
 		else:
-			return os.path.join('users', self.user['group'], 'Content', self.user['section'][0], type, *parts), False
+			return os.path.join('users', self.user['group'], 'Content', self.user['chapter'][0], type, *parts), False
 	# }}}
 	def _load_sprite(self, loadname, tag): # {{{
+		# FIXME: This is reading files from disk. It should read them from the database.
 		filename, is_common = self._get_filename(loadname, 'sprite')
 		data = content.load822(filename)
 		ret = {'base': os.path.dirname(filename), 'tag': tag, 'style': {}, 'mood': None, 'common': is_common}
@@ -870,7 +996,7 @@ class Connection: # {{{
 			r = sprite['style'][style]
 			return {'url': 'content/common/' + tag + '/' + r['image'], 'size': r['size'], 'hotspot': r['hotspot']}
 		else:
-			return {'url': 'content/' + self.user['group'] + '/' + self.user['section'][0] + '/sprite/' + tag + '/' + r['image'], 'size': r['size'], 'hotspot': r['hotspot']}
+			return {'url': 'content/' + self.user['group'] + '/' + self.user['chapter'][0] + '/sprite/' + tag + '/' + r['image'], 'size': r['size'], 'hotspot': r['hotspot']}
 	# }}}
 	def _update_sprite(self, tag, data): # {{{
 		for item in ('x', 'y', 'mood'):
@@ -882,17 +1008,46 @@ class Connection: # {{{
 	def _store_answer(self, question, answer, store = True): # {{{
 		self.user['environment'].set(question, answer)
 		if store:
-			if self.user['section'] not in self.user['answers']:
-				self.user['answers'][self.user['section']] = {}
-			if question not in self.user['answers'][self.user['section']]:
-				self.user['answers'][self.user['section']][question] = []
-			if len(self.user['answers'][self.user['section']][question]) == 0 or answer != self.user['answers'][self.user['section']][question][-1]:
-				self.user['answers'][self.user['section']][question].append(answer)
+			if self.user['chapter'] not in self.user['answers']:
+				self.user['answers'][self.user['chapter']] = {}
+			if question not in self.user['answers'][self.user['chapter']]:
+				self.user['answers'][self.user['chapter']][question] = []
+			if len(self.user['answers'][self.user['chapter']][question]) == 0 or answer != self.user['answers'][self.user['chapter']][question][-1]:
+				self.user['answers'][self.user['chapter']][question].append(answer)
 			self.user['question'] = question
-			if not config['lazysave']:
-				user.save(self.user)
+			# TODO: store in userdata.
 		else:
 			self.user['question'] = None
+	# }}}
+	# }}}
+	def get_image(self, imageid): # {{{
+		'Retrieve image from database. Return data url.'
+		wake = (yield)
+		data = (yield from serverdata.select('image', ('url', 'width', 'height', 'hotx', 'hoty'), ('=', 'id', imageid), wake = wake))
+		assert len(data) == 1
+		return {'url': data[0][0], 'size': (data[0][1], data[0][2]), 'hotspot': (data[0][3], data[0][4])}
+	# }}}
+	def home(self): # {{{
+		if self.busy and not force:
+			traceback.print_stack()
+			log('attempt to home while busy')
+			return
+		self._home()
+	# }}}
+	def start(self, script): # {{{
+		wake = (yield)
+		if self.busy:
+			log('attempt to start while busy')
+			traceback.print_stack()
+			return
+		self.user['_kinetic_state'] = {'background': None, 'sprite': {}, 'music': None}
+		self.busy = True
+		scriptid, code = (yield from content.get(wake, self.user['group'], script))
+		self.user['script'] = scriptid
+		try:
+			yield from self._start(wake, code, False)
+		finally:
+			self.busy = False
 	# }}}
 	def answer(self, answer): # {{{
 		wake = (yield)
@@ -1053,10 +1208,10 @@ class Connection: # {{{
 		basedir = os.path.join(config['data'], 'html', 'sandbox', config['sandbox'], self.user['group'].lower(), self.user['name'].lower())
 		d = os.path.dirname(scriptname)
 		assert '.' not in d and os.path.exists(os.path.join(basedir, scriptname))
-		self.user['section'] = ('sandbox', self.user['name'].lower())
+		self.user['chapter'] = ('sandbox', self.user['name'].lower())
 		self.busy = True
 		try:
-			yield from self._start(wake, self.user['section'], content.get_file(self.user['group'], self.user['section'], os.path.join(basedir, scriptname)), True)
+			yield from self._start(wake, content.get_file(self.user['group'], self.user['chapter'], os.path.join(basedir, scriptname)), True)
 		finally:
 			self.busy = False
 	# }}}
@@ -1085,57 +1240,89 @@ class Connection: # {{{
 		os.makedirs(basedir, exist_ok = True)
 		open(os.path.join(basedir, name), 'w').write(contents)
 	# }}}
+# }}}
 
-def sandbox_post(connection): # {{{
-	'''Upload a new file for the sandbox.
-	Credentials must be provided in the cookie. User must be allowed to use the sandbox.
-	'''
-	if connection.busy:
-		log('attempt to post sandbox while busy')
-		return
-	if 'cookie' not in connection.headers or 'file' not in connection.post[1]:
-		debug(1, 'ignoring invalid POST request')
-		sandboxserver.reply(connection, 404, 'invalid POST request', 'text/plain;charset=utf-8')
-		return False
-	c = connection.headers['cookie']
-	kv = [chunk.strip().split('=', 1) for chunk in c.split(';')]
-	kv = {x[0]: x[1] for x in kv}
-	if 'name' not in kv or 'group' not in kv or 'key' not in kv or (kv['name'], kv['group']) not in user.users or user.users[(kv['name'], kv['group'])]['cookie'] != kv['key']:
-		debug(1, 'invalid cookie for POST')
-		sandboxserver.reply(connection, 403, b'invalid cookie for POST request', 'text/plain;charset=utf-8')
-		return False
-	u = user.users[(kv['name'], kv['group'])]
-	if not u['sandbox']:
-		debug(1, 'User is not allowed to use sandbox')
-		sandboxserver.reply(connection, 403, b'User is not allowed to use sandbox', 'text/plain;charset=utf-8')
-		return False
-	# Credentials are good, save the files.
-	basedir = os.path.join(config['data'], 'html', 'sandbox', config['sandbox'], kv['group'].lower(), kv['name'].lower())
-	for f in connection.post[1]['file']:
-		basename = os.path.basename(f[1]).split('.')
-		if len(basename) > 1:
-			basename[-2:] = [basename[-2] + '.' + basename[-1]]
-		filename = os.path.join(basedir, *basename)
-		os.makedirs(os.path.join(basedir, *basename[:-1]), exist_ok = True)
-		# Copy the file.
-		try:
-			with open(filename, 'wb') as w:
-				with open(f[0], 'rb') as r:
-					w.write(r.read())
-			debug(1, 'copied {} to {}'.format(f[0], filename))
-		except:
-			debug(1, 'unable to copy file')
-			traceback.print_exc()
-	sandboxserver.page(connection)
-	return False
+def connection_selector(my_id, my_name, my_userdata, my_remote): # {{{
+	parts = my_remote.data['url'].strip('/').split('/')
+	# example parts: ['content', 'index.html', 'websocket']
+	if len(parts) > 2:
+		if parts[-3] == 'admin':
+			return Admin_Connection(my_id, my_name, my_userdata, my_remote)
+		if parts[-3] == 'content':
+			return Content_Connection(my_id, my_name, my_userdata, my_remote)
+	return Connection(my_id, my_name, my_userdata, my_remote)
 # }}}
-# }}}
+
+db_config = { # {{{
+	'group': [
+		('id', 'int(11) NOT NULL AUTO_INCREMENT PRIMARY KEY'),
+		('name', 'text NOT NULL')
+	],
+	'chapter': [
+		('id', 'int(11) NOT NULL AUTO_INCREMENT PRIMARY KEY'),
+		('name', 'text NOT NULL'),
+		('parent', 'int(11) DEFAULT NULL'),
+	],
+	'access': [
+		('groupid', 'int(11) NOT NULL'),
+		('chapter', 'int(11) DEFAULT NULL'),
+	],
+	'script': [
+		('id', 'int(11) NOT NULL AUTO_INCREMENT PRIMARY KEY'),
+		('name', 'text NOT NULL'),
+		('chapter', 'int(11) NOT NULL'),
+		('script', 'longtext NOT NULL')
+	],
+	'question': [
+		('id', 'text NOT NULL'),
+		('script', 'int(11) NOT NULL'),
+		('type', 'varchar(255) NOT NULL'),
+		('description', 'varchar(255) NOT NULL')
+	],
+	'sprite': [
+		('id', 'int(11) NOT NULL AUTO_INCREMENT PRIMARY KEY'),
+		('name', 'text DEFAULT NULL'),	# Sprite name for first mood, NULL for other moods.
+		('mood', 'text NOT NULL'),	# Mood name.
+		('image', 'int(11) NOT NULL'),	# Image id.
+		('next', 'int(11) DEFAULT NULL'),	# sprite id for next mood, NULL for last mood.
+	],
+	'image': [
+		('id', 'varchar(255) NOT NULL PRIMARY KEY'),
+		('url', 'longtext NOT NULL'),	# Data url.
+
+		# Size of image in screen units.
+		('width', 'float NOT NULL'),
+		('height', 'float NOT NULL'),
+
+		# Location of hotspot in screen units.
+		# The origin for the hotspot coordinates is the bottom left corner of the image.
+		('hotx', 'float NOT NULL'),
+		('hoty', 'float NOT NULL'),
+	],
+	'audio': [
+		('id', 'varchar(255) NOT NULL PRIMARY KEY'),
+		('url', 'longtext NOT NULL'),	# Data url.
+		('duration', 'int(11) NOT NULL'),
+	],
+} # }}}
+player_config = { # {{{
+	'id': [	# This table has only one row.
+		('my_name', 'varchar(255) NOT NULL'),
+		('my_group', 'varchar(255) NOT NULL')
+	],
+	'answer': [
+		('script', 'mediumtext NOT NULL'),	# tab-separated list of chapters.
+		('question', 'longtext NOT NULL'),
+		('answer', 'longtext NOT NULL'),
+		('style', 'mediumtext DEFAULT NULL')
+	]
+} # }}}
 
 # Main program {{{
-server = websocketd.RPChttpd(config['port'], Connection, httpdirs = [os.path.join('html', 'main')], tls = False, proxy = config['proxy'])
-adminserver = websocketd.RPChttpd(config['admin-port'], Admin_Connection, httpdirs = [os.path.join('html', 'admin')], proxy = config['proxy-admin'], tls = False)
-sandboxserver = websocketd.RPChttpd(config['sandbox-port'], Connection, httpdirs = [os.path.join('html', 'sandbox')], tls = False, proxy = config['proxy-sandbox'] or ())
-sandboxserver.post = sandbox_post
+server, serverdata = userdata.setup(connection_selector, config, db_config, player_config, httpdirs = ('html',), proxy = config['proxy'])
+server.post = post
+content.init(serverdata)
+
 print('servers are running on ports {}, {} and {}'.format(config['port'], config['admin-port'], config['sandbox-port']))
 websocketd.fgloop()
 # }}}

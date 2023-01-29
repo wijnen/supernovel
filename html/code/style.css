@@ -7,7 +7,7 @@ body {
 	overflow: hidden;
 }
 
-#login, #videodiv, #question {
+#userdata, #videodiv, #question {
 	display: none;
 	position: absolute;
 	left: 0px;
@@ -19,10 +19,6 @@ body {
 	margin: 3em 3em 3em 3em;
 	border-radius: 2ex;
 	border: solid black .5ex;
-}
-
-#login {
-	text-align: center;
 }
 
 button.not(#navbutton) {
@@ -104,7 +100,7 @@ button.not(#navbutton) {
 .choicebuttons {
 	text-align: center;
 }
-.choicebutton, .chapter, .script {
+.choicebutton, .script {
 	display: inline;
 	padding: 1em 5em 1em 5em;
 	margin: 1ex 1ex 1ex 1ex;

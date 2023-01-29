@@ -1,18 +1,22 @@
-# This is a comment; indentation is irrelevant.
+-- This is a comment; indentation is irrelevant.
 comment: also a comment. Indentation must be valid
 comment:
 	(Possibly) multi-line comment.
 	Indentation must also be valid.
 	  Extra indentation within the comment is allowed.
+	But deindentation is only allowed to a previously used level (as it would be with code).
 
-# labels are only allowed at top level.
+-- labels are only allowed at top level.
 label <labelname>
+-- goto is allowed everywhere; it will pop the entire call stack and jump to the label.
 goto <labelname>
-$ single line Python code
-python: single line Python code
-python:
-	(Possibly) multi line Python code.
-video filename
+$ single line Lua code
+code: single line Lua code
+code:
+	(Possibly) multi line Lua code.
+video videoid	-- TODO
+
+-- Question examples:
 question short variable Single line question
 question hidden variable value
 question choice variable:
@@ -20,64 +24,66 @@ question choice variable:
 	Text substitutions are performed on the question text.
 option first option
 option second option
-# Question types:
-# short: single line answer -> {'text': str}
-# long: multi-line answer -> {'text': str}
-# choice: single option chosen from list -> {'index': int, 'text': str}
-# unit -> {'quantity': str | None, 'unit': str, 'digits': int, 'value': float}	(all are None if unparsable)
-# hidden: not passed to the user; substitutions are performed on question text and it is stored as answer value.
-# Notes:
-#	all contain 'raw'
-#	all contain 'style', which is for internal use
-#	all long<thing> are identical to <thing>, with 'long' added
-#	longlong and longhidden do not exist
-while expr:
+-- Question types:
+-- short: single line answer -> {'text': str}
+-- long: multi-line answer -> {'text': str}
+-- choice: single option chosen from list -> {'index': int, 'text': str}
+-- unit -> {'quantity': str | None, 'unit': str, 'digits': int, 'value': float}	(all are None if unparsable)
+-- hidden: not passed to the user; substitutions are performed on question text and it is stored as answer value.
+-- Notes:
+--	all contain 'raw'
+--	all contain 'style', which is for internal use
+--	all long<thing> are identical to <thing>, with 'long' added
+--	longlong and longhidden do not exist
+while expr do
 	code
-	continue	# TODO
-	break	# TODO
-else:
+	continue
+	break
+else
 	code
 
-if expr:
+if expr then
 	code
-elif expr:
+elseif expr then
 	code
-else:
+else
 	code
-# Instead of a block, a single line may be given inline.
-if expr: single line code	# XXX
+-- Instead of a block, a single line may be given inline.
+if expr then single line code	-- XXX
 
-answer value	# Style is applied to background of span that contains last answer on admin page.
+end -- End can be used (but is ignored) on its own to make it look like lua code, but only on its own; not after an inline command
 
-# Load a sprite file by the name of anja in the common/ directory and store it in the variable anja.
-# For more complex actions, use sprite() from Python code.
+answer value	-- Style is applied to background of span that contains last answer on admin page.
+
+-- FIXME Load a sprite file by the name of anja in the common/ directory and store it in the variable anja.
+-- For more complex actions, use sprite() from Lua code. TODO
 sprite common/anja
-anja,[style]: text
-anja,[style]:
+anja [style]: text
+anja [style]:
 	multi-line text
 
-animation [args]:
+parallel [args]:
 	<animation actions>
 serial [args]:
 	<animation actions>
-# If animation actions are given without an animation or serial parent command, a serial parent is implied.
+-- If animation actions are given without an parallel or serial parent command, a serial parent is implied.
 
-# Animation actions are:
-animation [args]:
+-- Animation actions are:
+parallel [args]:
 serial [args]:
 scene [filename] [args]
 show <sprite>[,style] [args]
 hide <sprite>[,style] [args]
 move <sprite>[,style] [args]
-music [filename]	# TODO
-sound [filename]	# TODO
+music [filename]	-- TODO
+sound [filename]	-- TODO
 
-# Styles are defined in the sprite.
-# Args can be:
-#	with <transition>	# jump, move, dissolve
-#	in <time>		# in seconds
-#	to <location>		# array of 3 items, either fractions or special string values. Z axis point out of screen.
-#	from <location>
-#	scale <scale>		# array of 2 items, or single number for uniform scale.
-#	rotate <revolutions>
-#	around <location>	# center of rotation for rotate or move transition
+-- Styles are defined in the sprite.
+-- Args can be:
+--	with <transition>	-- jump, move, dissolve
+--	in <time>		-- includes unit, must be s or ms.
+--	to <location>		-- array of 3 items, either fractions or special string values. Z axis points out of screen.
+--	from <location>
+--	scale <scale>		-- array of 2 items, or single number for uniform scale.
+--	rotate <revolutions>
+--	around <location>	-- center of rotation for rotate or move transition

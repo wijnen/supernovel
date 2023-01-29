@@ -1,1 +1,0 @@
-/usr/share/python3-websocketd/builders.js

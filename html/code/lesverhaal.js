@@ -6,12 +6,7 @@ var all_sprites = {};	// All screen sprites.
 var img_cache = {};	// Cache of loaded images; keys are urls, values are data urls.
 var screen_scale = 1;	// Scale for background and sprites.
 var pending_music = null;	// Delay starting music because browsers don't allow it.
-
-// DOM elements.
-var error, login, videodiv, video;
-var contents, contentslist, question, navigation;
-var spritebox, sandbox, speechbox, speaker, speaker_image, speech, bg, game;
-var music, sound;
+var elements; // DOM elements.
 
 // Threads.
 var state, prev_states;
@@ -131,6 +126,29 @@ function SpriteState(ref) { // {{{
 	};
 } // }}}
 
+function select_ui(shown, other) { // {{{
+	// Hide all elements except one (or two).
+	var ui_elements = ['error', 'userdata', 'videodiv', 'contents', 'question', 'game', 'sandbox'];
+	var found_shown = false;
+	var found_other = other === undefined;
+	for (var e = 0; e < ui_elements.length; ++e) {
+		if (ui_elements[e] == shown) {
+			found_shown = true;
+			elements[shown].style.display = '';
+		}
+		else if (ui_elements[e] == other) {
+			found_other = true;
+			elements[other].style.display = '';
+		}
+		else
+			elements[ui_elements[e]].style.display = 'none';
+	}
+	if (!found_shown)
+		console.error('Showing invalid element', shown);
+	if (!found_other)
+		console.error('Showing invalid element', other);
+} // }}}
+
 function Sprite(ref) { // {{{
 	// Class that defines one sprite in a state. It does not contain display parts.
 	// Construct with new.
@@ -180,31 +198,15 @@ function Sprite(ref) { // {{{
 	};
 } // }}}
 
-function get_img(url, cb) { // {{{
+function get_img(imageid, cb) { // {{{
 	// Get an image from the cache, or load it if it wasn't in the cache yet.
-	// Call cb when the image is loaded. Its argument is the image with attributes url (the data url) and size (w x h).
+	// Call cb when the image is loaded. Its argument is the image with attributes url (the data url), size (w, h) and hotspot (x, y).
 	// Returns undefined.
-	if (img_cache[url] !== undefined) {
-		setTimeout(function() { cb(img_cache[url]); }, 0);
+	if (img_cache[imageid] !== undefined) {
+		setTimeout(function() { cb(img_cache[imageid]); }, 0);
 		return;
 	}
-	var xhr = new XMLHttpRequest();
-	xhr.AddEvent('loadend', function() {
-		var reader = new FileReader();
-		reader.AddEvent('load', function() {
-			var tmp = Create('img');
-			tmp.src = reader.result;
-			var w = tmp.width;
-			var h = tmp.height;
-			var img = {url: reader.result, size: [w, h]};
-			img_cache[url] = img;
-			cb(img);
-		});
-		reader.readAsDataURL(xhr.response);
-	});
-	xhr.responseType = 'blob';
-	xhr.open('GET', url, true);
-	xhr.send();
+	server.call('get_image', [imageid], {}, cb);
 } // }}}
 
 function DisplaySprite() { // {{{
@@ -224,7 +226,7 @@ function DisplaySprite() { // {{{
 		}
 		me.div.style.zIndex = sprite_state.position[2];
 		//console.info(sprite_state.image, sprite_state.position[0], sprite_state.position[1]);
-		get_img(sprite_state.image.url, function(img) {
+		get_img(sprite_state.image.imageid, function(img) {
 			me.img.src = img.url;
 			var size;
 			if (sprite_state.image.size !== null)
@@ -236,7 +238,7 @@ function DisplaySprite() { // {{{
 				if (sprite_state.position[i][0] == 0)
 					hotspot.push(sprite_state.image.hotspot[i]);
 				else
-					hotspot.push(sprite_state.position[i][0]);
+					hotspot.push(img.hotspot[i]);
 			}
 			var x = (sprite_state.position[0][1] + 1) / 2 * 100;
 			var hx = (hotspot[0] + 1) / 2 * size[0] * 100;
@@ -259,7 +261,7 @@ function DisplaySprite() { // {{{
 function State(ref) { // {{{
 	// Class that holds an animation state. Construct with new. Main methods:
 	// draw: update interface using this state.
-	// constructor: create a copy for storing in history, or from restoring from history.
+	// constructor: create a copy for storing in history, or for restoring from history.
 	this.thread = {};	// All running (and paused) threads.
 	this.waiting_threads = [];	// Stack of threads that are currently waiting for next_kinetic. Usually length 0 or 1.
 	this.sleeping_threads = [];	// Sorted list of threads that are in a wait instruction.
@@ -289,32 +291,32 @@ function State(ref) { // {{{
 		// Background.
 		if (!this.background)
 			this.background = {url: '', size: [1280, 1024]};
-		bg.src = this.background.url;
+		elements.bg.src = this.background.url;
 		if (this.background.url)
-			bg.RemoveClass('hidden');
+			elements.bg.RemoveClass('hidden');
 		else
-			bg.AddClass('hidden');
+			elements.bg.AddClass('hidden');
 		if (!skip_resize)
 			resize();
 
 		// Speech.
 		if (this.speaker.name || this.speaker.text)
-			speechbox.style.display = 'block';
+			elements.speechbox.style.display = 'block';
 		else
-			speechbox.style.display = 'none';
+			elements.speechbox.style.display = 'none';
 		if (this.speaker.name) {
-			speaker.style.display = 'inline';
+			elements.speaker.style.display = 'inline';
 			speaker.innerHTML = this.speaker.name;
 		}
 		else
-			speaker.style.display = 'none';
+			elements.speaker.style.display = 'none';
 		speech.innerHTML = this.speaker.text;
-		if (this.speaker.image) {
-			speaker_image.style.display = 'block';
+		if (this.speaker.image && this.speaker.image.url) {
+			elements.speaker_image.style.display = 'block';
 			speaker_image.src = this.speaker.image.url;
 		}
 		else
-			speaker_image.style.display = 'none';
+			elements.speaker_image.style.display = 'none';
 
 		// Sprites.
 		for (var s in all_sprites) {
@@ -457,7 +459,7 @@ function activate(name, now, extra, fast_forward) { // {{{
 			all_sprites = [];
 			// Set new background.
 			if (action.target) {
-				get_img('content/' + action.target, function(img) {
+				get_img(action.target, function(img) {
 					state.background = img;
 					resize();
 					activate(name, now, 0, fast_forward);
@@ -529,12 +531,7 @@ function run_story(story, cb) { // {{{
 	// cb: callback to be called when story is done.
 	// Returns undefined.
 	// TODO: fill image cache.
-	question.style.display = 'none';
-	videodiv.style.display = 'none';
-	contents.style.display = 'none';
-	game.style.display = '';
-	speechbox.style.display = 'none';
-	sandbox.style.display = 'none';
+	select_ui('game');
 	question.innerHTML = '';
 	video.pause();
 	if (state === undefined)
@@ -571,64 +568,35 @@ function update_screen() { // {{{
 // Server communication. {{{
 var Connection = { // {{{
 	userdata_setup: userdata_setup,
-	replaced: function() {	// Connection has been replaced by new connection.
+	replaced: function() {	// {{{ Connection has been replaced by new connection.
 		is_replaced = true;
 		alert('De verbinding is overgenomen door een nieuwe login');
 		is_replaced = false;
-		Connection.cookie('', '', '');
 		server.close();
 		init();
-	},
-	login: function() {	// Player needs to log in.
-		error.style.display = 'none';
-		login.style.display = 'block';
-		videodiv.style.display = 'none';
-		contents.style.display = 'none';
-		question.style.display = 'none';
-		game.style.display = 'none';
-		sandbox.style.display = 'none';
+	}, // }}}
+	login: function() {	// {{{ Player needs to log in.
+		select_ui('userdata');
 		video.pause();
 		music.pause();
 		sound.pause();
-	},
-	contents: function(data) {	// Update chapter and section contents.
-		chapters.ClearAll();
-		sections.ClearAll();
-		var chapterlist = [];
-		for (var d in data)
-			chapterlist.push(d);
-		chapterlist.sort();
+		userdata_setup.call(this, arguments);
+	}, // }}}
+	contents: function(data) {	// {{{ Update chapter and script contents.
+		scripts.ClearAll();
 		var buttons = [];
-		for (var c = 0; c < chapterlist.length; ++c) {
-			var chapter = chapterlist[c];
-			buttons.push(chapters.AddElement('li').AddElement('button', 'chapter').AddText(chapter).AddEvent('click', function() {
-				sections.ClearAll();
-				for (var b = 0; b < buttons.length; ++b)
-					buttons[b].RemoveClass('active');
-				this.AddClass('active');
-				for (var s = 0; s < data[this.chapter].length; ++s) {
-					var section = data[this.chapter][s];
-					var button = sections.AddElement('li').AddElement('button', 'script').AddText(section).AddEvent('click', function() {
-						server.call('start', [[this.chapter, this.section]]);
-					});
-					button.chapter = this.chapter;
-					button.section = section;
-					button.type = 'button';
-				}
+		for (var c = 0; c < data.length; ++c) {
+			var script = data[c];
+			buttons.push(scripts.AddElement('li').AddElement('button', 'script').AddText(script.join('/')).AddEvent('click', function() {
+				server.call('start', [this.script]);
 			}));
-			buttons[c].chapter = chapter;
+			buttons[c].script = script;
 			buttons[c].type = 'button';
 		}
-	},
-	main: function() {	// Show chapter and section selection.
-		bg.AddClass('hidden');
-		error.style.display = 'none';
-		login.style.display = 'none';
-		videodiv.style.display = 'none';
-		contents.style.display = 'block';
-		question.style.display = 'none';
-		game.style.display = 'none';
-		sandbox.style.display = 'none';
+	}, // }}}
+	main: function() {	// {{{ Show book and chapter selection.
+		elements.bg.AddClass('hidden');
+		select_ui('contents');
 		video.pause();
 		music.pause();
 		sound.pause();
@@ -637,24 +605,24 @@ var Connection = { // {{{
 			all_sprites[s].remove();
 		all_sprites = [];
 		prev_states = [];
-	},
-	kinetic: function(story, music) {
+	}, // }}}
+	kinetic: function(story, music) { // {{{ Run a story without a question; used for setting up current state on login.
 		//console.info('setup kinetic', music, story)
 		server.lock();
 		pending_music = music;
 		run_story(story, function() { server.unlock(); });
-	},
-	question: function(story, text, type, options, last_answer) {
+	}, // }}}
+	question: function(story, text, type, options, last_answer) { // {{{ Run a story, followed by a question.
 		//console.info('question', text, type, story);
 		run_story(story, function() {
 			if (state.show_question)
 				return;
 			state.show_question = true;
-			speechbox.style.display = 'none';
+			elements.speechbox.style.display = 'none';
 			question.innerHTML = text;
-			question.style.display = 'block';
+			elements.question.style.display = 'block';
 			// Clear speech so the old text cannot reappear by accident.
-			speaker.style.display = 'none';
+			elements.speaker.style.display = 'none';
 			speech.innerHTML = '';
 			var get_value;
 			var button_text = 'Antwoord';
@@ -782,28 +750,19 @@ var Connection = { // {{{
 			if (rich !== null)
 				richinput(rich);
 		});
-	},
-	video: function(story, file) {	// Next game item is a video, optionally with a kinetic part before it.
+	}, // }}}
+	video: function(story, file) {	// {{{ Run a story, followed by a video.
 		run_story(story, function() {
 			music.pause();
 			sound.pause();
 			animate(false);
 			video.src = file;
 			video.load();
-			videodiv.style.display = 'block';
-			contents.style.display = 'none';
-			question.style.display = 'none';
-			game.style.display = 'none';
-			sandbox.style.display = 'none';
+			select_ui('videodiv');
 			speed(); // Set playback speed.
 			video.play();
 		});
-	},
-	cookie: function(n, g, c) {	// A cookie should be set to make the browser auto-login next time.
-		document.cookie = 'name=' + encodeURIComponent(n) + '; sameSite=Strict';
-		document.cookie = 'group=' + encodeURIComponent(g) + '; sameSite=Strict';
-		document.cookie = 'key=' + encodeURIComponent(c) + '; sameSite=Strict';
-	},
+	}, // }}}
 }; // }}}
 
 function init() { // {{{
@@ -811,22 +770,17 @@ function init() { // {{{
 	// Returns undefined.
 
 	// Fill global variables.
-	var varnames = ['error', 'login', 'videodiv', 'video', 'contents', 'chapters', 'sections', 'question', 'speechbox', 'navigation', 'spritebox', 'sandbox', 'speaker', 'speaker_image', 'speech', 'bg', 'game', 'music', 'sound'];
+	elements = {};
+	var varnames = ['error', 'videodiv', 'video', 'contents', 'scripts', 'question', 'speechbox', 'navigation', 'spritebox', 'sandbox', 'speaker', 'speaker_image', 'speech', 'bg', 'game', 'music', 'sound', 'userdata'];
 	for (var i = 0; i < varnames.length; ++i)
-		window[varnames[i]] = document.getElementById(varnames[i]);
+		elements[varnames[i]] = document.getElementById(varnames[i]);
 
 	video.pause();
 	music.pause();
 	sound.pause();
 
-	error.style.display = 'block';
-	login.style.display = 'none';
-	videodiv.style.display = 'none';
-	contents.style.display = 'none';
-	question.style.display = 'none';
-	game.style.display = 'none';
-	sandbox.style.display = 'none';
-	speaker.style.display = 'none';
+	select_ui('error', 'userdata');
+	elements.speaker.style.display = 'none';
 
 	// Handle clicks on screen for progression.
 	spritebox.AddEvent('click', function(event) {
@@ -843,34 +797,12 @@ function init() { // {{{
 		next_kinetic();
 	});
 
-	// Parse cookie.
-	var c = document.cookie.split(';');
-	var crumbs = {};
-	for (var i = 0; i < c.length; ++i) {
-		var item = c[i].split('=');
-		for (var j = 0; j < item.length; ++j)
-			item[j] = item[j].replace(/^\s*|\s*$/g, '');	// strip whitespace.
-		crumbs[item[0]] = decodeURIComponent(item[1]);
-	}
-	// Set credentials from cookie if they were empty.
-	var loginname = document.getElementById('loginname');
-	var group = document.getElementById('class');
-	if ('name' in crumbs && loginname.value == '')
-		loginname.value = crumbs.name;
-	if ('group' in crumbs && group.value == '')
-		group.value = crumbs.group;
 	var connection_lost = function() { // {{{
-		bg.AddClass('hidden');
+		elements.bg.AddClass('hidden');
 		if (is_replaced)
 			return;
 		try {
-			error.style.display = 'block';
-			login.style.display = 'none';
-			videodiv.style.display = 'none';
-			contents.style.display = 'none';
-			question.style.display = 'none';
-			game.style.display = 'none';
-			sandbox.style.display = 'none';
+			select_ui('error');
 			video.pause();
 			music.pause();
 			sound.pause();
@@ -892,32 +824,18 @@ function resize() { // {{{
 	if (state === undefined)
 		state = new State();
 	screen_scale = Math.min(window.innerWidth / state.background.size[0], window.innerHeight / state.background.size[1]);
-	game.style.left = (window.innerWidth - state.background.size[0] * screen_scale) / 2 + 'px';
-	game.style.top = (window.innerHeight - state.background.size[1] * screen_scale) / 2 + 'px';
-	game.style.width = state.background.size[0] * screen_scale + 'px';
-	game.style.height = state.background.size[1] * screen_scale + 'px';
+	elements.game.style.left = (window.innerWidth - state.background.size[0] * screen_scale) / 2 + 'px';
+	elements.game.style.top = (window.innerHeight - state.background.size[1] * screen_scale) / 2 + 'px';
+	elements.game.style.width = state.background.size[0] * screen_scale + 'px';
+	elements.game.style.height = state.background.size[1] * screen_scale + 'px';
 	state.draw(performance.now(), true);
 } // }}}
 window.AddEvent('resize', resize);
 
-function log_in() { // {{{
-	// The log in button is clicked.
-	// Always returns false, to prevent the form from submitting.
-	var loginname = document.getElementById('loginname').value;
-	var group = document.getElementById('class').value;
-	var password = document.getElementById('password').value;
-	server.call('login', [loginname, group, password], {}, function(error) {
-		if (error)
-			alert('Inloggen is mislukt: ' + error);
-	});
-	return false;
-} // }}}
-
 function log_out() { // {{{
 	// The log out button is clicked.
 	// Returns undefined.
-	bg.AddClass('hidden');
-	Connection.cookie('', '', '');
+	elements.bg.AddClass('hidden');
 	Connection.login();
 } // }}}
 // }}}
@@ -955,7 +873,7 @@ function prev_kinetic(full) { // {{{
 	else
 		prev_states.pop();
 	if (prev_states.length == 1) {
-		question.style.display = 'none';
+		elements.question.style.display = 'none';
 		state = new State();
 		state.background = prev_states[0].background;
 		state.music = prev_states[0].music;
@@ -963,7 +881,7 @@ function prev_kinetic(full) { // {{{
 	}
 	else {
 		state = new State(prev_states[prev_states.length - 1]);
-		question.style.display = state.show_question ? 'block' : 'none';
+		elements.question.style.display = state.show_question ? 'block' : 'none';
 	}
 	state.draw();
 	if (state.music != prev_music) {

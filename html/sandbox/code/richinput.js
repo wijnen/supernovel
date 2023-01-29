@@ -1,1 +1,0 @@
-../../main/code/richinput.js

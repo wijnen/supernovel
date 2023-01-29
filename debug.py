@@ -1,4 +1,7 @@
-from __main__ import config
+try:
+	from __main__ import config
+except:
+	config = {'logfile': None, 'loglimit': 2}
 from websocketd import log
 
 logfile = open(config['logfile'], 'a') if config['logfile'] else None

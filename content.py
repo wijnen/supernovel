@@ -1,51 +1,93 @@
 #!/usr/bin/python3
 
+# Calls:
+# list()	done.
+# get()		done.
+# showhide()	not defined here...
+# load822()	only used in load_sprite. Must be updated.
+# get_file()	only used in sandbox.
+
 # Imports {{{
 import sys
 import os
 import re
-from __main__ import config
 from debug import debug
 # }}}
 
-def list(group): # {{{
-	'''Get a list of available sections.'''
-	content_dir = os.path.join(config['data'], 'users', group.lower(), 'Content')
-	if not os.path.exists(content_dir):
-		return {}
-	ret = {}
-	for chapter in os.listdir(content_dir):
-		cpath = os.path.join(content_dir, chapter)
-		if not os.path.isdir(cpath):
-			continue
-		section = []
-		for s in os.listdir(cpath):
-			if not s.endswith('.script'):
-				continue
-			spath = os.path.join(cpath, s)
-			if os.path.isdir(spath):
-				continue
-			section.append(os.path.splitext(s)[0])
-		if len(section) == 0:
-			continue
-		section.sort()
-		ret[chapter] = section
+serverdata = [None]
+def init(data):
+	serverdata[0] = data
+
+def list(wake, groupid): # {{{
+	'''Get a list of available scripts.'''
+
+	# Load all chapters that can be accessed.
+	access = (yield from serverdata[0].select('access', ('chapter',), ('=', 'groupid', groupid), wake = wake))
+	cache = {}	# keys: IDs, values: {'name': ..., 'parent': ...}
+	for chapter in access:
+		c = chapter[0]
+		data = (yield from serverdata[0].select('chapter', ('name', 'parent'), ('=', 'id', c), wake = wake))
+		assert len(data) == 1
+		name, parent = data[0]
+		cache[c] = {'name': name, 'parent': parent}
+
+	# Load missing parents.
+	todo = []
+	for chapter in access:
+		c = chapter[0]
+		parent = cache[c]['parent']
+		if parent is not None and parent not in cache and parent not in todo:
+			todo.append(parent)
+	while len(todo) > 0:
+		t = todo.pop()
+		data = (yield from serverdata[0].select('chapter', ('name', 'parent'), ('=', 'id', t), wake = wake))
+		assert len(data) == 1
+		name, parent = data[0]
+		cache[c] = {'name': name, 'parent': parent}
+		if parent is not None and parent not in cache and parent not in todo:
+			todo.append(parent)
+
+	# Find all scripts.
+	ret = []
+	for chapter in access:
+		c = chapter[0]
+		path = [cache[c]['name']]
+		p = c
+		while cache[p]['parent'] is not None:
+			p = cache[p]['parent']
+			path.insert(0, cache[p]['name'])
+		data = (yield from serverdata[0].select('script', ('name',), ('=', 'chapter', c), wake = wake))
+		for s in data:
+			ret.append(path + [s[0]])
+
 	return ret
 # }}}
 
 errors = []
-def parse_error(line, message):
+def parse_error(line, message): # {{{
 	errors.append('{}: {}'.format(line if line is not None else '(from code)', message))
 	debug(1, '{}: parse error: {}'.format(line, message))
+	assert False
+# }}}
 
 def read_structure(f): # {{{
+	'''Parse script text into structured format.
+	Input: iterable (text file or sequence of strings).
+	Returns: dict of
+	{
+		'line': int,
+		'code': str,
+		'children': dicts of indented lines (same format),
+		'rawchildren': str of indented block, for when it is not code.
+	}
+	'''
 	indentstack = ['']
 	stack = [[]]
 	ln = 0
 	for line in f:
 		ln += 1
 		l = line.lstrip()
-		if l == '' or l.startswith('#'):
+		if l == '' or l.startswith('--'):
 			continue
 		i = line[:len(line) - len(l)]
 		if len(i) > len(indentstack[-1]):
@@ -70,14 +112,15 @@ def read_structure(f): # {{{
 	return stack[0]
 # }}}
 
-def parse_raw(ln, d, firstline):
+def parse_raw(ln, d, firstline): # {{{
 	if firstline != '':
 		if d['rawchildren'] != '':
 			parse_error(ln, 'raw block present after inline data')
 		return firstline
 	return d['rawchildren']
+# }}}
 
-def parse_anim_args(ln, a, parent_args):
+def parse_anim_args(ln, a, parent_args): # {{{
 	args = {'with': None, 'in': None, 'to': None, 'from': None, 'scale': None, 'rotation': None, 'around': None}
 	if a is None:
 		return args
@@ -100,11 +143,12 @@ def parse_anim_args(ln, a, parent_args):
 			if args[a] is None:
 				args[a] = parent_args[a]
 	return args
+# }}}
 
-def parse_anim_element(ln, c, d, parent_args):
+def parse_anim_element(ln, c, d, parent_args): # {{{
 	'''Read and return single animation command, possibly including children
 	Returns None if this was not an animation command, False if there was an error and the action otherwise.'''
-	# parallel, serial
+	# parallel, serial {{{
 	r = re.match(r'(parallel|serial)\b\s*(.*)\s*:$', c)
 	if r is not None:
 		args = parse_anim_args(ln, r.group(2), parent_args)
@@ -121,18 +165,21 @@ def parse_anim_element(ln, c, d, parent_args):
 				continue
 			ret['actions'].append(action)
 		return ret
+	# }}}
 
-	# speech
+	# speech {{{
 	r = re.match(r'(\S*)(?:\s+(\S*))?\s*:\s*(.*?)\s*$', c)
 	if r is not None:
 		return {'action': 'speech', 'line': ln, 'speaker': r.group(1), 'image': r.group(2), 'markdown': parse_raw(ln, d, r.group(3))}
+	# }}}
 	
-	# wait
+	# wait {{{
 	r = re.match(r'wait\s+(\S.*?)\s*$', c)
 	if r is not None:
 		return {'action': 'wait', 'line': ln, 'time': r.group(1)}
+	# }}}
 
-	# scene, show, hide, move, sound, music
+	# scene, show, hide, move, sound, music {{{
 	r = re.match(r'(scene|show|hide|move|sound|music)\s*(?:\s(\S+(?:\s*,\s*\S+)?)\s*(?:\s(\S.*?)\s*)?)?$', c)
 	if r is None:
 		return None
@@ -168,8 +215,10 @@ def parse_anim_element(ln, c, d, parent_args):
 		mood = None
 
 	return {'action': r.group(1), 'target': target, 'mood': mood, 'args': args, 'line': ln}
+	# }}}
+# }}}
 
-def parse_anim(ln, c, d, ostack):
+def parse_anim(ln, c, d, ostack): # {{{
 	'''Check if a line is an animation command. Parse it and return True if it is.'''
 	action = parse_anim_element(ln, c, d, None)
 	if action is None:
@@ -182,18 +231,21 @@ def parse_anim(ln, c, d, ostack):
 		ostack[-1].append({'command': 'kinetic', 'line': ln, 'kinetic': []})
 	ostack[-1][-1]['kinetic'].append(action)
 	return True
+# }}}
 
-def parse_line(d, ln, istack, ostack, index):
+def parse_line(d, ln, istack, ostack, index): # {{{
 	# d is the data dict of the current line; ln is the current line number.
 	# return False if parsing should be aborted, True otherwise.
 	# Note that True does not imply parsing was successfull. False is only returned if the error will likely cause a chain of useless errors.
 	c = d['code']
 
-	# end is ignored for allowing lua syntax.
+	# end is ignored so lua syntax is allowed (but not enforced). {{{
 	if c == 'end':
 		return True
+	# }}}
 
-	# if, elseif, while
+	# Commands with child blocks {{{
+	# if, elseif, while {{{
 	r = re.match(r'(if|elseif|while)\b\s*(.*?)\s*\w(then|do)\w\s*(.*?)\s*$', c)
 	if r is not None:
 		cmd = r.group(1)
@@ -221,9 +273,10 @@ def parse_line(d, ln, istack, ostack, index):
 			if len(d['children']) > 0:
 				parse_error(ln, 'indented block is only allowed without inline code')
 		return True
+	# }}}
 
-	# else
-	r = re.match(r'else\s*(.*?)\s*$', c)
+	# else {{{
+	r = re.match(r'else\w\s*(.*?)\s*$', c)
 	if r is not None:
 		code = r.group(1)
 		if ostack[-1][-1]['command'] == 'if':
@@ -249,8 +302,9 @@ def parse_line(d, ln, istack, ostack, index):
 			parse_error(ln, 'else without if or while')
 			return False
 		return True
+	# }}}
 
-	# question
+	# question {{{
 	r = re.match(r'question\s+(\S*)\s+(\S*)\s*:\s*(.*)$', c)
 	if r is not None:
 		t = r.group(1)
@@ -265,8 +319,9 @@ def parse_line(d, ln, istack, ostack, index):
 		else:
 			ostack[-1][-1]['option'] = None
 		return True
+	# }}}
 
-	# option
+	# option {{{
 	r = re.match(r'option\s*:\s*(.*?)\s*$', c)
 	if r is not None:
 		if ostack[-1][-1]['command'] != 'question' or 'choice' not in ostack[-1][-1]['type']:
@@ -274,8 +329,9 @@ def parse_line(d, ln, istack, ostack, index):
 			return True
 		ostack[-1][-1]['option'].append(parse_raw(ln, d, r.group(1)))
 		return True
+	# }}}
 
-	# code
+	# code {{{
 	r = re.match(r'code\s*:\s*(.*?)\s*$', c)
 	if r is not None:
 		if len(r.group(1)) > 0:
@@ -286,24 +342,29 @@ def parse_line(d, ln, istack, ostack, index):
 			return True
 		ostack[-1].append({'command': 'code', 'line': ln, 'code': parse_raw(ln, d, r.group(1))})
 		return True
+	# }}}
 
 	if parse_anim(ln, c, d, ostack):
 		return True
+	# }}}
 
 	if len(d['children']) > 0:
 		parse_error(ln, 'unexpected indent')
 		return False
 
-	# $
+	# Commands which should not have an indented block after them {{{
+	# $ {{{
 	if c[0] == '$':
 		ostack[-1].append({'command': 'code', 'line': ln, 'code': c[1:].strip()})
 		return True
+	# }}}
 
-	# break, continue
+	# break, continue {{{
 	if c in ('break', 'continue'):
 		ostack[-1].append({'command': c, 'line': ln})
+	# }}}
 
-	# label, goto
+	# label, goto {{{
 	r = re.match(r'(label|goto)\s*(\S*)\s*$', c)
 	if r is not None:
 		if r.group(1) == 'label' and len(ostack) > 1:
@@ -317,35 +378,42 @@ def parse_line(d, ln, istack, ostack, index):
 		index[r.group(1)][name] = len(ostack[0])
 		ostack[0].append({'command': r.group(1), 'line': ln, 'label': name, 'target': None})
 		return True
+	# }}}
 
-	# video
+	# video {{{
 	r = re.match(r'video\s*(.*)\s*$', c)
 	if r is not None:
 		ostack[-1].append({'command': 'video', 'line': ln, 'video': r.group(1)})
 		return True
+	# }}}
 
-	# answer
+	# answer {{{
 	r = re.match(r'answer\s*(.*)\s*$', c)
 	if r is not None:
 		ostack[-1].append({'command': 'answer', 'line': ln, 'answer': r.group(1)})
 		return True
+	# }}}
 
-	# sprite
+	# sprite {{{
 	r = re.match(r'sprite\s*(.*?)(?:\s+as\s+(\S+))?\s*$', c)
 	if r is not None:
 		sprite = r.group(1)
 		tag = r.group(2) or sprite.rsplit('/', 1)[1]
 		ostack[-1].append({'command': 'sprite', 'line': ln, 'sprite': sprite, 'tag': tag})
 		return True
+	# }}}
+	# }}}
 
 	parse_error(ln, 'syntax error')
 	return True
+# }}}
 
-def get_file(group, section, filename): # {{{
+def parse_script(script): # {{{
+	'''Parse a script into structured code.
+	Returns tuple: parsed script, list of parse errors.'''
 	global errors
 	errors = []
-	with open(filename) as f:
-		data = read_structure(f)
+	data = read_structure(script.split('\n'))
 	istack = [data]
 	ret = []
 	ostack = [ret]
@@ -366,14 +434,22 @@ def get_file(group, section, filename): # {{{
 	return ret, errors
 # }}}
 
-def get(group, section): # {{{
-	'''Get the program for a section.'''
-	content_dir = os.path.join(config['data'], 'users', group.lower(), 'Content')
-	filename = os.path.join(content_dir, section[0], section[1] + '.script')
-	if not os.path.exists(filename):
-		debug(1, 'Error: file {} does not exist'.format(filename))
-		return [], {}
-	return get_file(group, section, filename)
+def get(wake, groupid, script_list): # {{{
+	'''Get the script from a list of chapter names; accessible by groupid.'''
+	current = None
+	for part in script_list[:-1]:
+		result = (yield from serverdata[0].select('chapter', ('id',), ('and', ('=', 'name', part), ('=', 'parent', current)), wake = wake))
+		assert len(result) == 1
+		current = result[0][0]
+
+	# Check that the group has access to this chapter.
+	check = (yield from serverdata[0].select('access', ('groupid',), ('and', ('=', 'groupid', groupid), ('=', 'chapter', current)), wake = wake))
+	assert len(check) == 1
+
+	result = (yield from serverdata[0].select('script', ('id', 'script'), ('and', ('=', 'chapter', current), ('=', 'name', script_list[-1])), wake = wake))
+	assert len(result) == 1
+	scriptid, script = result[0]
+	return scriptid, parse_script(script)
 # }}}
 
 def load822(filename):

@@ -6,11 +6,12 @@
 		<script src='code/builders.js'></script>
 		<script src='code/rpc.js'></script>
 		<script src='code/richinput.js'></script>
-		<script src='code/lesverhaal.js'></script>
 		<script src='code/userdata.js'></script>
+		<script src='code/lesverhaal.js'></script>
 		<link rel='stylesheet' href='code/style.css'/>
 	</head>
 	<body onkeypress='keypress(event)'>
+		<div id='userdata'></div>
 		<audio id='music' loop='loop'></audio>
 		<audio id='sound'></audio>
 		<div id='error'>
@@ -18,20 +19,9 @@
 			<p>The connection with the server is attempted.</p>
 			<p>If this message does not disappear, there is a problem. There may be messages in the debugging console that identify the problem.</p>
 		</div>
-		<div id='login'>
-			<h1>Log in to Lesverhaal</h1>
-			<form onsubmit='return log_in()'>
-				Name: <input type='text' id='loginname'/><br/>
-				Class: <input type='text' id='class'/><br/>
-				Password: <input type='password' id='password'/><br/>
-				<input type='submit' value='Log in'/>
-			</form>
-		</div>
 		<div id='contents'>
 			<div id='logout'><button type='button' onclick='log_out()'>Log out</button></div>
-			<ul id='chapters'></ul>
-			<hr/>
-			<ul id='sections'></ul>
+			<ul id='scripts'></ul>
 		</div>
 		<div id='game'>
 			<img id='bg'/>
