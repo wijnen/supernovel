@@ -1,4 +1,10 @@
 "use strict";
+// Translations are not implemented yet, but preparations are made. Make sure things don't break. {{{
+function _(message) {
+	return message;
+}
+// }}}
+
 // Globals. {{{
 
 var server;	// Handle for server communication.
@@ -128,7 +134,7 @@ function SpriteState(ref) { // {{{
 
 function select_ui(shown, other) { // {{{
 	// Hide all elements except one (or two).
-	var ui_elements = ['error', 'userdata', 'videodiv', 'contents', 'question', 'game', 'sandbox'];
+	var ui_elements = ['error', 'videodiv', 'contents', 'question', 'game'];
 	var found_shown = false;
 	var found_other = other === undefined;
 	for (var e = 0; e < ui_elements.length; ++e) {
@@ -173,11 +179,14 @@ function Sprite(ref) { // {{{
 	this.state = function(now) {
 		// Compute current state at time now.
 		var ret;
-		if (this.start_time === null || this.duration === null || this['with'] === null) {
+		if (this.start_time === null || this.duration === null) {
 			ret = new SpriteState(this.from);
 			ret.extra = null;
 		}
 		else {
+			// Default animation type to 'move'.
+			if (this['with'] === null)
+				this['with'] = 'move';
 			setTimeout(function() { animate(true); }, 0);
 			var phase = (now - this.start_time) / this.duration;
 			if (phase >= 1) {
@@ -198,15 +207,26 @@ function Sprite(ref) { // {{{
 	};
 } // }}}
 
-function get_img(imageid, cb) { // {{{
+function get_img(tag, mood, cb) { // {{{
 	// Get an image from the cache, or load it if it wasn't in the cache yet.
 	// Call cb when the image is loaded. Its argument is the image with attributes url (the data url), size (w, h) and hotspot (x, y).
 	// Returns undefined.
-	if (img_cache[imageid] !== undefined) {
-		setTimeout(function() { cb(img_cache[imageid]); }, 0);
+	if (tag === undefined)
+		console.error('undefined image requested');
+	if (img_cache[tag] !== undefined && img_cache[tag][mood] !== undefined) {
+		//console.info('getting image from cache', tag, mood);
+		cb(img_cache[tag][mood]);
 		return;
 	}
-	server.call('get_image', [imageid], {}, cb);
+	server.call('get_sprite_image', [tag, mood], {}, function(image) {
+		//console.info('getting image from server', tag, mood);
+		image.tag = tag;
+		image.mood = mood;
+		if (img_cache[tag] === undefined)
+			img_cache[tag] = {};
+		img_cache[tag][mood] = image;
+		cb(image);
+	});
 } // }}}
 
 function DisplaySprite() { // {{{
@@ -225,8 +245,8 @@ function DisplaySprite() { // {{{
 			return false;
 		}
 		me.div.style.zIndex = sprite_state.position[2];
-		//console.info(sprite_state.image, sprite_state.position[0], sprite_state.position[1]);
-		get_img(sprite_state.image.imageid, function(img) {
+		//console.info(sprite_state, sprite_state.image, sprite_state.position[0], sprite_state.position[1]);
+		get_img(sprite_state.image.tag, sprite_state.image.mood, function(img) {
 			me.img.src = img.url;
 			var size;
 			if (sprite_state.image.size !== null)
@@ -246,6 +266,7 @@ function DisplaySprite() { // {{{
 			var hy = hotspot[1] * size[1] * 100;
 			me.div.style.left = (x - hx) + '%';
 			me.div.style.bottom = (y - hy) + '%';
+			//console.info('sprite', sprite_state.image.tag, 'x', x, 'hx', hx, 'y', y, 'hy', hy, 'scale', screen_scale, 'size', size, 'bgsize', state.background.size);
 			me.div.style.width = screen_scale * size[0] * state.background.size[0] + 'px';
 			me.div.style.height = screen_scale * size[1] * state.background.size[1] + 'px';
 			me.div.style.transformOrigin = hotspot[0] * 100 + '% ' + (1 - hotspot[1]) * 100 + '%';
@@ -325,23 +346,29 @@ function State(ref) { // {{{
 				delete all_sprites[s];
 			}
 		}
+		var run_queue = [];
 		for (var s in this.sprite) {
 			if (all_sprites[s] === undefined)
 				all_sprites[s] = new DisplaySprite();
 			if (all_sprites[s].update(this.sprite[s], now)) {
 				// Animation done; call cb.
-				if (all_sprites[s].cb)
-					setTimeout(function() { all_sprites[s].cb(now, all_sprites[s].extra); }, 0);
+				if (all_sprites[s].cb) {
+					run_queue.push({target: all_sprites[s].cb, args: [now, all_sprites[s].extra], self: all_sprites[s]});
+					all_sprites[s].cb = null;
+				}
 			}
 		}
 
 		// If any sleeper is ready, run it.
-		while (this.sleeping_threads.length > 0 && this.sleeping_threads[0][0] < now) {
+		while (this.sleeping_threads.length > 0 && this.sleeping_threads[0].when < now) {
 			var w = this.sleeping_threads.splice(0, 1)[0];
-			(function (w) { setTimeout(function() { activate(w[1], now, now - w[0], false); }, 0); })(w);
+			run_queue.push({target: activate, args: [w.thread, now, now - w.when, false], self: this});
 		}
 		if (this.sleeping_threads.length > 0)
-			setTimeout(function() { animate(true); }, 0);
+			run_queue.push({target: animate, args: [true], self: this});
+		for (var r = 0; r < run_queue.length; ++r) {
+			run_queue[r].target.apply(run_queue[r].self, run_queue[r].args);
+		}
 	}; // }}}
 }; // }}}
 
@@ -371,7 +398,12 @@ function activate(name, now, extra, fast_forward) { // {{{
 	// name: the thread to activate.
 	// now: the time that this activation is supposed to run. This may be (slightly) in the past. (optional)
 	// Returns undefined.
+	//console.info('running', name, state.thread);
 	var current = state.thread[name];
+	if (current === undefined) {
+		console.info('not running thread because it does not exist:', name, state.thread)
+		return;
+	}
 	if (now === undefined) {
 		now = performance.now();
 		current.start = now;
@@ -383,8 +415,11 @@ function activate(name, now, extra, fast_forward) { // {{{
 		var action = current.script[current.pos];
 		if (action === undefined) {
 			delete state.thread[name];
-			if (current.cb)
-				current.cb(now - current.start);
+			if (current.cb) {
+				var cb = current.cb;
+				current.cb = null;
+				cb(now - current.start);
+			}
 			state.draw(now);
 			break;
 		}
@@ -396,7 +431,10 @@ function activate(name, now, extra, fast_forward) { // {{{
 			state.speaker.text = action.text;
 			state.speaker.image = action.image;
 			if (action.image !== null) {
-				// TODO.
+				get_img(action.target, action.mood, function(image) {
+					// XXX use size and hotspot?
+					elements.speaker_image.src = image.url;
+				});
 			}
 			//console.info('pushing new prev state; waiting:', state.waiting_threads.length);
 			prev_states.push(new State(state));
@@ -406,7 +444,7 @@ function activate(name, now, extra, fast_forward) { // {{{
 		else if (action.action == 'wait') {
 			if (!fast_forward) {
 				console.assert(typeof action.time == 'number', 'value of "time" must be a number');
-				state.sleeping_threads.push([now + action.time * 1000, name]);
+				state.sleeping_threads.push({when: now + action.time * 1000, thread: name});
 				state.sleeping_threads.sort();
 				break;
 			}
@@ -416,26 +454,28 @@ function activate(name, now, extra, fast_forward) { // {{{
 			pending_music = null;
 			state.music = action.target;
 			if (action.target === null) {
-				delete music.src;
-				music.pause();
+				// FIXME delete music.src;
+				// FIXME music.pause();
 			}
 			else {
-				music.src = action.target;
-				music.play();
+				// FIXME music.src = action.target;
+				// FIXME music.play();
 			}
 		}
 		else if (action.action == 'sound') {
 			if (action.target === null) {
-				delete sound.src;
-				sound.pause();
+				// FIXME delete sound.src;
+				// FIXME sound.pause();
 			}
 			else {
-				sound.src = action.target;
-				sound.play();
+				// FIXME sound.src = action.target;
+				// FIXME sound.play();
 			}
 		}
 		else if (action.action == 'serial') {
+			//console.info('running serial', action);
 			new_thread(action.actions, function(extra) {
+				//console.info('serial done; resuming', name);
 				activate(name, now, extra, fast_forward);
 			}, name + '+', now, fast_forward);
 			return;
@@ -443,8 +483,11 @@ function activate(name, now, extra, fast_forward) { // {{{
 		else if (action.action == 'parallel') {
 			var wait = action.actions.length;
 			for (var a = 0; a < action.actions.length; ++a) {
+				//console.info('running parallel thread', name, a);
 				new_thread([action.actions[a]], function(extra) {
+					//console.info('finished one parallel component; waiting was', wait);
 					if (--wait == 0) {
+						//console.info('parallel done, resuming', name);
 						activate(name, now, extra, fast_forward);
 					}
 				}, name + '+' + a, now, fast_forward)
@@ -452,6 +495,7 @@ function activate(name, now, extra, fast_forward) { // {{{
 			return;
 		}
 		else if (action.action == 'scene') {
+			//console.info('scene');
 			// TODO: transitions.
 			// Remove all sprites.
 			for (var s in all_sprites)
@@ -459,7 +503,7 @@ function activate(name, now, extra, fast_forward) { // {{{
 			all_sprites = [];
 			// Set new background.
 			if (action.target) {
-				get_img(action.target, function(img) {
+				get_img(action.target, '', function(img) {
 					state.background = img;
 					resize();
 					activate(name, now, 0, fast_forward);
@@ -474,48 +518,55 @@ function activate(name, now, extra, fast_forward) { // {{{
 		}
 		else {
 			var target = action.target;
-			var image = action.image;
-			var args = action.args;
-			var current_sprite;
-			if (action.action == 'show') {
-				if (state.sprite[action.target] === undefined) {
-					current_sprite = new Sprite();
-					state.sprite[action.target] = current_sprite;
-					current_sprite.from.position = args.from;
-					current_sprite.from.image = image;
+			get_img(action.target, action.mood, function(image) {
+				var args = action.args;
+				var current_sprite;
+				if (action.action == 'show') {
+					if (state.sprite[action.target] === undefined) {
+						current_sprite = new Sprite();
+						state.sprite[action.target] = current_sprite;
+						current_sprite.from.position = args.from;
+						current_sprite.from.image = image;
+					}
 				}
-			}
-			else if (action.action == 'hide') {
-				// TODO
-			}
-			else {
-				console.assert(action.action == 'move', 'invalid action "' + action.action + '"', action);
-				// Nothing to prepare; only common handling below is required.
-			}
-			current_sprite = state.sprite[action.target];
-			current_sprite.to.position = args.to;
-			current_sprite.to.image = image;
-			current_sprite.to.scale = args.scale;
-			current_sprite.to.rotation = args.rotation;
-			current_sprite.to.around = args.around;
-			if (!fast_forward && args['in'] !== null) {
-				console.assert(typeof args['in'] == 'number', 'value of "in" must be a number');
-				current_sprite.start_time = now;
-				current_sprite['with'] = args['with'];
-				current_sprite.duration = args['in'] * 1000;
-				current_sprite.cb = function(now, extra) { activate(name, now, extra, fast_forward); };
-				animate(true);
-				break;
-			}
-			else {
-				if (args.to !== null)
-					current_sprite.from.position = args.to;
-				if (args.scale !== null)
-					current_sprite.from.scale = args.scale;
-				current_sprite.from.image = image;
-				current_sprite.start_time = null;
-				current_sprite['with'] = null;
-			}
+				else if (action.action == 'hide') {
+					// TODO
+				}
+				else {
+					console.assert(action.action == 'move', 'invalid action "' + action.action + '"', action);
+					// Nothing to prepare; only common handling below is required.
+				}
+				current_sprite = state.sprite[action.target];
+				current_sprite.to.position = args.to;
+				current_sprite.to.image = image;
+				current_sprite.to.scale = args.scale;
+				current_sprite.to.rotation = args.rotation;
+				current_sprite.to.around = args.around;
+				if (!fast_forward && args['in'] !== null) {
+					console.assert(typeof args['in'] == 'number', 'value of "in" must be a number');
+					current_sprite.start_time = now;
+					current_sprite['with'] = args['with'];
+					current_sprite.duration = args['in'] * 1000;
+					current_sprite.cb = function(now, extra) {
+						activate(name, now, extra, fast_forward);
+					};
+					animate(true);
+					return;
+				}
+				else {
+					if (args.to !== null)
+						current_sprite.from.position = args.to;
+					if (args.scale !== null)
+						current_sprite.from.scale = args.scale;
+					current_sprite.from.image = image;
+					current_sprite.start_time = null;
+					current_sprite['with'] = null;
+				}
+				//console.info('instant activation', name);
+				activate(name, now);
+			});
+			// End function now; it will restart at callback.
+			return;
 		}
 	}
 	if (state.waiting_threads.length == 0) {
@@ -570,17 +621,10 @@ var Connection = { // {{{
 	userdata_setup: userdata_setup,
 	replaced: function() {	// {{{ Connection has been replaced by new connection.
 		is_replaced = true;
-		alert('De verbinding is overgenomen door een nieuwe login');
+		alert(_('The connection was replaced by a new login'));
 		is_replaced = false;
 		server.close();
 		init();
-	}, // }}}
-	login: function() {	// {{{ Player needs to log in.
-		select_ui('userdata');
-		video.pause();
-		music.pause();
-		sound.pause();
-		userdata_setup.call(this, arguments);
 	}, // }}}
 	contents: function(data) {	// {{{ Update chapter and script contents.
 		scripts.ClearAll();
@@ -594,9 +638,10 @@ var Connection = { // {{{
 			buttons[c].type = 'button';
 		}
 	}, // }}}
-	main: function() {	// {{{ Show book and chapter selection.
+	main: function(myname) {	// {{{ Show book and chapter selection.
 		elements.bg.AddClass('hidden');
 		select_ui('contents');
+		document.getElementById('login').ClearAll().AddText(myname);
 		video.pause();
 		music.pause();
 		sound.pause();
@@ -625,7 +670,7 @@ var Connection = { // {{{
 			elements.speaker.style.display = 'none';
 			speech.innerHTML = '';
 			var get_value;
-			var button_text = 'Antwoord';
+			var button_text = _('Answer');
 			var send_answer = function() {
 				var answer = get_value();
 				if (answer === null)
@@ -654,20 +699,20 @@ var Connection = { // {{{
 					}
 					var button = form.AddElement('p').AddElement('button');
 					button.type = 'button';
-					button.AddText('Answer');
+					button.AddText(_('Answer'));
 					button.AddEvent('click', function() {
 						for (var o = 0; o < choices.length; ++o) {
 							if (choices[o].checked)
 								break;
 						}
 						if (o < choices.length)
-							server.call('answer', [[o, l.value]]);
+							server.call('answer', [[o + 1, l.value]]);
 						else
-							alert('Please select your answer');
+							alert(_('Please select your answer'));
 					});
 					if (last_answer != null) {
 						div.AddElement('hr');
-						var button = div.AddElement('button', 'choicebutton').AddText('Herhaal laatste antwoord: ' + last_answer[1] + ': ' + options[last_answer[0]]);
+						var button = div.AddElement('button', 'choicebutton').AddText(_('Repeat last answer') + ': ' + last_answer[1] + ': ' + options[last_answer[0] - 1]);
 						button.type = 'button';
 						button.AddEvent('click', function() {
 							server.call('answer', [last_answer]);
@@ -699,12 +744,12 @@ var Connection = { // {{{
 						button.type = 'button';
 						button.value = o;
 						button.AddEvent('click', function() {
-							server.call('answer', [Number(this.value)]);
+							server.call('answer', [Number(this.value) + 1]);
 						});
 					}
 					if (last_answer != null) {
 						div.AddElement('hr');
-						var button = div.AddElement('button', 'choicebutton').AddText('Repeat last answer: ' + options[last_answer]);
+						var button = div.AddElement('button', 'choicebutton').AddText(_('Repeat last answer') + ': ' + options[last_answer - 1]);
 						button.type = 'button';
 						button.AddEvent('click', function() {
 							server.call('answer', [last_answer]);
@@ -743,7 +788,7 @@ var Connection = { // {{{
 				send_answer();
 			}).type = 'button';
 			if (last_answer != null) {
-				form.AddElement('button').AddText('Repeat last answer: ' + last_answer).AddEvent('click', function() {
+				form.AddElement('button').AddText(_('Repeat last answer') + ': ' + last_answer).AddEvent('click', function() {
 					server.call('answer', [last_answer]);
 				}).type = 'button';
 			}
@@ -765,22 +810,25 @@ var Connection = { // {{{
 	}, // }}}
 }; // }}}
 
+function restart() { // {{{
+	elements.bg.AddClass('hidden');
+	video.pause();
+	music.pause();
+	sound.pause();
+
+	select_ui('error');
+	elements.speaker.style.display = 'none';
+} // }}}
+
 function init() { // {{{
 	// Initialize everything.
 	// Returns undefined.
 
 	// Fill global variables.
 	elements = {};
-	var varnames = ['error', 'videodiv', 'video', 'contents', 'scripts', 'question', 'speechbox', 'navigation', 'spritebox', 'sandbox', 'speaker', 'speaker_image', 'speech', 'bg', 'game', 'music', 'sound', 'userdata'];
+	var varnames = ['error', 'videodiv', 'video', 'contents', 'scripts', 'question', 'speechbox', 'navigation', 'spritebox', 'speaker', 'speaker_image', 'speech', 'bg', 'game', 'music', 'sound'];
 	for (var i = 0; i < varnames.length; ++i)
 		elements[varnames[i]] = document.getElementById(varnames[i]);
-
-	video.pause();
-	music.pause();
-	sound.pause();
-
-	select_ui('error', 'userdata');
-	elements.speaker.style.display = 'none';
 
 	// Handle clicks on screen for progression.
 	spritebox.AddEvent('click', function(event) {
@@ -810,7 +858,7 @@ function init() { // {{{
 		}
 		catch (err) {
 			try {
-				alert('De verbinding met de server is verbroken en kan niet worden hersteld.');
+				alert(_('The connection with the server was lost and could not be reestablished.'));
 			}
 			catch (err) {
 			}
@@ -824,8 +872,8 @@ function resize() { // {{{
 	if (state === undefined)
 		state = new State();
 	screen_scale = Math.min(window.innerWidth / state.background.size[0], window.innerHeight / state.background.size[1]);
-	elements.game.style.left = (window.innerWidth - state.background.size[0] * screen_scale) / 2 + 'px';
-	elements.game.style.top = (window.innerHeight - state.background.size[1] * screen_scale) / 2 + 'px';
+	elements.game.style.left = 'calc(50vw - ' + state.background.size[0] * screen_scale / 2 + 'px)';
+	elements.game.style.top = 'calc(50vh - ' + state.background.size[1] * screen_scale / 2 + 'px)';
 	elements.game.style.width = state.background.size[0] * screen_scale + 'px';
 	elements.game.style.height = state.background.size[1] * screen_scale + 'px';
 	state.draw(performance.now(), true);
@@ -835,8 +883,8 @@ window.AddEvent('resize', resize);
 function log_out() { // {{{
 	// The log out button is clicked.
 	// Returns undefined.
-	elements.bg.AddClass('hidden');
-	Connection.login();
+	restart();
+	server.call('userdata_logout');
 } // }}}
 // }}}
 
@@ -856,13 +904,19 @@ function next_kinetic(finish) { // {{{
 	if (state.show_question || state.waiting_threads.length == 0)
 		return;
 	if (finish) {
-		while (state.sleeping_threads.length > 0)
-			activate(state.sleeping_threads.splice(0, 1)[1], now, 0, true);
-		while (!state.show_question && state.waiting_threads.length > 0)
+		while (state.sleeping_threads.length > 0) {
+			//console.info('waking up for finish', state.sleeping_threads[0]);
+			activate(state.sleeping_threads.splice(0, 1).thread, now, 0, true);
+		}
+		while (!state.show_question && state.waiting_threads.length > 0) {
+			//console.info('waking up for finish', state.waiting_threads[state.waiting_threads.length - 1]);
 			activate(state.waiting_threads.pop(), undefined, undefined, true);
+		}
 	}
-	else
+	else {
+		//console.info('waking up', state.waiting_threads[state.waiting_threads.length - 1]);
 		activate(state.waiting_threads.pop());
+	}
 } // }}}
 
 function prev_kinetic(full) { // {{{

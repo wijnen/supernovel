@@ -1,6 +1,6 @@
 -- This is a comment; indentation is irrelevant.
-comment: also a comment. Indentation must be valid
-comment:
+comment also a comment. Indentation must be valid
+comment
 	(Possibly) multi-line comment.
 	Indentation must also be valid.
 	  Extra indentation within the comment is allowed.
@@ -11,15 +11,15 @@ label <labelname>
 -- goto is allowed everywhere; it will pop the entire call stack and jump to the label.
 goto <labelname>
 $ single line Lua code
-code: single line Lua code
-code:
+code single line Lua code
+code
 	(Possibly) multi line Lua code.
 video videoid	-- TODO
 
 -- Question examples:
 question short variable Single line question
 question hidden variable value
-question choice variable:
+question choice variable
 	(Possibly) multi-line question
 	Text substitutions are performed on the question text.
 option first option

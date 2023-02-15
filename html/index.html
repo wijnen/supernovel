@@ -15,20 +15,20 @@
 		<audio id='music' loop='loop'></audio>
 		<audio id='sound'></audio>
 		<div id='error'>
-			<h1>Please Wait</h1>
-			<p>The connection with the server is attempted.</p>
-			<p>If this message does not disappear, there is a problem. There may be messages in the debugging console that identify the problem.</p>
+			<h1 class='translate'>Please Wait</h1>
+			<p class='translate'>The connection with the server is attempted.</p>
+			<p class='translate'>If this message does not disappear, there is a problem. There may be messages in the debugging console that identify the problem.</p>
 		</div>
 		<div id='contents'>
-			<div id='logout'><button type='button' onclick='log_out()'>Log out</button></div>
+			<div id='logout'>Logged in as <span id='login'></span> <button type='button' onclick='log_out()' class='translate'>Log out</button></div>
 			<ul id='scripts'></ul>
 		</div>
 		<div id='game'>
 			<img id='bg'/>
 			<div id='videodiv'>
 				<video id='video' preload='auto' controls></video><br/>
-				Speed: <input type='number' id='speed' onchange='speed()' value='100'/>%<br/>
-				<button onclick='video_done()'>Continue</button>
+				<span class='translate'>Speed</span>: <input type='number' id='speed' onchange='speed()' value='100'/>%<br/>
+				<button onclick='video_done()' class='translate'>Continue</button>
 			</div>
 			<div id='navigation'>
 				<button type='button' class='navbutton' id='navfirst' onclick='prev_kinetic(true)'>&#x21e4;</button>
@@ -45,6 +45,5 @@
 			</div>
 			<div id='question'></div>
 		</div>
-		<div id='sandbox'></div>
 	</body>
 </html>

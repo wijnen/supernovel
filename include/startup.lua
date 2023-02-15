@@ -1,15 +1,15 @@
 function check(args)
-	--result, quantity = None, value = None, digits = None, unit = None, error = None):
+	--result, quantity = nil, value = nil, digits = nil, unit = nil, error = nil
 	--[[Check an answer. Result is the object that was returned from the question.
 	Returns true if the result is acceptable according to the given constraints, false otherwise.
 	For digits and error:
-		If both are None: the value must match exactly.
-		If only digits is None: the difference must not be larger than error.
-		If only error is None: the number of digits and the value must match.
-		If both are not None: the number of digits must match, but the error may be as large as the given value.
+		If both are nil: the value must match exactly.
+		If only digits is nil: the difference must not be larger than error.
+		If only error is nil: the number of digits and the value must match.
+		If both are not nil: the number of digits must match, but the error may be as large as the given value.
 	]]
 	-- Check that the quantity starts with the correct symbol(s)
-	if args.quantity is not None and (result.quantity == nil or not result.quantity:match(('^' .. args.quantity))) then
+	if args.quantity ~= nil and (result.quantity == nil or not result.quantity:match(('^' .. args.quantity))) then
 		return false
 	end
 	-- Check if value is correct according to the number of digits.
@@ -72,8 +72,8 @@ function get_num_answers(question)
 	return #(user.answers[user.chapter][question])
 end
 
-function get_answer(question, index):
-	-- If the requested answer doesn't exist, return None.
+function get_answer(question, index)
+	-- If the requested answer doesn't exist, return nil.
 	local answers = user.answers[user.chapter][question]
 	if answers == nil then return nil end
 	if index == nil then index = #answers end

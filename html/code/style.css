@@ -7,7 +7,7 @@ body {
 	overflow: hidden;
 }
 
-#userdata, #videodiv, #question {
+#videodiv, #question {
 	display: none;
 	position: absolute;
 	left: 0px;
@@ -127,6 +127,15 @@ ul {
 #game {
 	position: fixed;
 	overflow: hidden;
+}
+
+#bg {
+	position: absolute;
+	overflow: hidden;
+	top: 0px;
+	left: 0px;
+	bottom: 0px;
+	right: 0px;
 }
 
 .hidden {
