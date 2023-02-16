@@ -8,8 +8,10 @@ function _(message) {
 // Globals. {{{
 
 var server;	// Handle for server communication.
+var screen_size = [1920, 1080];	// Size of the screen, in pixels. Defaults to [1920, 1080].
 var all_sprites = {};	// All screen sprites.
-var img_cache = {};	// Cache of loaded images; keys are urls, values are data urls.
+var img_cache = {};	// Cache of loaded images; keys are tags, values are objects with mood keys and values of {url, size, hotspot, tag, mood}.
+var audio_cache = {};	// Cache of loaded audio; keys are audioids, values are {url, duration, audioid}.
 var screen_scale = 1;	// Scale for background and sprites.
 var pending_music = null;	// Delay starting music because browsers don't allow it.
 var elements; // DOM elements.
@@ -88,10 +90,10 @@ function SpriteState(ref) { // {{{
 		else {
 			if (with_ == 'move') {
 				if (ret.around === null)
-					// No rotation: simple interposlation.
+					// No rotation: simple interpolation.
 					ret.position = [mix_array(phase, this.position[0], to.position[0]), mix_array(phase, this.position[1], to.position[1]), mix_num(phase, this.position[2], to.position[2])];
 				else {
-					var ratio = state.background.size[1] / state.background.size[0];
+					var ratio = screen_size[1] / screen_size[0];
 					// Rotate around some point. Compute starting and ending angles and radii; mix those.
 					var from_vect = [this.position[0][1] - ret.around[0], (this.position[1][1] - ret.around[1]) / ratio];
 					var to_vect = [to.position[0][1] - ret.around[0], (to.position[1][1] - ret.around[1]) / ratio];
@@ -209,7 +211,7 @@ function Sprite(ref) { // {{{
 
 function get_img(tag, mood, cb) { // {{{
 	// Get an image from the cache, or load it if it wasn't in the cache yet.
-	// Call cb when the image is loaded. Its argument is the image with attributes url (the data url), size (w, h) and hotspot (x, y).
+	// Call cb when the image is loaded. Its argument is the image with attributes url (the data url), size (w, h), hotspot (x, y), tag and mood.
 	// Returns undefined.
 	if (tag === undefined)
 		console.error('undefined image requested');
@@ -229,13 +231,36 @@ function get_img(tag, mood, cb) { // {{{
 	});
 } // }}}
 
+function get_audio(audioid, cb) { // {{{
+	// Get an audio data url from the cache, or load it if it wasn't in the cache yet.
+	// Call cb when the file is loaded. Its argument is the image with attributes url (the data url), duration and audioid.
+	// Returns undefined.
+	if (audioid === undefined)
+		console.error('undefined audio requested');
+	if (audio_cache[audioid] !== undefined) {
+		//console.info('getting audio from cache', audioid);
+		cb(audio_cache[audioid]);
+		return;
+	}
+	server.call('get_audio', [audioid], {}, function(audio) {
+		//console.info('getting audio from server', audioid);
+		if (audio === null) {
+			cb(null);
+			return;
+		}
+		audio.audioid = audioid;
+		audio_cache[audioid] = audio;
+		cb(audio);
+	});
+} // }}}
+
 function DisplaySprite() { // {{{
 	// Class that defines one sprite that is currently displayed.
 	// Construct with new.
 	var me = this;
 	this.div = spritebox.AddElement('div', 'sprite');
 	this.img = this.div.AddElement('img');
-	this.update = function(current_sprite, now) {
+	this.update = function(current_sprite, now) { // {{{
 		// Update this sprite according to a state Sprite.
 		this.cb = current_sprite.cb;
 		var sprite_state = current_sprite.state(now);
@@ -246,34 +271,34 @@ function DisplaySprite() { // {{{
 		}
 		me.div.style.zIndex = sprite_state.position[2];
 		//console.info(sprite_state, sprite_state.image, sprite_state.position[0], sprite_state.position[1]);
-		get_img(sprite_state.image.tag, sprite_state.image.mood, function(img) {
-			me.img.src = img.url;
-			var size;
-			if (sprite_state.image.size !== null)
-				size = sprite_state.image.size;
-			else
-				size = [img.size[0] / state.background.size[0], img.size[1] / state.background.size[1]];
-			var hotspot = [];
-			for (var i = 0; i < 2; ++i) {
-				if (sprite_state.position[i][0] == 0)
-					hotspot.push(sprite_state.image.hotspot[i]);
-				else
-					hotspot.push(img.hotspot[i]);
+		get_img(sprite_state.image.tag, sprite_state.image.mood, function(img) { // {{{
+			if (img === null) {
+				delete me.img.src;
+				console.warn('image does not exist', sprite_state.image.tag, sprite_state.image.mood);
+				return;
 			}
-			var x = (sprite_state.position[0][1] + 1) / 2 * 100;
-			var hx = (hotspot[0] + 1) / 2 * size[0] * 100;
-			var y = sprite_state.position[1][1] * 100;
-			var hy = hotspot[1] * size[1] * 100;
-			me.div.style.left = (x - hx) + '%';
-			me.div.style.bottom = (y - hy) + '%';
-			//console.info('sprite', sprite_state.image.tag, 'x', x, 'hx', hx, 'y', y, 'hy', hy, 'scale', screen_scale, 'size', size, 'bgsize', state.background.size);
-			me.div.style.width = screen_scale * size[0] * state.background.size[0] + 'px';
-			me.div.style.height = screen_scale * size[1] * state.background.size[1] + 'px';
-			me.div.style.transformOrigin = hotspot[0] * 100 + '% ' + (1 - hotspot[1]) * 100 + '%';
-			me.div.style.transform = 'rotate(' + sprite_state.rotation * 360 + 'deg)';
-		});
+			me.img.src = img.url;
+			// Compute reference, in image pixels ([0, 0] is hotspot, positive directions are towards top right).
+			var reference = [];
+			for (var i = 0; i < 2; ++i) {
+				var c = sprite_state.position[i][0];
+				// Position is based on sprite edge.
+				if (c >= 0)
+					reference.push((img.size[i] - img.hotspot[i]) * c);
+				else
+					reference.push(img.hotspot[i] * c);
+			}
+			var x = (sprite_state.position[0][1] + 1) / 2 * screen_size[0];
+			var y = sprite_state.position[1][1] * screen_size[1];
+			me.div.style.left = (x - reference[0] * sprite_state.scale[0]) * screen_scale + 'px';
+			me.div.style.bottom = (y - reference[1] * sprite_state.scale[1]) * screen_scale + 'px';
+			me.div.style.width = img.size[0] * screen_scale + 'px';
+			me.div.style.height = img.size[1] * screen_scale + 'px';
+			me.div.style.transformOrigin = img.hotspot[0] * screen_scale + 'px ' + (img.size[1] - img.hotspot[1] - 1) * screen_scale + 'px';
+			me.div.style.transform = 'rotate(' + sprite_state.rotation * 360 + 'deg) scale(' + sprite_state.scale[0] + ',' + sprite_state.scale[1] + ')';
+		}); // }}}
 		return sprite_state.extra !== null;
-	};
+	}; // }}}
 	this.remove = function() {
 		spritebox.removeChild(this.div);
 	};
@@ -287,7 +312,7 @@ function State(ref) { // {{{
 	this.waiting_threads = [];	// Stack of threads that are currently waiting for next_kinetic. Usually length 0 or 1.
 	this.sleeping_threads = [];	// Sorted list of threads that are in a wait instruction.
 	this.show_question = false;	// Flag for next_kinetic to be disabled when a question is shown.
-	this.background = (state && state.background ? state.background : {url: '', size: [1280, 1024]});
+	this.background = (state && state.background ? state.background : '');
 	this.sprite = {};
 	this.speaker = {name: null, image: null, text: null};
 	this.music = null;
@@ -311,8 +336,8 @@ function State(ref) { // {{{
 
 		// Background.
 		if (!this.background)
-			this.background = {url: '', size: [1280, 1024]};
-		elements.bg.src = this.background.url;
+			this.background = '';
+		elements.bg.src = this.background;
 		if (this.background.url)
 			elements.bg.RemoveClass('hidden');
 		else
@@ -454,22 +479,38 @@ function activate(name, now, extra, fast_forward) { // {{{
 			pending_music = null;
 			state.music = action.target;
 			if (action.target === null) {
-				// FIXME delete music.src;
-				// FIXME music.pause();
+				delete music.src;
+				music.pause();
 			}
 			else {
-				// FIXME music.src = action.target;
-				// FIXME music.play();
+				get_audio(action.target, function(audio) {
+					if (audio === null) {
+						delete music.src;
+						music.pause();
+					}
+					else {
+						music.src = audio.url;
+						music.play();
+					}
+				});
 			}
 		}
 		else if (action.action == 'sound') {
 			if (action.target === null) {
-				// FIXME delete sound.src;
-				// FIXME sound.pause();
+				delete sound.src;
+				sound.pause();
 			}
 			else {
-				// FIXME sound.src = action.target;
-				// FIXME sound.play();
+				get_audio(action.target, function(audio) {
+					if (audio === null) {
+						delete sound.src;
+						sound.pause();
+					}
+					else {
+						sound.src = audio.url;
+						sound.play();
+					}
+				});
 			}
 		}
 		else if (action.action == 'serial') {
@@ -504,7 +545,7 @@ function activate(name, now, extra, fast_forward) { // {{{
 			// Set new background.
 			if (action.target) {
 				get_img(action.target, '', function(img) {
-					state.background = img;
+					state.background = img.url;
 					resize();
 					activate(name, now, 0, fast_forward);
 				});
@@ -530,7 +571,10 @@ function activate(name, now, extra, fast_forward) { // {{{
 					}
 				}
 				else if (action.action == 'hide') {
-					// TODO
+					if (fast_forward || args['in'] === null) {
+						delete state.sprite[action.target];
+						return;
+					}
 				}
 				else {
 					console.assert(action.action == 'move', 'invalid action "' + action.action + '"', action);
@@ -548,6 +592,8 @@ function activate(name, now, extra, fast_forward) { // {{{
 					current_sprite['with'] = args['with'];
 					current_sprite.duration = args['in'] * 1000;
 					current_sprite.cb = function(now, extra) {
+						if (action.action == 'hide')
+							delete state.sprite[action.target];
 						activate(name, now, extra, fast_forward);
 					};
 					animate(true);
@@ -871,11 +917,11 @@ window.AddEvent('load', init);
 function resize() { // {{{
 	if (state === undefined)
 		state = new State();
-	screen_scale = Math.min(window.innerWidth / state.background.size[0], window.innerHeight / state.background.size[1]);
-	elements.game.style.left = 'calc(50vw - ' + state.background.size[0] * screen_scale / 2 + 'px)';
-	elements.game.style.top = 'calc(50vh - ' + state.background.size[1] * screen_scale / 2 + 'px)';
-	elements.game.style.width = state.background.size[0] * screen_scale + 'px';
-	elements.game.style.height = state.background.size[1] * screen_scale + 'px';
+	screen_scale = Math.min(window.innerWidth / screen_size[0], window.innerHeight / screen_size[1]);
+	elements.game.style.left = 'calc(50vw - ' + screen_size[0] * screen_scale / 2 + 'px)';
+	elements.game.style.top = 'calc(50vh - ' + screen_size[1] * screen_scale / 2 + 'px)';
+	elements.game.style.width = screen_size[0] * screen_scale + 'px';
+	elements.game.style.height = screen_size[1] * screen_scale + 'px';
 	state.draw(performance.now(), true);
 } // }}}
 window.AddEvent('resize', resize);

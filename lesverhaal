@@ -1044,6 +1044,15 @@ class Connection: # {{{
 		#print('image id', imageid, 'from', repr(self.user['sprite']), 'data', data[0][0][:30])
 		return {'url': data[0][0], 'size': (data[0][1], data[0][2]), 'hotspot': (data[0][3], data[0][4])}
 	# }}}
+	def get_audio(self, audioid): # {{{
+		'Retrieve audio from database. Return data url.'
+		wake = (yield)
+		data = (yield from serverdata.select('audio', ('url', 'duration'), ('=', 'id', audioid), wake = wake))
+		if len(data) != 1:
+			log('failed to get audio %s' % audioid)
+			return None
+		return {'url': data[0][0], 'duration': data[0][1]}
+	# }}}
 	def home(self): # {{{
 		if self.busy and not force:
 			traceback.print_stack()
