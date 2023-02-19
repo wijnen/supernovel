@@ -44,156 +44,11 @@ def fromsuper(src):
 
 # List of all currently logged in users.
 users = {}
+admins = {}
 
-class Admin_Connection: # {{{ Class for handling admin connections.
-	def __init__(self, my_id, my_name, my_userdata, my_remote, managed_name): # {{{
-		self.id = my_id
-		self.name = my_name
-		self.userdata = my_userdata
-		self.remote = my_remote
-		self.remote.closed = self._closed
-	# }}}
-	def _init(self, wake): # {{{
-		self.user = None
-		self.refresh = lambda: self.remote.login.event()
-		self.remote.login.event()
-	# }}}
-	def login(self, name, password): # {{{
-		u = user.load(name.strip(), 'admin')
-		if u is None:
-			debug(2, 'Invalid admin {} from {}:{}'.format(name, *self.remote.socket.remote))
-			return False
-		crypted = crypt(password, salt = u['password'])
-		if crypted != u['password']:
-			debug(2, 'Invalid password for {} from {}:{}'.format(name, *self.remote.socket.remote))
-			return False
-		if not self._login(name.strip()):
-			debug(2, 'Login failed for other reason')
-			self.remote.login.event()
-			self.refresh = lambda: self.remote.login.event()
-		debug(2, 'login function returns')
-		return True
-	# }}}
-	def _login(self, name): # {{{
-		u = user.load(name, 'admin')
-		if u is None:
-			return False
-		if u['connection'] is not None:
-			debug(3, 'Replacing connection for ' + name)
-			try:
-				u['connection'].remote.replaced.event()
-			except:
-				pass
-			u['connection'].remote.close()
-		users[(u['filename'], 'admin')] = u
-		u['connection'] = self
-		self.user = u
-		debug(1, 'Admin {} logged in from {}:{}'.format(name, *self.remote.socket.remote))
-		user.admins[name.lower()] = self
-		self.list_groups()
-		return True
-	# }}}
-	def _closed(self): # {{{
-		self.remote.close()
-		if self.user is None:
-			debug(2, 'admin connection to {}:{} lost before logging in'.format(*self.remote.socket.remote))
-			return
-		debug(1, 'disconnecting admin {}'.format(self.user['name']))
-		try:
-			users.pop((self.user['filename'], 'admin'))
-		except:
-			pass
-		try:
-			user.admins.pop(self.user['filename'])
-		except:
-			pass
-	# }}}
-	def list_groups(self): # {{{
-		'''Show selection of groups to choose.'''
-		assert self.user is not None
-		self.refresh = lambda: self.list_groups()
-		groups = []
-		for g in os.listdir(os.path.join(config['data'], 'users')):
-			if g == 'admin' or g.lower() != g:
-				continue
-			groups.append([g])
-			chapters = content.list(wake, g)
-			keys = list(chapters.keys())
-			keys.sort()
-			for c in keys:
-				for s in chapters[c]:
-					groups[-1].append(((c, s), sum(users[u]['group'].lower() == g and users[u]['chapter'] == (c, s) for u in users)))
-		groups.sort()
-		self.remote.group_list.event(groups)
-	# }}}
-	def show_chapter(self, group, chapter): # {{{
-		'''Show questions for one chapter.'''
-		assert self.user is not None
-		chapter = tuple(chapter)
-		self.refresh = lambda: self.show_chapter(group, chapter)
-		parts, errors = content.get(wake, group, chapter)
-		questions = []
-		def add_block(block):
-			for p in block:
-				if p['command'] == 'while':
-					add_block(p['code'])
-				elif p['command'] == 'if':
-					for b in p['code']:
-						add_block(b[1])
-				elif p['command'] == 'video':
-					questions.append({'type': 'video', 'name': 'video', 'markdown': p['video'], 'option': None, 'line': p['line']})
-				elif p['command'] == 'question':
-					questions.append({'type': p['type'], 'name': p['variable'], 'markdown': p['markdown'], 'option': p['option'], 'line': p['line']})
-		add_block(parts)
-		questions.append({'type': 'end', 'name': '', 'markdown': '', 'option': None, 'line': math.nan})
-		students = []
-		def make_field(student, question):
-			active = False
-			if student['chapter'] == chapter:
-				if len(student['run_stack']) > 0:
-					frame = student['run_stack'][-1]
-					if len(frame['program']) > frame['current']:
-						if frame['program'][frame['current']]['line'] == question['line']:
-							active = True
-				elif question['type'] == 'end':
-					active = True
-			return {'active': active, 'attempts': student['answers'][chapter][question['name']] if question['type'] not in ('video', 'end') and chapter in student['answers'] and question['name'] in student['answers'][chapter] else None}
-		def make_other_field(student, question):
-			return {'active': False, 'attempts': student['answers'][chapter][question['name']] if question['type'] not in ('video', 'end') and chapter in student['answers'] and question['name'] in student['answers'][chapter] else None}
-		for s in users:
-			if users[s]['group'].lower() != group.lower():
-				continue
-			students.append({'password': bool(users[s]['password']), 'name': users[s]['name'], 'code': s, 'login': users[s]['chapter'] == chapter, 'connected': users[s]['connection'] is not None, 'answers': tuple(make_field(users[s], q) for q in questions)})
-		students.sort(key = lambda s: (not s['login'], s['name'], s['code']))
-		# Add non-connected students to the list.
-		others = []
-		for u in user.list_group(group):
-			if (u, group) in users:
-				continue
-			student = user.load(u, group)
-			if student is None:
-				debug(0, 'student found but unloadable: {}:{}'.format(u, group))
-				continue
-			others.append({'password': bool(student['password']), 'name': student['name'], 'code': u, 'login': None, 'connected': False, 'answers': tuple(make_other_field(student, q) for q in questions)})
-		try:
-			others.sort(key = lambda s: (s['name'], s['code']))
-		except:
-			pass
-		students.extend(others)
-		self.remote.students_list.event(group, questions, students)
-	# }}}
-	def reset_password(self, student, group): # {{{
-		assert self.user is not None
-		u = user.load(student, group)
-		assert u is not None
-		u['password'] = None
-		user.save(u)
-	# }}}
-# }}}
-
-def refresh_admins(): # {{{
-	# TODO: part of admin reimplementation.
-	pass
+def refresh_admins(wake): # {{{
+	for a in admins:
+		yield from admins[a].refresh(wake)
 # }}}
 
 # Class for handling user script commands. {{{
@@ -237,6 +92,45 @@ def Environment():
 	return Lua()
 # }}}
 
+class Admin_Connection: # {{{ Class for handling admin connections.
+	def __init__(self, my_id, my_name, my_userdata, my_remote, managed_name): # {{{
+		self.id = my_id
+		self.name = my_name
+		self.userdata = my_userdata
+		self.remote = my_remote
+		self.remote._websocket_closed = self._closed
+		admins[my_id] = self
+		debug(1, 'admin {} connected'.format(self.name))
+	# }}}
+	def _init(self, wake): # {{{
+		self.script = None
+		self.refresh = lambda wake: self.remote.scripts.event((yield from content.list(wake, None)))
+		yield from self.refresh(wake)
+	# }}}
+	def _closed(self): # {{{
+		del admins[self.id]
+		self.remote._websocket_close()
+		debug(1, 'disconnecting admin {}'.format(self.name))
+	# }}}
+	def _send_script(self, wake): # {{{
+		log('sending script')
+		questions = (yield from content.list_questions(wake, self.script))
+		players = (yield from content.list_players(wake, self.script))
+		log('sending qp', questions, players)
+		self.remote.script.event(questions, players)
+	# }}}
+	def select_script(self, script): # {{{
+		wake = (yield)
+		if script is None:
+			yield from self._init(wake)
+		else:
+			self.script = (yield from content.get_scriptid(wake, script))
+			print('script', self.script)
+			self.refresh = self._send_script
+			yield from self.refresh(wake)
+	# }}}
+# }}}
+
 class Content_Connection: # {{{ Class for handling content management.
 	def __init__(self, my_id, my_name, my_userdata, my_remote, managed_name): # {{{
 		self.id = my_id
@@ -247,8 +141,7 @@ class Content_Connection: # {{{ Class for handling content management.
 	def _init(self, wake):
 		# TODO: Check that this user is allowed to edit content.
 		# Other than that, nothing to do here.
-		return
-		yield	# Make sure this is a generator.
+		pass
 	# }}}
 	def get_post_token(self):
 		# TODO? use this token in a post request to upload files that way.
@@ -308,30 +201,33 @@ class Content_Connection: # {{{ Class for handling content management.
 	def add_script(self, name, chapter, script):
 		wake = (yield)
 		yield from serverdata.insert('script', {'name': name, 'chapter': chapter, 'script': script}, wake = wake)
+		new_scriptid = (yield from serverdata.select('script', ('id',), ('and', ('=', 'name', name), ('=', 'chapter', chapter)), wake = wake))
+		return (yield from self._update_questions(wake, new_scriptid, script))
 	def update_script(self, scriptid, name, chapter, script):
 		wake = (yield)
 		if script is None:
 			yield from serverdata.update('script', {'name': name, 'chapter': chapter}, ('=', 'id', scriptid), wake = wake)
+			return []
 		else:
 			yield from serverdata.update('script', {'name': name, 'chapter': chapter, 'script': script}, ('=', 'id', scriptid), wake = wake)
+			return (yield from self._update_questions(wake, scriptid, script))
 	def remove_script(self, scriptid):
 		wake = (yield)
 		yield from serverdata.delete('script', ('=', 'id', scriptid), wake = wake)
+		yield from serverdata.delete('question', ('=', 'script', scriptid), wake = wake)
 	# }}}
 	# Questions {{{
+	def _update_questions(self, wake, scriptid, script):
+		parsed, errors, questions = content.parse_script(script)
+		#print('questions', questions)
+		yield from serverdata.delete('question', ('=', 'script', scriptid), wake = wake)
+		for q in questions:
+			yield from serverdata.insert('question', {'id': q['id'], 'script': scriptid, 'type': q['type'], 'description': q['description']}, wake = wake)
+		return errors
 	def list_questions(self):
 		wake = (yield)
 		data = (yield from serverdata.select('question', ('id', 'script', 'type', 'description'), wake = wake))
 		return {('%d:%s' % (d[1], d[0])): {'type': d[2], 'description': d[3]} for d in data}
-	def add_question(self, questionid, scriptid, type, description):
-		wake = (yield)
-		yield from serverdata.insert('question', {'id': questionid, 'script': scriptid, 'type': type, 'description': description}, wake = wake)
-	def update_question(self, questionid, scriptid, type, description):
-		wake = (yield)
-		yield from serverdata.update('question', {'type': type, 'description': description}, ('and', ('=', 'id', questionid), ('=', 'script', scriptid)), wake = wake)
-	def remove_question(self, questionid, scriptid):
-		wake = (yield)
-		yield from serverdata.delete('question', ('and', ('=', 'id', questionid), ('=', 'script', scriptid)), wake = wake)
 	# }}}
 	# Sprite ids {{{
 	def list_spriteids(self):
@@ -468,9 +364,14 @@ class Connection: # {{{
 		self.display_name = my_name + (' (%s)' % managed_name if managed_name is not None else '')
 		self.new_commands = None	# This is initialized to a list when running code and filled with new commands by it.
 	# }}}
+	def _close(self): # {{{
+		wake = (yield)
+		del users[self.id]
+		yield from refresh_admins(wake)
+	# }}}
 	def _init(self, wake): # {{{
 		# Delayed contructor. Must be a generator.
-		self.closed = refresh_admins
+		self._websocket_closed = self._close
 		self.busy = False
 		debug(2, 'New connection from {}:{}'.format(*self.remote.socket.remote))
 		u = {}
@@ -481,7 +382,7 @@ class Connection: # {{{
 		if len(data) == 0:
 			groupname = (yield from serverdata.select('group', ('name',), ('=', 'id', 1), wake = wake))
 			assert len(groupname) == 1
-			yield from self.userdata.insert('id', {'my_name': self.name, 'my_group': groupname[0][0]}, wake = wake) 
+			yield from self.userdata.insert('id', {'my_name': self.name, 'my_group': groupname[0][0]}, wake = wake)
 			my_group = 1
 		else:
 			self.name = data[0][0]
@@ -613,7 +514,7 @@ class Connection: # {{{
 		self.user['_pending'] = []
 	# }}}
 	def _start(self, wake, script_content, send_errors): # {{{
-		self.user['program'], errors = script_content
+		self.user['program'], errors, question = script_content
 		if send_errors:
 			if len(errors) > 0:
 				errors = markdown('# Errors:\n' + '\n\n'.join(errors))

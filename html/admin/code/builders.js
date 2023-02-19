@@ -1,1 +1,1 @@
-../../main/code/builders.js
+/usr/lib/python3/dist-packages/websocketd/builders.js

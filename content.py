@@ -1,12 +1,5 @@
 #!/usr/bin/python3
 
-# Calls:
-# list()	done.
-# get()		done.
-# showhide()	not defined here...
-# load822()	only used in load_sprite. Must be updated.
-# get_file()	only used in sandbox.
-
 # Imports {{{
 import sys
 import os
@@ -22,7 +15,10 @@ def list(wake, groupid): # {{{
 	'''Get a list of available scripts.'''
 
 	# Load all chapters that can be accessed.
-	access = (yield from serverdata[0].select('access', ('chapter',), ('=', 'groupid', groupid), wake = wake))
+	if groupid is None:
+		access = (yield from serverdata[0].select('access', ('chapter',), wake = wake))
+	else:
+		access = (yield from serverdata[0].select('access', ('chapter',), ('=', 'groupid', groupid), wake = wake))
 	cache = {}	# keys: IDs, values: {'name': ..., 'parent': ...}
 	for chapter in access:
 		c = chapter[0]
@@ -61,6 +57,18 @@ def list(wake, groupid): # {{{
 			ret.append(path + [s[0]])
 
 	return ret
+# }}}
+
+def list_questions(wake, scriptid): # {{{
+	'Get information about all questions in a script.'
+	data = (yield from serverdata[0].select('question', ('id', 'type', 'description'), ('=', 'script', scriptid), wake = wake))
+	return [{'id': d[0], 'type': d[1], 'description': d[2]} for d in data] 
+# }}}
+
+def list_players(wake, scriptid): # {{{
+	'Get answers to all questions by managed users.'
+	players = (yield from serverdata[0].list_managed_players(None, wake = wake))
+	return players
 # }}}
 
 errors = []
@@ -247,7 +255,7 @@ def parse_anim(ln, c, d, ostack): # {{{
 	return True
 # }}}
 
-def parse_line(d, ln, istack, ostack, index): # {{{
+def parse_line(d, ln, istack, ostack, index, question): # {{{
 	# d is the data dict of the current line; ln is the current line number.
 	# return False if parsing should be aborted, True otherwise.
 	# Note that True does not imply parsing was successfull. False is only returned if the error will likely cause a chain of useless errors.
@@ -359,6 +367,7 @@ def parse_line(d, ln, istack, ostack, index): # {{{
 			ostack[-1][-1]['option'] = []
 		else:
 			ostack[-1][-1]['option'] = None
+		question.append({'id': name, 'type': t, 'description': text})
 		return True
 	# }}}
 
@@ -471,10 +480,11 @@ def parse_script(script): # {{{
 	ret = []
 	ostack = [ret]
 	index = {'label': {}, 'goto': {}}
+	question = []
 	while len(istack) > 0:
 		d = istack[-1].pop(0)
 		ln = d['line']
-		parse_line(d, ln, istack, ostack, index)
+		parse_line(d, ln, istack, ostack, index, question)
 		while len(istack) > 0 and len(istack[-1]) == 0:
 			istack.pop()
 			ostack.pop()
@@ -485,65 +495,39 @@ def parse_script(script): # {{{
 		else:
 			source['target'] = index['label'][label]
 	#print('parsed script:', repr(ret))
-	return ret, errors
+	return ret, errors, question
 # }}}
 
-def get(wake, groupid, script_list): # {{{
-	'''Get the script from a list of chapter names; accessible by groupid.
-	Returns chapterid, scriptid, code'''
+def parse_script_list(wake, script_list): # {{{
+	'''Parse script list (except last element). Return chapter id.'''
 	current = None
 	for part in script_list[:-1]:
 		result = (yield from serverdata[0].select('chapter', ('id',), ('and', ('=', 'name', part), ('=', 'parent', current)), wake = wake))
 		assert len(result) == 1
 		current = result[0][0]
-
-	# Check that the group has access to this chapter.
-	check = (yield from serverdata[0].select('access', ('groupid',), ('and', ('=', 'groupid', groupid), ('=', 'chapter', current)), wake = wake))
-	assert len(check) == 1
-
-	result = (yield from serverdata[0].select('script', ('id', 'script'), ('and', ('=', 'chapter', current), ('=', 'name', script_list[-1])), wake = wake))
-	assert len(result) == 1
-	scriptid, script = result[0]
-	return current, scriptid, parse_script(script)
+	return current
 # }}}
 
-def load822(filename): # {{{
-	'''Read a file in RFC 822 format.
-	Returns a dict of str keys and list[str] values.'''
-	ret = {}
-	with open(filename) as f:
-		indent = False
-		current = None
-		for line in f:
-			if line.strip() == '' or line.startswith('#'):
-				continue
-			# Handle indentation: start long value.
-			if len(line.lstrip()) != len(line):
-				assert indent is not False
-				if indent is not None:
-					# Existing indentation.
-					assert line.startswith(indent)
-				else:
-					# New indentation (first line of indented block).
-					indent = line[:-len(line.lstrip())]
-				# Add line to current value.
-				ret[current].append(line[len(indent):])
-			else:
-				# New key.
-				if ':' in line.strip()[:-1]:
-					# Line contains ':', so this is a single line value.
-					indent = False	# Don't allow indented block.
-					key, value = line.split(':', 1)
-					# Insert value as single element list.
-					ret[key.strip()] = [value.strip()]
-				else:
-					# Line does not contain ':', so it must be at the end: expect indeted block.
-					assert line.strip()[-1] == ':'
-					indent = None
-					current = line.strip()[:-1].strip()
-					# Insert empty value, which is filled by indented block.
-					ret[current] = []
-	return ret
+def get_scriptid(wake, script_list): # {{{
+	'''Get script id from path. This is called by the admin interface, it does not check for permissions.'''
+	chapter = (yield from parse_script_list(wake, script_list))
+	result = (yield from serverdata[0].select('script', ('id',), ('and', ('=', 'chapter', chapter), ('=', 'name', script_list[-1])), wake = wake))
+	assert len(result) == 1
+	return result[0][0]
+# }}}
+
+def get(wake, groupid, script_list): # {{{
+	'''Get the script from a list of chapter names; accessible by groupid.
+	Returns chapterid, scriptid, code'''
+	chapter = (yield from parse_script_list(wake, script_list))
+	# Check that the group has access to this chapter.
+	check = (yield from serverdata[0].select('access', ('groupid',), ('and', ('=', 'groupid', groupid), ('=', 'chapter', chapter)), wake = wake))
+	assert len(check) == 1
+
+	result = (yield from serverdata[0].select('script', ('id', 'script'), ('and', ('=', 'chapter', chapter), ('=', 'name', script_list[-1])), wake = wake))
+	assert len(result) == 1
+	scriptid, script = result[0]
+	return chapter, scriptid, parse_script(script)
 # }}}
 
 # vim: set foldmethod=marker :
