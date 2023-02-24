@@ -1008,20 +1008,21 @@ class Connection: # {{{
 			# 2: base value	([+-]?[0-9]*(?:[.,]\d*)?)
 			# 3: exponent	(·10([⁻⁺]?[⁰¹²³⁴⁵⁶⁷⁸⁹]+))?
 			# 4: unit	(\S*)
-			if not r:
+			if not r or r.group(1) is None:
 				debug(3, 'no match for unit answer')
 				answer = {'quantity': None, 'unit': None, 'digits': None, 'value': None}
-			try:
-				answer = {}
-				answer['quantity'] = r.group(1)
-				base = r.group(2).replace(',', '.')
-				exponent = None if r.group(3) is None else int(fromsuper(r.group(3)))
-				answer['unit'] = r.group(4)
-				answer['digits'] = len(base.replace('.', '').lstrip('0'))
-				answer['value'] = float(base) * (1 if exponent is None else 10 ** exponent)
-			except:
-				traceback.print_exc()
-				answer = {'quantity': None, 'unit': None, 'digits': None, 'value': None}
+			else:
+				try:
+					answer = {}
+					answer['quantity'] = r.group(1)
+					base = r.group(2).replace(',', '.')
+					exponent = None if r.group(3) is None else int(fromsuper(r.group(3)))
+					answer['unit'] = r.group(4)
+					answer['digits'] = len(base.replace('.', '').lstrip('0'))
+					answer['value'] = float(base) * (1 if exponent is None else 10 ** exponent)
+				except:
+					traceback.print_exc()
+					answer = {'quantity': None, 'unit': None, 'digits': None, 'value': None}
 			debug(3, 'unit-split answer: {}'.format(answer))
 			return answer
 		raw = answer
