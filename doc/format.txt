@@ -1,3 +1,4 @@
+-- Comments {{{
 -- This is a comment; indentation is irrelevant.
 comment also a comment. Indentation must be valid
 comment
@@ -5,18 +6,25 @@ comment
 	Indentation must also be valid.
 	  Extra indentation within the comment is allowed.
 	But deindentation is only allowed to a previously used level (as it would be with code).
+-- }}}
 
+-- Goto {{{
 -- labels are only allowed at top level.
 label <labelname>
 -- goto is allowed everywhere; it will pop the entire call stack and jump to the label.
 goto <labelname>
+-- }}}
+
+-- Code {{{
 $ single line Lua code
 code single line Lua code
 code
 	(Possibly) multi line Lua code.
+-- }}}
+
 video videoid	-- TODO
 
--- Question examples:
+-- Question examples: {{{
 question short variable Single line question
 question hidden variable value
 question choice variable
@@ -35,6 +43,11 @@ option second option
 --	all contain 'style', which is for internal use
 --	all long<thing> are identical to <thing>, with 'long' added
 --	longlong and longhidden do not exist
+-- }}}
+
+answer value	-- Style is applied to background of span that contains last answer on admin page.
+
+-- Flow control {{{
 while expr do
 	code
 	continue
@@ -52,38 +65,47 @@ else
 if expr then single line code	-- XXX
 
 end -- End can be used (but is ignored) on its own to make it look like lua code, but only on its own; not after an inline command
+-- }}}
 
-answer value	-- Style is applied to background of span that contains last answer on admin page.
+-- Sprites {{{
+-- Declare a sprite.
+-- The sprite-tag is used to refer to the sprite in the script; players never see it.
+-- The image id  must match the database name. It refers to all moods that use the id as theirs.
+-- The name is used as the speaker name, displayed to the player. It may contain any characters, including spaces.
+sprite <sprite-tag> <image-id> <name>
 
--- FIXME Load a sprite file by the name of anja in the common/ directory and store it in the variable anja.
--- For more complex actions, use sprite() from Lua code. TODO
-sprite common/anja
-anja [style]: text
-anja [style]:
-	multi-line text
+-- Speech:
+<sprite-tag>: <text>
+<sprite-tag>,<mood>: <text>
+<sprite-tag>,:
+	<multi-line text>
+	-- The empty mood is valid, so it resets the mood to the default.
+	-- Note: these lines are not comments, they are part of the multi-line text.
 
-parallel [args]:
-	<animation actions>
-serial [args]:
-	<animation actions>
+parallel [args]
+	<speech and/or animation actions>
+serial [args]
+	<speech and/or animation actions>
 -- If animation actions are given without an parallel or serial parent command, a serial parent is implied.
 
 -- Animation actions are:
-parallel [args]:
-serial [args]:
-scene [filename] [args]
-show <sprite>[,style] [args]
-hide <sprite>[,style] [args]
-move <sprite>[,style] [args]
-music [filename]	-- TODO
-sound [filename]	-- TODO
+parallel [args]
+serial [args]
+scene [image-id[,mood]] [args]
+show <sprite-tag>[,mood] [args]
+hide <sprite-tag>[,mood] [args]
+move <sprite-tag>[,mood] [args]
+music [<audio-id>]
+sound [<audio-id>]
 
--- Styles are defined in the sprite.
--- Args can be:
---	with <transition>	-- jump, move, dissolve
+-- Args are inherited by child animation actions. They can be:
+--	with <transition>	-- jump, move, fade (default is move)
 --	in <time>		-- includes unit, must be s or ms.
---	to <location>		-- array of 3 items, either fractions or special string values. Z axis points out of screen.
---	from <location>
---	scale <scale>		-- array of 2 items, or single number for uniform scale.
---	rotate <revolutions>
---	around <location>	-- center of rotation for rotate or move transition
+--	to <location>[@<hotspot>]		-- array of 3 items, either fractions or special string values. Z axis points out of screen.
+--	from <location>[@<hotspot>]
+--	scale <scale-x>[%][,<scale-y>[%]][@<hotspot>]
+--	rotate <revolutions>[@<hotspot>]
+--	around <location>	-- center of rotation for move transition
+-- }}}
+
+-- vim: set foldmethod=marker :

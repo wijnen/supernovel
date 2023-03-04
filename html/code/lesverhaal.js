@@ -38,10 +38,13 @@ function SpriteState(ref) { // {{{
 	};
 	if (ref === undefined) {
 		this.image = {url: '', size: null, hotspot: [.5, 0]}
-		this.position = [[0, 0], [0, 0], 0];
+		this.position = [0, 0, 0];
+		this.position_hotspot = [0, 0];
 		this.rotation = 0;
+		this.rotation_hotspot = [0, 0];
 		this.around = null;
-		this.scale = [1, 1];
+		this.scale = [1, 1]
+		this.scale_hotspot = [0, 0];
 		this['with'] = null;
 	}
 	else {
@@ -49,10 +52,16 @@ function SpriteState(ref) { // {{{
 		if (ref.position === null)
 			this.position = null;
 		else
-			this.position = [this.copy_array(ref.position[0]), this.copy_array(ref.position[1]), ref.position[2]];
-		this.rotation = ref.rotation;
+			this.position = this.copy_array(ref.position);
+		if (ref.position_hotspot === null)
+			this.position_hotspot = [0, 0];
+		else
+			this.position_hotspot = this.copy_array(ref.position_hotspot);
+		this.rotation = ref.rotation
+		this.rotation_hotspot = this.copy_array(ref.rotation_hotspot);
 		this.around = this.copy_array(ref.around);
-		this.scale = this.copy_array(ref.scale);
+		this.scale = this.copy_array(ref.scale)
+		this.scale_hotspot = this.copy_array(ref.scale_hotspot);
 		this['with'] = ref['with'];
 	}
 	var mix_num = function(phase, a, b) {
@@ -79,24 +88,32 @@ function SpriteState(ref) { // {{{
 	this.mix = function(phase, to, with_) {
 		var ret = new SpriteState();
 		ret.rotation = mix_num(phase, this.rotation, to.rotation);
+		ret.rotation_hotspot = mix_array(phase, this.rotation_hotspot, to.rotation_hotspot);
 		// Don't reuse previous around.
 		ret.around = this.copy_array(to.around);
 		ret.scale = mix_array(phase, this.scale, to.scale);
+		ret.scale_hotspot = mix_array(phase, this.scale_hotspot, to.scale_hotspot);
 		ret.image = to.image;
-		if (to.position === null)
+		if (to.position === null) {
 			ret.position = this.copy_array(this.position);
-		else if (this.position === null)
+			ret.position_hotspot = this.copy_array(this.position_hotspot);
+		}
+		else if (this.position === null) {
 			ret.position = this.copy_array(to.position);
+			ret.position_hotspot = this.copy_array(to.position_hotspot);
+		}
 		else {
-			if (with_ == 'move') {
-				if (ret.around === null)
+			if (with_ == 'move') { // {{{
+				if (ret.around === null) {
 					// No rotation: simple interpolation.
-					ret.position = [mix_array(phase, this.position[0], to.position[0]), mix_array(phase, this.position[1], to.position[1]), mix_num(phase, this.position[2], to.position[2])];
+					ret.position = mix_array(phase, this.position, to.position);
+					ret.position_hotspot = mix_array(phase, this.position_hotspot, to.position_hotspot);
+				}
 				else {
 					var ratio = screen_size[1] / screen_size[0];
 					// Rotate around some point. Compute starting and ending angles and radii; mix those.
-					var from_vect = [this.position[0][1] - ret.around[0], (this.position[1][1] - ret.around[1]) / ratio];
-					var to_vect = [to.position[0][1] - ret.around[0], (to.position[1][1] - ret.around[1]) / ratio];
+					var from_vect = [this.position[0] - ret.around[0], (this.position[1] - ret.around[1]) / ratio];
+					var to_vect = [to.position[0] - ret.around[0], (to.position[1] - ret.around[1]) / ratio];
 					var from_angle = Math.atan2(from_vect[1], from_vect[0]);
 					var to_angle = Math.atan2(to_vect[1], to_vect[0]);
 					if (ret.around[2]) {
@@ -115,21 +132,28 @@ function SpriteState(ref) { // {{{
 					var radius = mix_num(phase, from_radius, to_radius);
 					//console.info(from_radius, from_angle, to_radius, to_angle, radius, angle, from_vect, to_vect, this.position, ret.around);
 					// Compute position.
-					var rpos = [];
+					ret.position_hotspot = [];
 					for (var c = 0; c < 2; ++c)
-						rpos.push(mix_num(phase, this.position[c][0], to.position[c][0]));
-					var x = [rpos[0], ret.around[0] + radius * Math.cos(angle)];
-					var y = [rpos[1], ret.around[1] + radius * Math.sin(angle) * ratio];
+						ret.position_hotspot.push(mix_num(phase, this.position_hotspot[c], to.position_hotspot[c]));
+					var x = ret.around[0] + radius * Math.cos(angle);
+					var y = ret.around[1] + radius * Math.sin(angle) * ratio;
 					var z = mix_num(phase, this.position[2], to.position[2]);
 					ret.position = [x, y, z];
 				}
-			}
+			} // }}}
+			else if (with_ == 'fade') { // {{{
+				// TODO: handle fade.
+				// - if phase <= 0 or phase >= 1: using only from or to values.
+				// - otherwise, use both with appropriate transparency.
+				// - do not mix values (other than transparency).
+				// - clean up extra sprite when done with transform for any reason.
+			} // }}}
 			else {
-				// TODO: handle non-linear interpolation ("with").
+				// TODO: handle non-linear interpolation ("with ...").
 				ret.position = this.copy_array(to.position);
+				ret.position_hotspot = this.copy_array(to.position_hotspot);
 			}
 		}
-		//console.info(phase, this.position[0], to.position[0], ret.position[0]);
 		return ret;
 	};
 } // }}}
@@ -215,6 +239,8 @@ function get_img(tag, mood, cb) { // {{{
 	// Returns undefined.
 	if (tag === undefined)
 		console.error('undefined image requested');
+	if (mood === undefined)
+		console.error('undefined mood requested');
 	if (img_cache[tag] !== undefined && img_cache[tag][mood] !== undefined) {
 		//console.info('getting image from cache', tag, mood);
 		cb(img_cache[tag][mood]);
@@ -281,15 +307,15 @@ function DisplaySprite() { // {{{
 			// Compute reference, in image pixels ([0, 0] is hotspot, positive directions are towards top right).
 			var reference = [];
 			for (var i = 0; i < 2; ++i) {
-				var c = sprite_state.position[i][0];
+				var c = sprite_state.position_hotspot[i];
 				// Position is based on sprite edge.
 				if (c >= 0)
 					reference.push((img.size[i] - img.hotspot[i]) * c);
 				else
 					reference.push(img.hotspot[i] * c);
 			}
-			var x = (sprite_state.position[0][1] + 1) / 2 * screen_size[0];
-			var y = sprite_state.position[1][1] * screen_size[1];
+			var x = (sprite_state.position[0] + 1) / 2 * screen_size[0];
+			var y = sprite_state.position[1] * screen_size[1];
 			me.div.style.left = (x - reference[0] * sprite_state.scale[0]) * screen_scale + 'px';
 			me.div.style.bottom = (y - reference[1] * sprite_state.scale[1]) * screen_scale + 'px';
 			me.div.style.width = img.size[0] * screen_scale + 'px';
@@ -338,7 +364,7 @@ function State(ref) { // {{{
 		if (!this.background)
 			this.background = '';
 		elements.bg.src = this.background;
-		if (this.background.url)
+		if (this.background)
 			elements.bg.RemoveClass('hidden');
 		else
 			elements.bg.AddClass('hidden');
@@ -450,23 +476,31 @@ function activate(name, now, extra, fast_forward) { // {{{
 		}
 		current.pos += 1;
 		//console.info('activating', name, 'action', action);
-		if (action.action == 'speech') {
+		if (action.action == 'speech') { // {{{
 			state.waiting_threads.push(name);
 			state.speaker.name = action.speaker;
 			state.speaker.text = action.text;
-			state.speaker.image = action.image;
-			if (action.image !== null) {
-				get_img(action.target, action.mood, function(image) {
+			state.speaker.image = action.side;
+			if (action.side !== null) {
+				get_img(action.target, action.side, function(image) {
 					// XXX use size and hotspot?
 					elements.speaker_image.src = image.url;
+				});
+			}
+			if (action.mood !== null) {
+				get_img(action.target, action.mood, function(image) {
+					var current_sprite = state.sprite[action.target];
+					current_sprite.to.image = image;
+					if (current_sprite.start_time + current_sprite.duration <= now)
+						current_sprite.from.image = image;
 				});
 			}
 			//console.info('pushing new prev state; waiting:', state.waiting_threads.length);
 			prev_states.push(new State(state));
 			state.draw(now);
 			return;
-		}
-		else if (action.action == 'wait') {
+		} // }}}
+		else if (action.action == 'wait') { // {{{
 			if (!fast_forward) {
 				console.assert(typeof action.time == 'number', 'value of "time" must be a number');
 				state.sleeping_threads.push({when: now + action.time * 1000, thread: name});
@@ -474,8 +508,8 @@ function activate(name, now, extra, fast_forward) { // {{{
 				break;
 			}
 			// If fast forwarding, ignore wait instructions.
-		}
-		else if (action.action == 'music') {
+		} // }}}
+		else if (action.action == 'music') { // {{{
 			pending_music = null;
 			state.music = action.target;
 			if (action.target === null) {
@@ -494,8 +528,8 @@ function activate(name, now, extra, fast_forward) { // {{{
 					}
 				});
 			}
-		}
-		else if (action.action == 'sound') {
+		} // }}}
+		else if (action.action == 'sound') { // {{{
 			if (action.target === null) {
 				delete sound.src;
 				sound.pause();
@@ -512,16 +546,16 @@ function activate(name, now, extra, fast_forward) { // {{{
 					}
 				});
 			}
-		}
-		else if (action.action == 'serial') {
+		} // }}}
+		else if (action.action == 'serial') { // {{{
 			//console.info('running serial', action);
 			new_thread(action.actions, function(extra) {
 				//console.info('serial done; resuming', name);
 				activate(name, now, extra, fast_forward);
 			}, name + '+', now, fast_forward);
 			return;
-		}
-		else if (action.action == 'parallel') {
+		} // }}}
+		else if (action.action == 'parallel') { // {{{
 			var wait = action.actions.length;
 			for (var a = 0; a < action.actions.length; ++a) {
 				//console.info('running parallel thread', name, a);
@@ -534,8 +568,8 @@ function activate(name, now, extra, fast_forward) { // {{{
 				}, name + '+' + a, now, fast_forward)
 			}
 			return;
-		}
-		else if (action.action == 'scene') {
+		} // }}}
+		else if (action.action == 'scene') { // {{{
 			//console.info('scene');
 			// TODO: transitions.
 			// Remove all sprites.
@@ -544,7 +578,8 @@ function activate(name, now, extra, fast_forward) { // {{{
 			all_sprites = [];
 			// Set new background.
 			if (action.target) {
-				get_img(action.target, '', function(img) {
+				var mood = (action.mood === null ? '' : action.mood);
+				get_img(action.target, action.mood, function(img) {
 					state.background = img.url;
 					resize();
 					activate(name, now, 0, fast_forward);
@@ -556,10 +591,29 @@ function activate(name, now, extra, fast_forward) { // {{{
 				activate(name, now, 0, fast_forward);
 			}
 			return;
-		}
-		else {
+		} // }}}
+		else { // Show, hide, move. {{{
 			var target = action.target;
-			get_img(action.target, action.mood, function(image) {
+			var mood;
+			if (action.mood !== null) {
+				//console.info('using specified mood', action.mood);
+				mood = action.mood;
+			}
+			else {
+				var sprite = state.sprite[action.target];
+				if (sprite === undefined) {
+					//console.info('New sprite without specified mood; using ""');
+					mood = '';
+				}
+				else {
+					//console.info('Existing sprite without specified mood; using existing mood');
+					var phase = (now - sprite.start_time) / sprite.duration;
+					var mixed = sprite.from.mix(phase, sprite.to, sprite['with']);
+					//console.info('mix', mixed);
+					mood = mixed.mood || '';
+				}
+			}
+			get_img(action.target, mood, function(image) {
 				var args = action.args;
 				var current_sprite;
 				if (action.action == 'show') {
@@ -567,12 +621,15 @@ function activate(name, now, extra, fast_forward) { // {{{
 						current_sprite = new Sprite();
 						state.sprite[action.target] = current_sprite;
 						current_sprite.from.position = args.from;
+						current_sprite.from.position_hotspot = args.from_hotspot;
 						current_sprite.from.image = image;
 					}
 				}
 				else if (action.action == 'hide') {
 					if (fast_forward || args['in'] === null) {
 						delete state.sprite[action.target];
+						animate(true);
+						activate(name, now);
 						return;
 					}
 				}
@@ -582,9 +639,12 @@ function activate(name, now, extra, fast_forward) { // {{{
 				}
 				current_sprite = state.sprite[action.target];
 				current_sprite.to.position = args.to;
+				current_sprite.to.position_hotspot = args.to_hotspot;
 				current_sprite.to.image = image;
 				current_sprite.to.scale = args.scale;
+				current_sprite.to.scale_hotspot = args.scale_hotspot;
 				current_sprite.to.rotation = args.rotation;
+				current_sprite.to.rotation_hotspot = args.rotation_hotspot;
 				current_sprite.to.around = args.around;
 				if (!fast_forward && args['in'] !== null) {
 					console.assert(typeof args['in'] == 'number', 'value of "in" must be a number');
@@ -600,8 +660,10 @@ function activate(name, now, extra, fast_forward) { // {{{
 					return;
 				}
 				else {
-					if (args.to !== null)
+					if (args.to !== null) {
 						current_sprite.from.position = args.to;
+						current_sprite.from.position_hotspot = args.to_hotspot;
+					}
 					if (args.scale !== null)
 						current_sprite.from.scale = args.scale;
 					current_sprite.from.image = image;
@@ -613,7 +675,7 @@ function activate(name, now, extra, fast_forward) { // {{{
 			});
 			// End function now; it will restart at callback.
 			return;
-		}
+		} // }}}
 	}
 	if (state.waiting_threads.length == 0) {
 		state.speaker.name = null;

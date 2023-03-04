@@ -125,7 +125,6 @@ class Admin_Connection: # {{{ Class for handling admin connections.
 			yield from self._init(wake)
 		else:
 			self.script = (yield from content.get_scriptid(wake, script))
-			print('script', self.script)
 			self.refresh = self._send_script
 			yield from self.refresh(wake)
 	# }}}
@@ -143,9 +142,6 @@ class Content_Connection: # {{{ Class for handling content management.
 		# Other than that, nothing to do here.
 		pass
 	# }}}
-	def get_post_token(self):
-		# TODO? use this token in a post request to upload files that way.
-		pass
 	# Groups {{{
 	def list_groups(self):
 		wake = (yield)
@@ -154,6 +150,8 @@ class Content_Connection: # {{{ Class for handling content management.
 	def add_group(self, name):
 		wake = (yield)
 		yield from serverdata.insert('group', {'name': name}, wake = wake)
+		me = (yield from serverdata.select('group', ('id',), ('=', 'name', name), wake = wake))
+		return me[0][0]
 	def update_group(self, groupid, name):
 		wake = (yield)
 		yield from serverdata.update('group', {'name': name}, ('=', 'id', groupid), wake = wake)
@@ -169,6 +167,8 @@ class Content_Connection: # {{{ Class for handling content management.
 	def add_chapter(self, name):
 		wake = (yield)
 		yield from serverdata.insert('chapter', {'name': name}, wake = wake)
+		me = (yield from serverdata.select('chapter', ('id',), ('=', 'name', name), wake = wake))
+		return me[0][0]
 	def update_chapter(self, chapterid, name):
 		wake = (yield)
 		yield from serverdata.update('chapter', {'name': name}, ('=', 'id', chapterid), wake = wake)
@@ -201,7 +201,7 @@ class Content_Connection: # {{{ Class for handling content management.
 	def add_script(self, name, chapter, script):
 		wake = (yield)
 		yield from serverdata.insert('script', {'name': name, 'chapter': chapter, 'script': script}, wake = wake)
-		new_scriptid = (yield from serverdata.select('script', ('id',), ('and', ('=', 'name', name), ('=', 'chapter', chapter)), wake = wake))
+		new_scriptid = (yield from serverdata.select('script', ('id',), ('and', ('=', 'name', name), ('=', 'chapter', chapter)), wake = wake))[0]
 		return (yield from self._update_questions(wake, new_scriptid, script))
 	def update_script(self, scriptid, name, chapter, script):
 		wake = (yield)
@@ -234,7 +234,7 @@ class Content_Connection: # {{{ Class for handling content management.
 		wake = (yield)
 		data = (yield from serverdata.select('spriteid', ('name', 'chapter', 'id'), wake = wake))
 		return {d[2]: {'name': d[0], 'chapter': d[1]} for d in data}
-	def add_spriteid(self, name, chapter, spriteid):
+	def add_spriteid(self, spriteid, name, chapter):
 		wake = (yield)
 		yield from serverdata.insert('spriteid', {'name': name, 'chapter': chapter, 'id': spriteid}, wake = wake)
 	def update_spriteid(self, spriteid, name, chapter):
@@ -307,50 +307,6 @@ class Content_Connection: # {{{ Class for handling content management.
 		wake = (yield)
 		yield from serverdata.delete('audio', ('=', 'id', audioid), wake = wake)
 	# }}}
-
-def post(connection): # {{{ TODO Use this to send new content, or update it.
-	'''Upload a new file for the sandbox.
-	Credentials must be provided in the cookie. User must be allowed to use the sandbox.
-	''' # FIXME: cookies are removed.
-	if connection.busy:
-		log('attempt to post sandbox while busy')
-		return
-	if 'cookie' not in connection.headers or 'file' not in connection.post[1]:
-		debug(1, 'ignoring invalid POST request')
-		sandboxserver.reply(connection, 404, 'invalid POST request', 'text/plain;charset=utf-8')
-		return False
-	c = connection.headers['cookie']
-	kv = [chunk.strip().split('=', 1) for chunk in c.split(';')]
-	kv = {x[0]: x[1] for x in kv}
-	if 'name' not in kv or 'group' not in kv or 'key' not in kv or (kv['name'], kv['group']) not in users or users[(kv['name'], kv['group'])]['cookie'] != kv['key']:
-		debug(1, 'invalid cookie for POST')
-		sandboxserver.reply(connection, 403, b'invalid cookie for POST request', 'text/plain;charset=utf-8')
-		return False
-	u = users[(kv['name'], kv['group'])]
-	if not u['sandbox']:
-		debug(1, 'User is not allowed to use sandbox')
-		sandboxserver.reply(connection, 403, b'User is not allowed to use sandbox', 'text/plain;charset=utf-8')
-		return False
-	# Credentials are good, save the files.
-	basedir = os.path.join(config['data'], 'html', 'sandbox', config['sandbox'], kv['group'].lower(), kv['name'].lower())
-	for f in connection.post[1]['file']:
-		basename = os.path.basename(f[1]).split('.')
-		if len(basename) > 1:
-			basename[-2:] = [basename[-2] + '.' + basename[-1]]
-		filename = os.path.join(basedir, *basename)
-		os.makedirs(os.path.join(basedir, *basename[:-1]), exist_ok = True)
-		# Copy the file.
-		try:
-			with open(filename, 'wb') as w:
-				with open(f[0], 'rb') as r:
-					w.write(r.read())
-			debug(1, 'copied {} to {}'.format(f[0], filename))
-		except:
-			debug(1, 'unable to copy file')
-			traceback.print_exc()
-	sandboxserver.page(connection)
-	return False
-# }}}
 # }}}
 
 class Connection: # {{{
@@ -381,7 +337,8 @@ class Connection: # {{{
 		data = (yield from self.userdata.select('id', ('my_name', 'my_group'), wake = wake))
 		if len(data) == 0:
 			groupname = (yield from serverdata.select('group', ('name',), ('=', 'id', 1), wake = wake))
-			assert len(groupname) == 1
+			if len(groupname) == 0:
+				groupname = ['']
 			yield from self.userdata.insert('id', {'my_name': self.name, 'my_group': groupname[0][0]}, wake = wake)
 			my_group = 1
 		else:
@@ -407,7 +364,7 @@ class Connection: # {{{
 					s.pop(0)
 		self.remote.contents.event(scripts)
 		self.remote.main.event(self.display_name)
-		refresh_admins()
+		yield from refresh_admins(wake)
 	# }}}
 	def _finish_login(self, wake = None): # {{{
 		# TODO: This function is never called anymore. It should be called when (managed?) players reconnect.
@@ -421,7 +378,10 @@ class Connection: # {{{
 					setup.append({'action': 'scene', 'target': state['background'], 'args': {'with': None}})
 				for spr in state['sprite']:
 					s = state['sprite'][spr]
-					setup.append({'action': 'show', 'target': spr, 'image': s['image'], 'args': {'from': s['from'], 'to': s['to'], 'scale': s['scale'], 'rotation': s['rotation'], 'with': None, 'around': None, 'in': None}})
+					arg = {'action': 'show', 'target': spr, 'image': s['image']}
+					arg.args = {x: s[x] for x in ('from', 'from_hotspot', 'to', 'to_hotspot', 'scale', 'scale_hotspot', 'rotation', 'rotation_hotspot')}
+					arg.args.update({'with': None, 'around': None, 'in': None})
+					setup.append(arg)
 				self.remote.kinetic.event(setup, state['music'])
 				if not (yield from self._run_item(wake, self.user['run_stack'][-1]['program'][self.user['run_stack'][-1]['current']])):
 					debug(0, 'Bug: saved state of user {}:{} was not a waiting state'.format(name, group))
@@ -469,12 +429,12 @@ class Connection: # {{{
 			return
 		style = self._parse_text(style)
 		yield from self.userdata.update('answer', {'style': style}, ('and', ('=', 'question', self.user['question']), ('=', 'script', self.user['scripttag'])), wake = wake)
-		refresh_admins()
+		yield from refresh_admins(wake)
 	# }}}
-	def _home(self): # {{{
+	def _home(self, wake): # {{{
 		self.user['chapter'] = None
 		del self.user['environment']
-		refresh_admins()
+		yield from refresh_admins(wake)
 		self.remote.main.event(self.display_name)
 	# }}}
 	def _clear_pending(self): # {{{
@@ -497,7 +457,7 @@ class Connection: # {{{
 
 				# If target sprite does not exist, create it (with no image).
 				if action['target'] not in state['sprite']:
-					state['sprite'][action['target']] = {'from': [(0, 0), (0, 0), None], 'to': [(0, 0), (0, 0), None], 'scale': None, 'rotation': None, 'image': None}
+					state['sprite'][action['target']] = {'from': [0, 0, None], 'from_hotspot': [0, 0], 'to': [0, 0, None], 'to_hotspot': [0, 0], 'scale': None, 'scale_hotspot': [0, 0], 'rotation': None, 'rotation_hotspot': [0, 0], 'image': None}
 				# Store target sprite in local variable.
 				target = state['sprite'][action['target']]
 
@@ -505,7 +465,7 @@ class Connection: # {{{
 				target['target'] = action['target']
 				target['mood'] = action['mood']
 				args = action['args']
-				for prop in ('from', 'to', 'scale', 'rotation'):
+				for prop in ('from', 'from_hotspot', 'to', 'to_hotspot', 'scale', 'scale_hotspot', 'rotation', 'rotation_hotspot'):
 					if args[prop] is not None:
 						target[prop] = args[prop]
 		for action in self.user['_pending']:
@@ -524,7 +484,7 @@ class Connection: # {{{
 		self.user['run_stack'] = [{'program': self.user['program'], 'current': 0}]
 		# Sprites are stored in two steps.
 		# All available sprites are loaded into user['sprite'] by this function.
-		# All active sprites (declared with a "sprite" command, may or may not be onscreen are in user['activesprite']. Both are dicts.
+		# All active sprites (declared with a "sprite" command, may or may not be onscreen) are in user['activesprite']. Both are dicts.
 		# user['sprite'] has sprite names (as defined in db) as keys. Its values are dicts with mood names as keys and their numerical image ids as values.
 		# user['activesprite'] has tags as used in the script as keys. Its values are dicts with items:
 		#   'name': The character's name that is shown on screen as the speaker name,
@@ -576,7 +536,7 @@ class Connection: # {{{
 		return True
 	# }}}
 	def _add_character(self, code, name, imgs, ext): # {{{
-		self.user['characters'][code] = {'name': name, 'imgs': imgs, 'ext': ext, 'mood': 'default', 'x': 0, 'y': 0}
+		self.user['characters'][code] = {'name': name, 'imgs': imgs, 'ext': ext, 'mood': '', 'x': 0, 'y': 0}
 		c = self.user['characters'][code]
 	# }}}
 	def _show(self, tag, mood = None, at = 'center', transition = None, timing = None): # {{{
@@ -593,7 +553,7 @@ class Connection: # {{{
 				debug(1, 'hanging script detected: {}; killing it'.format(self.user['chapter']))
 				self.remote.error.event(['Script stopped working and was killed.'])
 				self.user['run_stack'] = [{'program': self.user['program'], 'current': len(self.user['program'])}]
-				refresh_admins()
+				yield from refresh_admins(wake)
 				return
 			# Pop off stack levels until there's an instruction.
 			while len(self.user['run_stack'][-1]['program']) <= self.user['run_stack'][-1]['current']:
@@ -603,14 +563,14 @@ class Connection: # {{{
 					# Send final "question".
 					self.remote.question.event(self.user['_pending'], '', 'choice', ['Done'])
 					self.breaking = True
-					refresh_admins()
+					yield from refresh_admins(wake)
 					return
 			# Run instructions.
 			if (yield from self._run_item(wake, self.user['run_stack'][-1]['program'][self.user['run_stack'][-1]['current']])):
 				#print('break')
 				break
 			#print('no break')
-		refresh_admins()
+		yield from refresh_admins(wake)
 	# }}}
 	def _run_item(self, wake, code): # {{{
 		debug(3, '{}:{} running item {}'.format(self.user['name'], self.user['group'], repr(code)))
@@ -683,26 +643,32 @@ class Connection: # {{{
 					target = item['speaker']
 					#print('check', item, self.user['activesprite'])
 					speaker = None if target is None else self.user['activesprite'][target]['name'] if target in self.user['activesprite'] else '(' + target + ')'
-					if target in self.user['activesprite']:
+					if target in self.user['activesprite']: # {{{
+						# Target is an active sprite (defined in the script).
 						spriteid = self.user['activesprite'][target]['id']
-						if spriteid in self.user['sprite']:
+						if spriteid in self.user['sprite']: # {{{
+							# Target is a sprite (not an invalid active sprite).
 							sprite = self.user['sprite'][spriteid]
-							if item['image'] not in sprite:
-								if item['image'] is not None:
-									debug(0, 'ignoring invalid image %s for %s' % (item['image'], target))
-									if 'side' in self.user['activesprite'][target]:
-										image = self.user['activesprite'][target]['side']
-									else:
-										image = None
-								else:
-									image = None
+							if item['mood'] not in sprite: # {{{
+								# Requested mood does not exist.
+								mood = None
 							else:
-								image = item['image']
+								# Requested mood exists; use it.
+								mood = item['mood']
+							# }}}
 						else:
-							image = None
+							# Target is not a sprite (invalid name defined in script): no images.
+							mood = None
+						# }}}
 					else:
-						image = None
-					return {'action': 'speech', 'speaker': speaker, 'target': target, 'image': image, 'text': markdown(self._parse_text(item['markdown']))}
+						# Target is not an active sprite (not defined in script): no images.
+						mood = None
+					# }}}
+					if 'side' in self.user['activesprite'][target]:
+						side = self.user['activesprite'][target]['side']
+					else:
+						side = None
+					return {'action': 'speech', 'speaker': speaker, 'target': target, 'mood': mood, 'side': side, 'text': markdown(self._parse_text(item['markdown']))}
 				# }}}
 				if item['action'] == 'wait': # {{{
 					return {'action': 'wait', 'time': self._parse_time(wake, item['time'])}
@@ -720,9 +686,17 @@ class Connection: # {{{
 				args = {}
 				# Parse animation arguments. {{{
 				def parse_location(loc): # {{{
+					'Parse location; return location and hotspot'
 					if loc is None:
-						return None
-					l = [x.strip() for x in self._parse_text(loc).split()]
+						return None, [0, 0]
+					raw = self._parse_text(loc)
+					if '@' in raw:
+						pos, h = loc.split('@')
+						hotspot = [float(x) for x in h]
+					else:
+						pos = loc
+						hotspot = [0, 0]
+					l = [x.strip() for x in pos.split()]
 					if l[0] == 'outleft':
 						l[0] = (1, -1)
 					elif l[0] == 'inleft':
@@ -774,7 +748,7 @@ class Connection: # {{{
 							l[2] = int(l[2])
 						except:
 							l[2] = None
-					return l
+					return l, hotspot
 				# }}}
 				def parse_around(loc): # {{{
 					if loc is None:
@@ -826,21 +800,33 @@ class Connection: # {{{
 					args['with'] = 'move'
 				else:
 					w = self._parse_text(item['args']['with'])
-					if w not in ('jump', 'dissolve', 'move'):
+					if w not in ('jump', 'fade', 'move'):
 						debug(0, 'invalid transition {}'.format(w))
 						args['with'] = None
 					else:
 						args['with'] = w
 				# }}}
-				args['to'] = parse_location(item['args']['to'])
-				args['from'] = parse_location(item['args']['from'])
+				args['to'], args['to_hotspot'] = parse_location(item['args']['to'])
+				args['from'], args['from_hotspot'] = parse_location(item['args']['from'])
 				args['around'] = parse_around(item['args']['around'])
 				if item['args']['scale'] is None: # {{{
 					args['scale'] = None
+					args['scale_hotspot'] = None
 				else:
-					s = [x.strip() for x in self._parse_text(item['args']['scale']).split()]
+					raw = self._parse_text(item['args']['scale'])
+					if '@' in raw:
+						value, hotspot = raw.split('@')
+						s = [x.strip() for x in value.split(',')]
+						h = [x.strip() for x in hotspot.split(',')]
+					else:
+						s = [x.strip() for x in raw.split(',')]
+						h = [0, 0]
 					try:
-						s = [float(x) for x in s]
+						def parse(num):
+							if num.endswith('%'):
+								return float(num[:-1]) / 100
+							return float(num)
+						s = [parse(x) for x in s]
 						if len(s) == 1:
 							s.append(s[0])
 						elif len(s) > 2:
@@ -849,11 +835,19 @@ class Connection: # {{{
 						debug(0, 'error parsing scale {}'.format(s))
 						s = None
 					args['scale'] = s
+					args['scale_hotspot'] = h
 				# }}}
 				if item['args']['rotation'] is None: # {{{
 					args['rotation'] = None
+					args['rotation_hotspot'] = None
 				else:
-					r = self._parse_text(item['args']['rotation']).strip()
+					raw = self._parse_text(item['args']['rotation']).strip()
+					if '@' in raw:
+						r, hotspot = raw.split('@')
+						h = [x.strip() for x in hotspot.split(',')]
+					else:
+						r = raw
+						h = [0, 0]
 					if r.endswith('°'):
 						f = 360
 						r = r[:-1]
@@ -865,6 +859,7 @@ class Connection: # {{{
 						debug(0, 'error parsing rotation {}'.format(r))
 						r = None
 					args['rotation'] = r
+					args['rotation_hotspot'] = h
 				# }}}
 				if item['target'] is None: # {{{
 					target = None
@@ -872,7 +867,10 @@ class Connection: # {{{
 				else:
 					target = self._parse_text(item['target'])
 					if item['action'] != 'scene':
-						mood = self._parse_text(item['mood'] or '')
+						if item['mood'] is None:
+							mood = None
+						else:
+							mood = self._parse_text(item['mood'])
 					else:
 						mood = None
 				# }}}
@@ -955,11 +953,12 @@ class Connection: # {{{
 		return {'url': data[0][0], 'duration': data[0][1]}
 	# }}}
 	def home(self): # {{{
+		wake = (yield)
 		if self.busy and not force:
 			traceback.print_stack()
 			log('attempt to home while busy')
 			return
-		self._home()
+		yield from self._home(wake)
 	# }}}
 	def start(self, script): # {{{
 		wake = (yield)
@@ -987,7 +986,7 @@ class Connection: # {{{
 		debug(3, '{}:{} answers {}'.format(self.user['name'], self.user['group'], answer))
 		if len(self.user['run_stack']) == 0:
 			# Ignore answer for final "Done" button.
-			self._home()
+			yield from self._home(wake)
 			return
 		if self.user['run_stack'][-1]['current'] >= len(self.user['run_stack'][-1]['program']):
 			self.busy = True
@@ -1255,7 +1254,6 @@ player_config = { # {{{
 
 # Main program {{{
 server, serverdata = userdata.setup(connection_selector, config, db_config, player_config, httpdirs = ('html',), proxy = config['proxy'])
-server.post = post
 content.init(serverdata)
 
 print('server is running on port {}'.format(config['port']))

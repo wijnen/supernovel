@@ -160,7 +160,7 @@ def parse_anim_element(ln, c, d, parent_args): # {{{
 	# parallel, serial {{{
 	# Code: parallel <anim parameters>
 	# Code: serial <anim parameters>
-	r = re.match(r'(parallel|serial)\b\s*(.*)\s*:$', c)
+	r = re.match(r'(parallel|serial)\b\s*(.*)\s*$', c)
 	if r is not None:
 		args = parse_anim_args(ln, r.group(2), parent_args)
 		if args is None:
@@ -182,7 +182,7 @@ def parse_anim_element(ln, c, d, parent_args): # {{{
 	# Code: <speakertag> [<mood>]: <text|indented>
 	r = re.match(r'(\w+)(?:,(\w+))?:\s*(.*?)\s*$', c)
 	if r is not None:
-		return {'action': 'speech', 'line': ln, 'speaker': r.group(1), 'image': r.group(2), 'markdown': parse_raw(ln, d, r.group(3))}
+		return {'action': 'speech', 'line': ln, 'speaker': r.group(1), 'mood': r.group(2), 'markdown': parse_raw(ln, d, r.group(3))}
 	# }}}
 	
 	# wait {{{
@@ -226,15 +226,11 @@ def parse_anim_element(ln, c, d, parent_args): # {{{
 		return False
 
 	t = r.group(2)
-	if r.group(1) == 'scene':
+	if ',' in t:
+		target, mood = map(str.strip, t.split(',', 1))
+	else:
 		target = t
 		mood = None
-	else:
-		if ',' in t:
-			target, mood = map(str.strip, t.split(',', 1))
-		else:
-			target = t
-			mood = None
 
 	return {'action': r.group(1), 'target': target, 'mood': mood, 'args': args, 'line': ln}
 	# }}}
@@ -482,9 +478,10 @@ def parse_script(script): # {{{
 	index = {'label': {}, 'goto': {}}
 	question = []
 	while len(istack) > 0:
-		d = istack[-1].pop(0)
-		ln = d['line']
-		parse_line(d, ln, istack, ostack, index, question)
+		if len(istack[-1]) > 0:
+			d = istack[-1].pop(0)
+			ln = d['line']
+			parse_line(d, ln, istack, ostack, index, question)
 		while len(istack) > 0 and len(istack[-1]) == 0:
 			istack.pop()
 			ostack.pop()

@@ -1,7 +1,7 @@
 lesverhaal:
-	./lesverhaal --password testverhaal --username shevek --allow-local --default-userdata http://localhost:8879
+	./lesverhaal --gamename vn --password vn --username shevek --allow-local --default-userdata http://localhost:8879
 
 userdata:
-	cd userdata && while : ; do ./userdata ; done
+	cd ../userdata && ./userdata
 
 .PHONY: lesverhaal userdata

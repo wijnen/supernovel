@@ -1,3 +1,4 @@
+'use strict';
 function richinput(element) {
 	var translation = [
 		{0x30: '⁰', 0x31: '¹', 0x32: '²', 0x33: '³', 0x34: '⁴', 0x35: '⁵', 0x36: '⁶', 0x37: '⁷', 0x38: '⁸', 0x39: '⁹', 45: '⁻', 43: '⁺', 61: '⁼', 40: '⁽', 41: '⁾', 110: 'ⁿ'},
@@ -107,6 +108,8 @@ function richinput(element) {
 }
 window.AddEvent('load', function() {
 	var elements = document.getElementsByClassName('richinput');
-	for (var e = 0; e < elements.length; ++e)
-		richinput(elements[e]);
+	for (var e = 0; e < elements.length; ++e) {
+		// Disable this for now.
+		//richinput(elements[e]);
+	}
 });
