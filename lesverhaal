@@ -164,14 +164,14 @@ class Content_Connection: # {{{ Class for handling content management.
 		wake = (yield)
 		data = (yield from serverdata.select('chapter', ('id', 'name'), wake = wake))
 		return {d[0]: {'name': d[1]} for d in data}
-	def add_chapter(self, name):
+	def add_chapter(self, name, parent):
 		wake = (yield)
-		yield from serverdata.insert('chapter', {'name': name}, wake = wake)
+		yield from serverdata.insert('chapter', {'name': name, 'parent': parent if parent else None}, wake = wake)
 		me = (yield from serverdata.select('chapter', ('id',), ('=', 'name', name), wake = wake))
 		return me[0][0]
-	def update_chapter(self, chapterid, name):
+	def update_chapter(self, chapterid, name, parent):
 		wake = (yield)
-		yield from serverdata.update('chapter', {'name': name}, ('=', 'id', chapterid), wake = wake)
+		yield from serverdata.update('chapter', {'name': name, 'parent': parent if parent else None}, ('=', 'id', chapterid), wake = wake)
 	def remove_chapter(self, chapterid):
 		wake = (yield)
 		yield from serverdata.delete('chapter', ('=', 'id', chapterid), wake = wake)
@@ -457,7 +457,7 @@ class Connection: # {{{
 
 				# If target sprite does not exist, create it (with no image).
 				if action['target'] not in state['sprite']:
-					state['sprite'][action['target']] = {'from': [0, 0, None], 'from_hotspot': [0, 0], 'to': [0, 0, None], 'to_hotspot': [0, 0], 'scale': None, 'scale_hotspot': [0, 0], 'rotation': None, 'rotation_hotspot': [0, 0], 'image': None}
+					state['sprite'][action['target']] = {'from': [0, 0, None], 'from_hotspot': None, 'to': [0, 0, None], 'to_hotspot': None, 'scale': None, 'scale_hotspot': None, 'rotation': None, 'rotation_hotspot': None, 'image': None}
 				# Store target sprite in local variable.
 				target = state['sprite'][action['target']]
 
@@ -466,7 +466,7 @@ class Connection: # {{{
 				target['mood'] = action['mood']
 				args = action['args']
 				for prop in ('from', 'from_hotspot', 'to', 'to_hotspot', 'scale', 'scale_hotspot', 'rotation', 'rotation_hotspot'):
-					if args[prop] is not None:
+					if args.get(prop) is not None:
 						target[prop] = args[prop]
 		for action in self.user['_pending']:
 			handle_action(action, self.user['_kinetic_state'])
@@ -683,6 +683,7 @@ class Connection: # {{{
 						actions.append((yield from build_kinetic(wake, x)))
 					return {'action': item['action'], 'args': item['args'], 'actions': actions}
 				# }}}
+				# Something else: show, move, or hide.
 				args = {}
 				# Parse animation arguments. {{{
 				def parse_location(loc): # {{{
@@ -691,56 +692,77 @@ class Connection: # {{{
 						return None, [0, 0]
 					raw = self._parse_text(loc)
 					if '@' in raw:
-						pos, h = loc.split('@')
-						hotspot = [float(x) for x in h]
+						h, pos = loc.split('@')
+						hotspot = [float(x) for x in h.split(',')]
 					else:
 						pos = loc
-						hotspot = [0, 0]
-					l = [x.strip() for x in pos.split()]
+						hotspot = [None, None]
+					l = [x.strip() for x in pos.split(',')]
+					h = [None, None]
 					if l[0] == 'outleft':
-						l[0] = (1, -1)
+						l[0] = -1
+						h[0] = 1
 					elif l[0] == 'inleft':
-						l[0] = (-1, -1)
+						l[0] = -1
+						h[0] = -1
 					elif l[0] == 'outright':
-						l[0] = (-1, 1)
+						l[0] = 1
+						h[0] = -1
 					elif l[0] == 'inright':
-						l[0] = (1, 1)
+						l[0] = 1
+						h[0] = 1
 					elif l[0] == 'left':
-						l[0] = (0, -.4)
+						l[0] = -.4
+						h[0] = 0
 					elif l[0] == 'center':
-						l[0] = (0, 0)
+						l[0] = 0
+						h[0] = 0
 					elif l[0] == 'right':
-						l[0] = (0, .4)
+						l[0] = .4
+						h[0] = 0
 					else:
 						try:
-							l[0] = (0, float(l[0]))
+							l[0] = float(l[0])
 						except:
-							l[0] = (0, 0)
+							l[0] = 0
+					if hotspot[0] is not None:
+						h[0] = hotspot[0]
 					if len(l) == 1:
-						l.append((0, 0))
+						l.append(None)
 					elif l[1] == 'outbottom':
-						l[1] = (1, 0)
+						l[1] = 0
+						h[1] = 1
 					elif l[1] == 'inbottom':
-						l[1] = (-1, 0)
+						l[1] = 0
+						h[1] = -1
 					elif l[1] == 'outtop':
-						l[1] = (-1, 1)
+						l[1] = 1
+						h[1] = -1
 					elif l[1] == 'intop':
-						l[1] = (1, 1)
+						l[1] = 1
+						h[1] = 1
 					elif l[1] == 'bottom':
-						l[1] = (0, 0)
+						l[1] = 0
+						h[1] = 0
 					elif l[1] == 'low':
-						l[1] = (0, .2)
+						l[1] = .2
+						h[1] = 0
 					elif l[1] == 'middle':
-						l[1] = (0, .5)
+						l[1] = .5
+						h[1] = 0
 					elif l[1] == 'high':
-						l[1] = (0, .8)
+						l[1] = .8
+						h[1] = 0
 					elif l[1] == 'top':
-						l[1] = (0, 1)
+						l[1] = 1
+						h[1] = 0
 					else:
 						try:
-							l[1] = (0, float(l[1]))
+							l[1] = float(l[1])
 						except:
-							l[1] = (0, 0)
+							l[1] = None
+					if hotspot[1] is not None:
+						h[1] = hotspot[1]
 					if len(l) == 2:
 						l.append(None)
 					else:
@@ -748,7 +770,9 @@ class Connection: # {{{
 							l[2] = int(l[2])
 						except:
 							l[2] = None
-					return l, hotspot
+					if h == [None, None]:
+						h = None
+					return l, h
 				# }}}
 				def parse_around(loc): # {{{
 					if loc is None:
@@ -794,9 +818,19 @@ class Connection: # {{{
 				else:
 					args['in'] = self._parse_time(wake, item['args']['in'])
 				# }}}
+				args['to'], args['to_hotspot'] = parse_location(item['args']['to'])
 				if args['in'] is None:
 					args['with'] = 'jump'
-				elif item['args']['with'] is None: # {{{
+					if item['action'] == 'show':
+						args['from'], args['from_hotspot'] = args['to'], args['to_hotspot']
+				if item['action'] == 'show' and 'from' not in args:
+					args['from'], args['from_hotspot'] = parse_location(item['args']['from'])
+				if 'from' in args and args['from'] is not None:
+					if args['from'][0] is None:
+						args['from'][0] = 0
+					if args['from'][1] is None:
+						args['from'][1] = 0
+				if item['args']['with'] is None: # {{{
 					args['with'] = 'move'
 				else:
 					w = self._parse_text(item['args']['with'])
@@ -806,8 +840,6 @@ class Connection: # {{{
 					else:
 						args['with'] = w
 				# }}}
-				args['to'], args['to_hotspot'] = parse_location(item['args']['to'])
-				args['from'], args['from_hotspot'] = parse_location(item['args']['from'])
 				args['around'] = parse_around(item['args']['around'])
 				if item['args']['scale'] is None: # {{{
 					args['scale'] = None
@@ -820,7 +852,7 @@ class Connection: # {{{
 						h = [x.strip() for x in hotspot.split(',')]
 					else:
 						s = [x.strip() for x in raw.split(',')]
-						h = [0, 0]
+						h = None
 					try:
 						def parse(num):
 							if num.endswith('%'):
@@ -847,7 +879,7 @@ class Connection: # {{{
 						h = [x.strip() for x in hotspot.split(',')]
 					else:
 						r = raw
-						h = [0, 0]
+						h = None
 					if r.endswith('°'):
 						f = 360
 						r = r[:-1]
@@ -1090,84 +1122,6 @@ class Connection: # {{{
 				yield from self._run(wake)
 			finally:
 				self.busy = False
-	# }}}
-	def sandbox_list(self): # {{{
-		if self.busy:
-			log('attempt to list sandbox while busy')
-			return
-		if not self.user['sandbox']:
-			debug(1, 'User {}:{} is not allowed to use sandbox'.format(self.user['name'], self.user['group']))
-			raise PermissionError('User is not allowed to use sandbox')
-		basedir = os.path.join(config['data'], 'html', 'sandbox', config['sandbox'], self.user['group'].lower(), self.user['name'].lower())
-		if not os.path.exists(basedir):
-			return []
-		def make_list(base, current):
-			ret = []
-			for f in os.listdir(os.path.join(base, current)):
-				filename = os.path.join(base, current, f)
-				if os.path.isdir(filename):
-					if f[0] == '.':
-						continue
-					ret.extend(make_list(base, os.path.join(current, f)))
-				else:
-					ret.append(os.path.join(current, f))
-			return ret
-		return make_list(basedir, '')
-	# }}}
-	def sandbox_remove(self, name): # {{{
-		if self.busy:
-			log('attempt to remove sandbox while busy')
-			return
-		if not self.user['sandbox']:
-			debug(1, 'User is not allowed to use sandbox')
-			raise PermissionError('User is not allowed to use sandbox')
-		basedir = os.path.join(config['data'], 'html', 'sandbox', config['sandbox'], self.user['group'].lower(), self.user['name'].lower())
-		d = os.path.dirname(name)
-		assert '.' not in d and os.path.exists(os.path.join(basedir, name))
-		os.unlink(os.path.join(basedir, name))
-	# }}}
-	def sandbox_play(self, scriptname): # {{{
-		wake = (yield)
-		if self.busy:
-			log('attempt to play sandbox while busy')
-			return
-		if not self.user['sandbox']:
-			debug(1, 'User is not allowed to use sandbox')
-			raise PermissionError('User is not allowed to use sandbox')
-		basedir = os.path.join(config['data'], 'html', 'sandbox', config['sandbox'], self.user['group'].lower(), self.user['name'].lower())
-		d = os.path.dirname(scriptname)
-		assert '.' not in d and os.path.exists(os.path.join(basedir, scriptname))
-		self.user['chapter'] = ('sandbox', self.user['name'].lower())
-		self.busy = True
-		try:
-			yield from self._start(wake, content.get_file(self.user['group'], self.user['chapter'], os.path.join(basedir, scriptname)), True)
-		finally:
-			self.busy = False
-	# }}}
-	def sandbox_get(self, name): # {{{
-		if self.busy:
-			log('attempt to get sandbox while busy')
-			return
-		if not self.user['sandbox']:
-			debug(1, 'User is not allowed to use sandbox')
-			raise PermissionError('User is not allowed to use sandbox')
-		basedir = os.path.join(config['data'], 'html', 'sandbox', config['sandbox'], self.user['group'].lower(), self.user['name'].lower())
-		d = os.path.dirname(name)
-		assert '.' not in d and os.path.exists(os.path.join(basedir, name))
-		return open(os.path.join(basedir, name)).read()
-	# }}}
-	def sandbox_put(self, name, contents): # {{{
-		if self.busy:
-			log('attempt to put sandbox while busy')
-			return
-		if not self.user['sandbox']:
-			debug(1, 'User is not allowed to use sandbox')
-			raise PermissionError('User is not allowed to use sandbox')
-		basedir = os.path.join(config['data'], 'html', 'sandbox', config['sandbox'], self.user['group'].lower(), self.user['name'].lower())
-		d = os.path.dirname(name)
-		assert '.' not in d
-		os.makedirs(basedir, exist_ok = True)
-		open(os.path.join(basedir, name), 'w').write(contents)
 	# }}}
 # }}}
 

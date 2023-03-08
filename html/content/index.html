@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset='utf-8'/>
+		<title>Lesverhaal Content Management</title>
+		<script src='code/builders.js'></script>
+		<script src='code/rpc.js'></script>
+		<script src='code/userdata.js'></script>
+		<script src='code/content.js'></script>
+		<link rel='stylesheet' href='code/style.css'/>
+	</head>
+	<body>
+		<div id='userdata'></div>
+		<a id='download'></a>
+		<div id='error'>
+			<h1>Please Wait</h1>
+			<p>The connection with the server is attempted.</p>
+			<p>If this message does not disappear, there is a problem. There may be messages in the debugging console that identify the problem.</p>
+		</div>
+		<div id='edit'>
+			<!-- Area is saved on change; save button is just to provide a way to lose focus, which triggers the change event.
+			The save button is shown disabled while saving is in progress. -->
+			<textarea id='editbox' onkeyup='cursorMove()' onchange='save()'></textarea>
+			<div id='editbuttons'>
+				<button type='button' id='save'>Save</button>
+				<span id='line'></span>
+				<button type='button' onclick='hide()'>Done</button>
+			</div>
+		</div>
+		<div>
+			<input type='checkbox' id='permissions' class='hider'/><label for='permissions'>Show permission items</label>
+			<div>
+				<div>
+					<h1>Groups</h1>
+					<table id='group'></table>
+				</div>
+				<div>
+					<h1>Chapters</h1>
+					<table id='chapter'></table>
+				</div>
+				<div>
+					<h1>Access</h1>
+					<table id='access'></table>
+				</div>
+			</div>
+		</div>
+		<div>
+			<input type='checkbox' id='scripts' class='hider'/><label for='scripts'>Show script items</label>
+			<div>
+				<div>
+					<h1>Scripts</h1>
+					<table id='script'></table>
+				</div>
+				<div>
+					<h1>Questions</h1>
+					<table id='question'></table>
+				</div>
+			</div>
+		</div>
+		<div>
+			<input type='checkbox' id='sprites' class='hider'/><label for='sprites'>Show sprite items</label>
+			<div>
+				<div>
+					<h1>Sprite IDs</h1>
+					<table id='spriteid'></table>
+				</div>
+				<div>
+					<h1>Sprite Images</h1>
+					<table id='spriteimage'></table>
+				</div>
+				<div>
+					<h1>Images</h1>
+					<table id='image'></table>
+				</div>
+			</div>
+		</div>
+		<div>
+			<input type='checkbox' id='audios' class='hider'/><label for='audios'>Show audio items</label>
+			<div>
+				<div>
+					<h1>Audio</h1>
+					<table id='audio'></table>
+				</div>
+			</div>
+		</div>
+	</body>
+</html>

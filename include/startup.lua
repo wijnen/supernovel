@@ -1,3 +1,6 @@
+python = require "python"
+math = require "math"
+
 function check(args)
 	--result, quantity = nil, value = nil, digits = nil, unit = nil, error = nil
 	--[[Check an answer. Result is the object that was returned from the question.

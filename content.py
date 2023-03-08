@@ -75,7 +75,6 @@ errors = []
 def parse_error(line, message): # {{{
 	errors.append('{}: {}'.format(line if line is not None else '(from code)', message))
 	debug(1, '{}: parse error: {}'.format(line, message))
-	assert False
 # }}}
 
 def read_structure(f): # {{{
@@ -129,7 +128,7 @@ def parse_raw(ln, d, firstline): # {{{
 	return d['rawchildren']
 # }}}
 
-def parse_anim_args(ln, a, parent_args): # {{{
+def parse_anim_args(ln, cmd, a, parent_args): # {{{
 	args = {'with': None, 'in': None, 'to': None, 'from': None, 'scale': None, 'rotation': None, 'around': None}
 	if a is None:
 		return args
@@ -142,6 +141,10 @@ def parse_anim_args(ln, a, parent_args): # {{{
 		full = ra.group(1)
 		key = ra.group(2)
 		expr = ra.group(3)
+		if cmd != 'show' and key == 'from':
+			print('from only allowed with show (not %s)' % cmd)
+			parse_error(ln, 'from argument is only allowed with show (not %s)' % cmd)
+			return None
 		a = a[:-len(full)].strip()
 		if args[key] is not None:
 			parse_error(ln, 'duplicate attribute')
@@ -162,7 +165,7 @@ def parse_anim_element(ln, c, d, parent_args): # {{{
 	# Code: serial <anim parameters>
 	r = re.match(r'(parallel|serial)\b\s*(.*)\s*$', c)
 	if r is not None:
-		args = parse_anim_args(ln, r.group(2), parent_args)
+		args = parse_anim_args(ln, r.group(1), r.group(2), parent_args)
 		if args is None:
 			# Parsing arguments triggered an error. Abort.
 			return False
@@ -220,7 +223,7 @@ def parse_anim_element(ln, c, d, parent_args): # {{{
 		parse_error(ln, 'command needs a target')
 		return False
 
-	args = parse_anim_args(ln, r.group(3), parent_args)
+	args = parse_anim_args(ln, r.group(1), r.group(3), parent_args)
 	if args is None:
 		# There was an error.
 		return False
@@ -452,11 +455,11 @@ def parse_line(d, ln, istack, ostack, index, question): # {{{
 
 	# sprite {{{
 	# Code: sprite <tag> <image-collection> <display-name>
-	r = re.match(r'sprite\s+(\S+)\s+(\S+)\s+(.+?)\s*$', c)
+	r = re.match(r'sprite\s+(\S+)(?:\s+(\S+)(?:\s+(.+?))?)?\s*$', c)
 	if r is not None:
 		tag = r.group(1)
-		images = r.group(2)
-		name = r.group(3)
+		images = r.group(2) or ''
+		name = r.group(3) or ''
 		ostack[-1].append({'command': 'sprite', 'line': ln, 'images': images, 'name': name, 'tag': tag})
 		return True
 	# }}}

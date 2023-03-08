@@ -1,0 +1,55 @@
+button {
+	width: 100%;
+}
+
+#edit {
+	display: none;
+	position: fixed;
+	width: 90vw;
+	height: 90vh;
+	bottom: 5vh;
+	left: 5vw;
+	background: #111;
+}
+
+#editbuttons button {
+	width: 30vw;
+}
+
+#editbuttons button:first-child {
+	float: left;
+}
+
+#editbuttons button ~ button {
+	float: right;
+}
+
+#editbuttons span {
+	width: 30vw;
+	display: inline-block;
+	text-align: center;
+	box-sizing: border-box;
+}
+
+#editbuttons {
+	width: 90vw;
+	box-sizing: border-box;
+}
+
+#editbuttons span {
+	color: white;
+}
+
+textarea {
+	box-sizing: border-box;
+	width: 90vw;
+	height: 80vh;
+	margin: auto auto auto auto;
+}
+
+.hider:checked + label + div {
+	display: block;
+}
+.hider:not(:checked) + label + div {
+	display: none;
+}

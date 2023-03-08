@@ -53,10 +53,7 @@ function SpriteState(ref) { // {{{
 			this.position = null;
 		else
 			this.position = this.copy_array(ref.position);
-		if (ref.position_hotspot === null)
-			this.position_hotspot = [0, 0];
-		else
-			this.position_hotspot = this.copy_array(ref.position_hotspot);
+		this.position_hotspot = this.copy_array(ref.position_hotspot);
 		this.rotation = ref.rotation
 		this.rotation_hotspot = this.copy_array(ref.rotation_hotspot);
 		this.around = this.copy_array(ref.around);
@@ -65,6 +62,7 @@ function SpriteState(ref) { // {{{
 		this['with'] = ref['with'];
 	}
 	var mix_num = function(phase, a, b) {
+		//console.info('mixing', a, b);
 		if (b === null)
 			return a;
 		if (a === null)
@@ -73,9 +71,11 @@ function SpriteState(ref) { // {{{
 			return b;
 		if (typeof b == 'boolean')
 			return a;
+		//console.info('mixed', a + (b - a) * phase);
 		return a + (b - a) * phase;
 	};
 	var mix_array = function(phase, a, b) {
+		//console.error('mixing array', a, b);
 		if (b === null)
 			return a;
 		if (a === null)
@@ -94,6 +94,7 @@ function SpriteState(ref) { // {{{
 		ret.scale = mix_array(phase, this.scale, to.scale);
 		ret.scale_hotspot = mix_array(phase, this.scale_hotspot, to.scale_hotspot);
 		ret.image = to.image;
+		//console.info('mixing position', this.position, to.position);
 		if (to.position === null) {
 			ret.position = this.copy_array(this.position);
 			ret.position_hotspot = this.copy_array(this.position_hotspot);
@@ -108,12 +109,15 @@ function SpriteState(ref) { // {{{
 					// No rotation: simple interpolation.
 					ret.position = mix_array(phase, this.position, to.position);
 					ret.position_hotspot = mix_array(phase, this.position_hotspot, to.position_hotspot);
+					//console.info('mixed position', ret.position);
 				}
 				else {
 					var ratio = screen_size[1] / screen_size[0];
 					// Rotate around some point. Compute starting and ending angles and radii; mix those.
-					var from_vect = [this.position[0] - ret.around[0], (this.position[1] - ret.around[1]) / ratio];
-					var to_vect = [to.position[0] - ret.around[0], (to.position[1] - ret.around[1]) / ratio];
+					var from_point = mix_array(0, this.position, to.position);
+					var to_point = mix_array(1, this.position, to.position);
+					var from_vect = [from_point[0] - ret.around[0], (from_point[1] - ret.around[1]) / ratio];
+					var to_vect = [to_point[0] - ret.around[0], (to_point[1] - ret.around[1]) / ratio];
 					var from_angle = Math.atan2(from_vect[1], from_vect[0]);
 					var to_angle = Math.atan2(to_vect[1], to_vect[0]);
 					if (ret.around[2]) {
@@ -132,9 +136,7 @@ function SpriteState(ref) { // {{{
 					var radius = mix_num(phase, from_radius, to_radius);
 					//console.info(from_radius, from_angle, to_radius, to_angle, radius, angle, from_vect, to_vect, this.position, ret.around);
 					// Compute position.
-					ret.position_hotspot = [];
-					for (var c = 0; c < 2; ++c)
-						ret.position_hotspot.push(mix_num(phase, this.position_hotspot[c], to.position_hotspot[c]));
+					ret.position_hotspot = mix_array(phase, this.position_hotspot, to.position_hotspot);
 					var x = ret.around[0] + radius * Math.cos(angle);
 					var y = ret.around[1] + radius * Math.sin(angle) * ratio;
 					var z = mix_num(phase, this.position[2], to.position[2]);
@@ -150,8 +152,8 @@ function SpriteState(ref) { // {{{
 			} // }}}
 			else {
 				// TODO: handle non-linear interpolation ("with ...").
-				ret.position = this.copy_array(to.position);
-				ret.position_hotspot = this.copy_array(to.position_hotspot);
+				ret.position = mix_array(1, this.position, to.position);
+				ret.position_hotspot = mix_array(1, this.position_hotspot, to.position_hotspot);
 			}
 		}
 		return ret;
@@ -213,7 +215,6 @@ function Sprite(ref) { // {{{
 			// Default animation type to 'move'.
 			if (this['with'] === null)
 				this['with'] = 'move';
-			setTimeout(function() { animate(true); }, 0);
 			var phase = (now - this.start_time) / this.duration;
 			if (phase >= 1) {
 				// Don't just copy this.to, because position can be null.
@@ -229,6 +230,7 @@ function Sprite(ref) { // {{{
 				ret.extra = null;
 			}
 		}
+		animate(true);
 		return ret;
 	};
 } // }}}
@@ -304,15 +306,21 @@ function DisplaySprite() { // {{{
 				return;
 			}
 			me.img.src = img.url;
-			// Compute reference, in image pixels ([0, 0] is hotspot, positive directions are towards top right).
+			// Compute reference point, in image pixels ([0, 0] is hotspot, positive directions are towards top right).
 			var reference = [];
-			for (var i = 0; i < 2; ++i) {
-				var c = sprite_state.position_hotspot[i];
-				// Position is based on sprite edge.
-				if (c >= 0)
-					reference.push((img.size[i] - img.hotspot[i]) * c);
-				else
-					reference.push(img.hotspot[i] * c);
+			if (sprite_state.position_hotspot === null) {
+				reference.push(0);
+				reference.push(0);
+			}
+			else {
+				for (var i = 0; i < 2; ++i) {
+					var c = sprite_state.position_hotspot[i] || 0;
+					// Position is based on sprite edge.
+					if (c >= 0)
+						reference.push(img.hotspot[i] + (img.size[i] - img.hotspot[i]) * c);
+					else
+						reference.push(img.hotspot[i] * (1 + c));
+				}
 			}
 			var x = (sprite_state.position[0] + 1) / 2 * screen_size[0];
 			var y = sprite_state.position[1] * screen_size[1];
@@ -617,13 +625,17 @@ function activate(name, now, extra, fast_forward) { // {{{
 				var args = action.args;
 				var current_sprite;
 				if (action.action == 'show') {
-					if (state.sprite[action.target] === undefined) {
+					if (state.sprite[action.target] !== undefined) {
+						console.error('Trying to show sprite that was already shown');
+						current_sprite = state.sprite[action.target];
+					}
+					else {
 						current_sprite = new Sprite();
 						state.sprite[action.target] = current_sprite;
-						current_sprite.from.position = args.from;
-						current_sprite.from.position_hotspot = args.from_hotspot;
-						current_sprite.from.image = image;
 					}
+					current_sprite.from.position = args.from;
+					current_sprite.from.position_hotspot = args.from_hotspot;
+					current_sprite.from.image = image;
 				}
 				else if (action.action == 'hide') {
 					if (fast_forward || args['in'] === null) {
@@ -674,9 +686,10 @@ function activate(name, now, extra, fast_forward) { // {{{
 				activate(name, now);
 			});
 			// End function now; it will restart at callback.
-			return;
+			break;
 		} // }}}
 	}
+	// If no thread is waiting for the user, nobody is talking and the speechbox should be hidden.
 	if (state.waiting_threads.length == 0) {
 		state.speaker.name = null;
 		state.speaker.text = '';
