@@ -53,3 +53,12 @@ textarea {
 .hider:not(:checked) + label + div {
 	display: none;
 }
+
+#preview {
+	display: block;
+	position: fixed;
+	top: 10vh;
+	bottom: 10vh;
+	left: 10vw;
+	right: 10vw;
+}

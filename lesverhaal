@@ -4,6 +4,8 @@
 # Imports and config. {{{
 import sys
 import os
+import base64
+import io
 import math
 import re
 import traceback
@@ -160,10 +162,12 @@ class Content_Connection: # {{{ Class for handling content management.
 		yield from serverdata.delete('group', ('=', 'id', groupid), wake = wake)
 	# }}}
 	# Chapters {{{
-	def list_chapters(self):
-		wake = (yield)
+	def _list_chapters(self, wake):
 		data = (yield from serverdata.select('chapter', ('id', 'name'), wake = wake))
 		return {d[0]: {'name': d[1]} for d in data}
+	def list_chapters(self):
+		wake = (yield)
+		return (yield from self._list_chapters(wake))
 	def add_chapter(self, name, parent):
 		wake = (yield)
 		yield from serverdata.insert('chapter', {'name': name, 'parent': parent if parent else None}, wake = wake)
@@ -198,9 +202,11 @@ class Content_Connection: # {{{ Class for handling content management.
 		wake = (yield)
 		data = (yield from serverdata.select('script', ('script',), ('=', 'id', scriptid), wake = wake))
 		return None if len(data) == 0 else data[0][0]
+	def _add_script(self, wake, name, chapter, script):
+		yield from serverdata.insert('script', {'name': name, 'chapter': chapter, 'script': script}, wake = wake)
 	def add_script(self, name, chapter, script):
 		wake = (yield)
-		yield from serverdata.insert('script', {'name': name, 'chapter': chapter, 'script': script}, wake = wake)
+		yield from self._add_script(wake, name, chapter, script)
 		new_scriptid = (yield from serverdata.select('script', ('id',), ('and', ('=', 'name', name), ('=', 'chapter', chapter)), wake = wake))[0]
 		return (yield from self._update_questions(wake, new_scriptid, script))
 	def update_script(self, scriptid, name, chapter, script):
@@ -229,73 +235,74 @@ class Content_Connection: # {{{ Class for handling content management.
 		data = (yield from serverdata.select('question', ('id', 'script', 'type', 'description'), wake = wake))
 		return {('%d:%s' % (d[1], d[0])): {'type': d[2], 'description': d[3]} for d in data}
 	# }}}
-	# Sprite ids {{{
-	def list_spriteids(self):
-		wake = (yield)
-		data = (yield from serverdata.select('spriteid', ('name', 'chapter', 'id'), wake = wake))
+	# Sprites {{{
+	def _list_sprites(self, wake):
+		data = (yield from serverdata.select('sprite', ('name', 'chapter', 'id'), wake = wake))
 		return {d[2]: {'name': d[0], 'chapter': d[1]} for d in data}
-	def add_spriteid(self, spriteid, name, chapter):
+	def list_sprites(self):
 		wake = (yield)
-		yield from serverdata.insert('spriteid', {'name': name, 'chapter': chapter, 'id': spriteid}, wake = wake)
-	def update_spriteid(self, spriteid, name, chapter):
+		return (yield from self._list_sprites(wake))
+	def _add_sprite(self, wake, spriteid, name, chapter):
+		yield from serverdata.insert('sprite', {'name': name, 'chapter': chapter, 'id': spriteid}, wake = wake)
+	def add_sprite(self, spriteid, name, chapter):
 		wake = (yield)
-		yield from serverdata.update('spriteid', {'name': name, 'chapter': chapter}, ('=', 'id', spriteid), wake = wake)
-	def remove_spriteid(self, spriteid):
+		yield from self._add_sprite(wake, spriteid, name, chapter)
+	def update_sprite(self, spriteid, name, chapter):
 		wake = (yield)
-		yield from serverdata.delete('spriteid', ('=', 'id', spriteid), wake = wake)
-	# }}}
-	# Sprite images {{{
-	def list_spriteimages(self):
+		yield from serverdata.update('sprite', {'name': name, 'chapter': chapter}, ('=', 'id', spriteid), wake = wake)
+	def remove_sprite(self, spriteid):
 		wake = (yield)
-		data = (yield from serverdata.select('spriteimage', ('id', 'spriteid', 'mood', 'image'), wake = wake))
-		return {d[0]: {'spriteid': d[1], 'mood': d[2], 'image': d[3]} for d in data}
-	def add_spriteimage(self, spriteid, mood, image):
-		wake = (yield)
-		yield from serverdata.insert('spriteimage', {'spriteid': spriteid, 'mood': mood, 'image': image}, wake = wake)
-	def update_spriteimage(self, spriteimageid, spriteid, mood, image):
-		wake = (yield)
-		yield from serverdata.update('spriteimage', {'spriteid': spriteid, 'mood': mood, 'image': image}, ('=', 'id', spriteimageid), wake = wake)
-	def remove_spriteimage(self, spriteimageid):
-		wake = (yield)
-		yield from serverdata.delete('spriteimage', ('=', 'id', spriteimageid), wake = wake)
+		yield from serverdata.delete('sprite', ('=', 'id', spriteid), wake = wake)
 	# }}}
 	# Images {{{
+	def _list_images(self, wake):
+		data = (yield from serverdata.select('image', ('id', 'sprite', 'mood', 'width', 'height', 'hotx', 'hoty'), wake = wake))
+		return {d[0]: {'sprite': d[1], 'mood': d[2], 'size': (d[3], d[4]), 'hotspot': (d[5], d[6])} for d in data}
 	def list_images(self):
 		wake = (yield)
-		data = (yield from serverdata.select('image', ('id', 'name', 'width', 'height', 'hotx', 'hoty'), wake = wake))
-		return {d[0]: {'name': d[1], 'size': (d[2], d[3]), 'hotspot': (d[4], d[5])} for d in data}
+		return (yield from self._list_images(wake))
+	def _get_image(self, wake, imageid):
+		data = (yield from serverdata.select('image', ('url', 'sprite', 'mood', 'width', 'height', 'hotx', 'hoty'), ('=', 'id', imageid), wake = wake))
+		return None if len(data) == 0 else {'url': data[0][0], 'sprite': data[0][1], 'mood': data[0][2], 'size': [data[0][3], data[0][4]], 'hotspot': [data[0][5], data[0][6]]}
 	def get_image(self, imageid):
 		wake = (yield)
-		data = (yield from serverdata.select('image', ('url', 'width', 'height', 'hotx', 'hoty'), ('=', 'id', imageid), wake = wake))
-		return None if len(data) == 0 else {'url': data[0][0], 'size': [data[0][1], data[0][2]], 'hotspot': [data[0][3], data[0][4]]}
-	def add_image(self, imageid, name, url, size, hotspot):
-		wake = (yield)
+		return (yield from self._get_image(wake, imageid))
+	def _add_image(self, wake, imageid, sprite, mood, url, size, hotspot):
 		# TODO: load image and detect size.
-		yield from serverdata.insert('image', {'id': imageid, 'name': name, 'url': url, 'width': size[0], 'height': size[1], 'hotx': hotspot[0], 'hoty': hotspot[1]}, wake = wake)
-	def update_image(self, imageid, name, url, size, hotspot):
+		yield from serverdata.insert('image', {'id': imageid, 'sprite': sprite, 'mood': mood, 'url': url, 'width': size[0], 'height': size[1], 'hotx': hotspot[0], 'hoty': hotspot[1]}, wake = wake)
+	def add_image(self, imageid, sprite, mood, url, size, hotspot):
+		wake = (yield)
+		yield from self._add_image(wake, imageid, sprite, mood, url, size, hotspot)
+	def update_image(self, imageid, sprite, mood, url, size, hotspot):
 		wake = (yield)
 		# TODO: load image and detect size.
 		if url is None:
-			yield from serverdata.update('image', {'name': name, 'width': size[0], 'height': size[1], 'hotx': hotspot[0], 'hoty': hotspot[1]}, ('=', 'id', imageid), wake = wake)
+			yield from serverdata.update('image', {'sprite': sprite, 'mood': mood, 'width': size[0], 'height': size[1], 'hotx': hotspot[0], 'hoty': hotspot[1]}, ('=', 'id', imageid), wake = wake)
 		else:
-			yield from serverdata.update('image', {'name': name, 'url': url, 'width': size[0], 'height': size[1], 'hotx': hotspot[0], 'hoty': hotspot[1]}, ('=', 'id', imageid), wake = wake)
+			yield from serverdata.update('image', {'sprite': sprite, 'mood': mood, 'url': url, 'width': size[0], 'height': size[1], 'hotx': hotspot[0], 'hoty': hotspot[1]}, ('=', 'id', imageid), wake = wake)
 	def remove_image(self, imageid):
 		wake = (yield)
 		yield from serverdata.delete('image', ('=', 'id', imageid), wake = wake)
 	# }}}
 	# Audio {{{
-	def list_audio(self):
-		wake = (yield)
+	def _list_audio(self, wake):
 		data = (yield from serverdata.select('audio', ('id', 'duration'), wake = wake))
 		return {d[0]: {'duration': d[1]} for d in data}
-	def get_audio(self, audioid):
+	def list_audio(self):
 		wake = (yield)
+		return (yield from self._list_audio(wake))
+	def _get_audio(self, wake, audioid):
 		data = (yield from serverdata.select('audio', ('url',), ('=', 'id', audioid), wake = wake))
 		return None if len(data) == 0 else data[0][0]
-	def add_audio(self, audioid, url, duration):
+	def get_audio(self, audioid):
 		wake = (yield)
+		return (yield from self._get_audio(wake, audioid))
+	def _add_audio(self, wake, audioid, url, duration):
 		# TODO: load sound and detect duration.
 		yield from serverdata.insert('audio', {'id': audioid, 'url': url, 'duration': duration}, wake = wake)
+	def add_audio(self, audioid, url, duration):
+		wake = (yield)
+		return (yield from self._add_audio(wake, audioid, url, duration))
 	def update_audio(self, audioid, url, duration):
 		wake = (yield)
 		# TODO: load sound and detect duration.
@@ -306,6 +313,62 @@ class Content_Connection: # {{{ Class for handling content management.
 	def remove_audio(self, audioid):
 		wake = (yield)
 		yield from serverdata.delete('audio', ('=', 'id', audioid), wake = wake)
+	# }}}
+	def import_chapter(self, zipdata): # {{{
+		wake = (yield)
+		z = zipfile.ZipFile(io.BytesIO(base64.b64decode(zipdata)), 'r')
+		for info in z.infolist():
+			parts = info.filename.split('/')
+			if parts[1] == 'sprite':
+				if len(parts) != 4:
+					print('ignoring unknown path in imported zipfile: %s' % parts[1], file = sys.stderr)
+					continue
+				if parts[2] not in sprites:
+					yield from self._add_sprite(wwake)
+			if len(parts) != 3:
+				print('ignoring path in imported zipfile, because it does not have 3 parts: %s' % info.filename)
+				continue
+			if parts[1] == 'script':
+				yield from self._add_script(wake, parts[2], parent, z.read(info).decode('utf-8', 'replace'))
+			elif parts[1] == 'audio':
+				yield from self._add_audio(wake, parts[2], z.read(info), 0)
+			elif parts[1] == 'video':
+				print('ignoring video path in imported zipfile (not implemented yet)', file = sys.stderr)
+			else:
+				print('ignoring unknown path in imported zipfile: %s' % parts[1], file = sys.stderr)
+	# }}}
+	def export_chapter(self, chapterid): # {{{
+		wake = (yield)
+		chaptername = (yield from serverdata.select('chapter', ('name',), ('=', 'id', chapterid), wake = wake))
+		ret = io.BytesIO()
+		z = zipfile.ZipFile(ret, 'w')
+		images = {}
+		info = b''
+		for imageid, im in (yield from self._list_images(wake)).items():
+			if im['sprite'] not in images:
+				images[im['sprite']] = {}
+			images[im['sprite']][im['mood']] = {'id': imageid, 'size': im['size'], 'hotspot': im['hotspot']}
+		for spriteid, sprite in (yield from self._list_sprites(wake)).items():
+			if sprite['chapter'] != chapterid:
+				continue
+			info += b'sprite %s\n' % sprite['name']
+			for mood in images[spriteid]:
+				imageid = images[spriteid][mood]['id']
+				url = (yield from self._get_image(wake, imageid))
+				with z.open('%s/%s/%s' % (chaptername, sprite['name'], mood + '.txt'), 'w') as f:
+					f.write(url.encode('utf-8'))
+				info += b'mood %s size %f %f hotspot %f %f\n' % (mood, images[spriteid][mood]['size'][0], images[spriteid][mood]['size'][1], images[spriteid][mood]['hotspot'][0], images[spriteid][mood]['hotspot'][1])
+		for audioid, duration in (yield from self._list_audio(wake)).items():
+			data = (yield from self._get_audio(wake, audioid))
+			if data is None:
+				print('ignoring invalid audio id %s' % audioid)
+				continue
+			with z.open('%s/audio/%s' % (chaptername, audioid), 'w') as f:
+				f.write(data)
+		with z.open('%s/info.txt' % chaptername, 'w') as f:
+			f.write(info)
+		z.close()
+		return 'data:application/zip;base64,' + base64.b64encode(ret.getbuffer()).decode('utf-8')
 	# }}}
 # }}}
 
@@ -378,7 +441,7 @@ class Connection: # {{{
 					setup.append({'action': 'scene', 'target': state['background'], 'args': {'with': None}})
 				for spr in state['sprite']:
 					s = state['sprite'][spr]
-					arg = {'action': 'show', 'target': spr, 'image': s['image']}
+					arg = {'action': 'move', 'target': spr, 'image': s['image']}
 					arg.args = {x: s[x] for x in ('from', 'from_hotspot', 'to', 'to_hotspot', 'scale', 'scale_hotspot', 'rotation', 'rotation_hotspot')}
 					arg.args.update({'with': None, 'around': None, 'in': None})
 					setup.append(arg)
@@ -453,7 +516,7 @@ class Connection: # {{{
 			elif action['action'] == 'hide':
 				del state['sprite'][action['target']]
 			else:
-				assert action['action'] in ('show', 'move')
+				assert action['action'] == 'move'
 
 				# If target sprite does not exist, create it (with no image).
 				if action['target'] not in state['sprite']:
@@ -495,13 +558,13 @@ class Connection: # {{{
 		self.user['_pending'] = []
 		self.user['question'] = None
 		# Set up self.user['sprite']. {{{
-		global_sprites = (yield from serverdata.select('spriteid', ('id', 'name'), ('=', 'chapter', None), wake = wake))
-		local_sprites = (yield from serverdata.select('spriteid', ('id', 'name'), ('=', 'chapter', self.user['chapter']), wake = wake))
+		global_sprites = (yield from serverdata.select('sprite', ('id', 'name'), ('=', 'chapter', None), wake = wake))
+		local_sprites = (yield from serverdata.select('sprite', ('id', 'name'), ('=', 'chapter', self.user['chapter']), wake = wake))
 		spriteid = {name: id for id, name in global_sprites}
 		spriteid.update({name: id for id, name in local_sprites})
 		for name in spriteid:
 			id = spriteid[name]
-			moods = (yield from serverdata.select('spriteimage', ('mood', 'image'), ('=', 'spriteid', id), wake = wake))
+			moods = (yield from serverdata.select('image', ('mood', 'id'), ('=', 'sprite', id), wake = wake))
 			self.user['sprite'][name] = {m[0]: m[1] for m in moods}
 		sprites = {name: list(self.user['sprite'][name].keys()) for name in spriteid}
 		# }}}
@@ -534,16 +597,6 @@ class Connection: # {{{
 		self.remote.question.event(self.user['_pending'], qtext, qtype, parsed_options, last_answer)
 		self.breaking = True
 		return True
-	# }}}
-	def _add_character(self, code, name, imgs, ext): # {{{
-		self.user['characters'][code] = {'name': name, 'imgs': imgs, 'ext': ext, 'mood': '', 'x': 0, 'y': 0}
-		c = self.user['characters'][code]
-	# }}}
-	def _show(self, tag, mood = None, at = 'center', transition = None, timing = None): # {{{
-		yield from self._run_item(wake, ['story', None, content.showhide(True, tag, mood, at, transition, timing, False, None)])
-	# }}}
-	def _hide(self, tag, at = 'center', transition = None, timing = None): # {{{
-		yield from self._run_item(wake, ['story', None, content.showhide(False, tag, None, at, transition, timing, False, None)])
 	# }}}
 	def _run(self, wake): # {{{
 		watchdog = 0
@@ -683,7 +736,7 @@ class Connection: # {{{
 						actions.append((yield from build_kinetic(wake, x)))
 					return {'action': item['action'], 'args': item['args'], 'actions': actions}
 				# }}}
-				# Something else: show, move, or hide.
+				# Something else: move, or hide.
 				args = {}
 				# Parse animation arguments. {{{
 				def parse_location(loc): # {{{
@@ -821,11 +874,10 @@ class Connection: # {{{
 				args['to'], args['to_hotspot'] = parse_location(item['args']['to'])
 				if args['in'] is None:
 					args['with'] = 'jump'
-					if item['action'] == 'show':
-						args['from'], args['from_hotspot'] = args['to'], args['to_hotspot']
-				if item['action'] == 'show' and 'from' not in args:
+					args['from'], args['from_hotspot'] = args['to'], args['to_hotspot']
+				else:
 					args['from'], args['from_hotspot'] = parse_location(item['args']['from'])
-				if 'from' in args and args['from'] is not None:
+				if args['from'] is not None:
 					if args['from'][0] is None:
 						args['from'][0] = 0
 					if args['from'][1] is None:
@@ -1137,6 +1189,7 @@ def connection_selector(my_id, my_name, my_userdata, my_remote, managed_name): #
 # }}}
 
 db_config = { # {{{
+	# Permissions # {{{
 	'group': [
 		('id', 'int(11) NOT NULL AUTO_INCREMENT PRIMARY KEY'),
 		('name', 'text NOT NULL')
@@ -1150,6 +1203,9 @@ db_config = { # {{{
 		('groupid', 'int(11) NOT NULL'),
 		('chapter', 'int(11) DEFAULT NULL'),
 	],
+	# }}}
+
+	# Scripts {{{
 	'script': [
 		('id', 'int(11) NOT NULL AUTO_INCREMENT PRIMARY KEY'),
 		('name', 'text NOT NULL'),
@@ -1162,20 +1218,18 @@ db_config = { # {{{
 		('type', 'varchar(255) NOT NULL'),
 		('description', 'varchar(255) NOT NULL')
 	],
-	'spriteid': [
+	# }}}
+
+	# Images {{{
+	'sprite': [
 		('name', 'text NOT NULL'),	# Sprite name.
 		('chapter', 'int(11) DEFAULT NULL'),	# Chapter id, or NULL for global sprites.
 		('id', 'int(11) NOT NULL AUTO_INCREMENT UNIQUE'),	# Sprite id.
 	],
-	'spriteimage': [
-		('id', 'int(11) NOT NULL AUTO_INCREMENT PRIMARY KEY'),	# Sprite image id.
-		('spriteid', 'int(11) NOT NULL'),	# Sprite id.
-		('mood', 'text NOT NULL'),	# Mood name.
-		('image', 'int(11) NOT NULL'),	# Image id.
-	],
 	'image': [
 		('id', 'int(11) NOT NULL AUTO_INCREMENT PRIMARY KEY'),
-		('name', 'varchar(255) NOT NULL'),
+		('sprite', 'int(11) NOT NULL'),	# Sprite id.
+		('mood', 'text NOT NULL'),	# Mood name.
 		('url', 'longtext NOT NULL'),	# Data url.
 
 		# Size of image in screen units.
@@ -1187,11 +1241,15 @@ db_config = { # {{{
 		('hotx', 'float NOT NULL'),
 		('hoty', 'float NOT NULL'),
 	],
+	# }}}
+
+	# Media {{{
 	'audio': [
 		('id', 'varchar(255) NOT NULL PRIMARY KEY'),
 		('url', 'longtext NOT NULL'),	# Data url.
 		('duration', 'int(11) NOT NULL'),
 	],
+	# }}}
 } # }}}
 player_config = { # {{{
 	'id': [	# This table has only one row.

@@ -600,7 +600,7 @@ function activate(name, now, extra, fast_forward) { // {{{
 			}
 			return;
 		} // }}}
-		else { // Show, hide, move. {{{
+		else { // Move, hide. {{{
 			var target = action.target;
 			var mood;
 			if (action.mood !== null) {
@@ -624,20 +624,7 @@ function activate(name, now, extra, fast_forward) { // {{{
 			get_img(action.target, mood, function(image) {
 				var args = action.args;
 				var current_sprite;
-				if (action.action == 'show') {
-					if (state.sprite[action.target] !== undefined) {
-						console.error('Trying to show sprite that was already shown');
-						current_sprite = state.sprite[action.target];
-					}
-					else {
-						current_sprite = new Sprite();
-						state.sprite[action.target] = current_sprite;
-					}
-					current_sprite.from.position = args.from;
-					current_sprite.from.position_hotspot = args.from_hotspot;
-					current_sprite.from.image = image;
-				}
-				else if (action.action == 'hide') {
+				if (action.action == 'hide') {
 					if (fast_forward || args['in'] === null) {
 						delete state.sprite[action.target];
 						animate(true);
@@ -647,7 +634,21 @@ function activate(name, now, extra, fast_forward) { // {{{
 				}
 				else {
 					console.assert(action.action == 'move', 'invalid action "' + action.action + '"', action);
-					// Nothing to prepare; only common handling below is required.
+					if (state.sprite[action.target] !== undefined)
+						current_sprite = state.sprite[action.target];
+					else {
+						current_sprite = new Sprite();
+						state.sprite[action.target] = current_sprite;
+					}
+					if (args.from === null) {
+						current_sprite.from.position = args.to;
+						current_sprite.from.position_hotspot = args.to_hotspot;
+					}
+					else {
+						current_sprite.from.position = args.from;
+						current_sprite.from.position_hotspot = args.from_hotspot;
+					}
+					current_sprite.from.image = image;
 				}
 				current_sprite = state.sprite[action.target];
 				current_sprite.to.position = args.to;

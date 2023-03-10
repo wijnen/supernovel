@@ -141,10 +141,6 @@ def parse_anim_args(ln, cmd, a, parent_args): # {{{
 		full = ra.group(1)
 		key = ra.group(2)
 		expr = ra.group(3)
-		if cmd != 'show' and key == 'from':
-			print('from only allowed with show (not %s)' % cmd)
-			parse_error(ln, 'from argument is only allowed with show (not %s)' % cmd)
-			return None
 		a = a[:-len(full)].strip()
 		if args[key] is not None:
 			parse_error(ln, 'duplicate attribute')
@@ -195,14 +191,13 @@ def parse_anim_element(ln, c, d, parent_args): # {{{
 		return {'action': 'wait', 'line': ln, 'time': r.group(1)}
 	# }}}
 
-	# scene, show, hide, move, sound, music {{{
+	# scene, hide, move, sound, music {{{
 	# Code: scene <target> [<anim-attributes>]
-	# Code: show <target>[,<mood>] [<anim-attributes>]
 	# Code: hide <target>[,<mood>] [<anim-attributes>]
 	# Code: move <target>[,<mood>] [<anim-attributes>]
 	# Code: sound <target>
 	# Code: music <target>
-	r = re.match(r'(scene|show|hide|move|sound|music)\s*(?:\s(\S+?(?:\s*,\s*\S+)?)\s*(?:\s+(\S.*?)\s*)?)?$', c)
+	r = re.match(r'(scene|hide|move|sound|music)\s*(?:\s(\S+?(?:\s*,\s*\S+)?)\s*(?:\s+(\S.*?)\s*)?)?$', c)
 	# group 1: command
 	# group 2: target[,mood]
 	# group 3: anim attributes
