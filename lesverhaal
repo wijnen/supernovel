@@ -950,13 +950,7 @@ class Connection: # {{{
 					mood = None
 				else:
 					target = self._parse_text(item['target'])
-					if item['action'] != 'scene':
-						if item['mood'] is None:
-							mood = None
-						else:
-							mood = self._parse_text(item['mood'])
-					else:
-						mood = None
+					mood = self._parse_text(item['mood'])
 				# }}}
 				# }}}
 				#print('returning build', item['action'])
@@ -1014,16 +1008,22 @@ class Connection: # {{{
 		if sprite_name in self.user['sprite']:
 			if sprite_mood in self.user['sprite'][sprite_name]:
 				imageid = self.user['sprite'][sprite_name][sprite_mood]
-			else:
+			elif '' in self.user['sprite'][sprite_name]:
 				imageid = self.user['sprite'][sprite_name]['']
+			else:
+				imageid = None
 		else:
 			s = self.user['sprite']['']
 			if sprite_mood in s:
 				imageid = s[sprite_mood]
-			else:
+			elif '' in s:
 				imageid = s['']
+			else:
+				imageid = None
 		data = (yield from serverdata.select('image', ('url', 'width', 'height', 'hotx', 'hoty'), ('=', 'id', imageid), wake = wake))
-		assert len(data) == 1
+		if len(data) != 1:
+			print('Warning: sprite %s mood %s not found and no fallback found either' % (sprite_tag, sprite_mood))
+			return {'url': None, 'size': (0, 0), 'hotspot': (0, 0)}
 		#print('image id', imageid, 'from', repr(self.user['sprite']), 'data', data[0][0][:30])
 		return {'url': data[0][0], 'size': (data[0][1], data[0][2]), 'hotspot': (data[0][3], data[0][4])}
 	# }}}

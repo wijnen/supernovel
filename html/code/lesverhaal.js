@@ -639,12 +639,12 @@ function activate(name, now, extra, fast_forward) { // {{{
 					else {
 						current_sprite = new Sprite();
 						state.sprite[action.target] = current_sprite;
+						if (args.from === null) {
+							current_sprite.from.position = args.to;
+							current_sprite.from.position_hotspot = args.to_hotspot;
+						}
 					}
-					if (args.from === null) {
-						current_sprite.from.position = args.to;
-						current_sprite.from.position_hotspot = args.to_hotspot;
-					}
-					else {
+					if (args.from !== null) {
 						current_sprite.from.position = args.from;
 						current_sprite.from.position_hotspot = args.from_hotspot;
 					}
