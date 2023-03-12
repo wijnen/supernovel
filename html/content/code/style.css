@@ -1,3 +1,7 @@
+body {
+	background: navy;
+}
+
 button {
 	width: 100%;
 }
@@ -47,10 +51,57 @@ textarea {
 	margin: auto auto auto auto;
 }
 
-.hider:checked + label + div {
+.hider {
+	display: none;
+}
+
+.hider + label {
+	float: left;
+	margin: 1em 2em 0em;
+	padding: 1ex 2ex;
+	border-radius: 1ex 1ex 0ex 0ex;
+	font-weight: bold;
+}
+
+.hider:not(:checked) + label {
+	background: lightgrey;
+}
+
+.hider:checked + label {
+	background: white;
+}
+
+.tab {
+	clear: both;
+	background: white;
+	padding: 1ex 1em;
+}
+
+#permissions:checked ~ #permissiontab {
 	display: block;
 }
-.hider:not(:checked) + label + div {
+#permissions:not(:checked) ~ #permissiontab {
+	display: none;
+}
+
+#scripts:checked ~ #scripttab {
+	display: block;
+}
+#scripts:not(:checked) ~ #scripttab {
+	display: none;
+}
+
+#sprites:checked ~ #spritetab {
+	display: block;
+}
+#sprites:not(:checked) ~ #spritetab {
+	display: none;
+}
+
+#audios:checked ~ #audiotab {
+	display: block;
+}
+#audios:not(:checked) ~ #audiotab {
 	display: none;
 }
 

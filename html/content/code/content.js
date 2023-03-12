@@ -4,6 +4,7 @@
 
 var server;	// Handle for server communication.
 var group, chapter, access, script, question, sprite, image, audio;	// Results of list_*()
+var access_lookup;	// {group: [chapter, ...], ...}
 var edit = {};	// Current contents of script editing window.
 // }}}
 
@@ -51,31 +52,6 @@ function connected() { // {{{
 // }}}
 
 // UI. {{{
-function GroupRow(id, data) { // {{{
-	id = Number(id);
-	// Create the object.
-	var ret = Create('tr');
-	ret.update = function() { server.call('update_group', [], {groupid: id, name: ret.name.value}); };
-
-	// Id.
-	ret.AddElement('td').AddText(id);
-
-	// Name.
-	ret.name = ret.AddElement('td').AddElement('input');
-	ret.name.type = 'text';
-	ret.name.value = data.name;
-	ret.name.AddEvent('change', ret.update);
-
-	// Remove.
-	ret.remove = ret.AddElement('td').AddElement('button').AddText('Remove');
-	ret.remove.type = 'button';
-	ret.remove.AddEvent('click', function() {
-		server.call('remove_group', [id], {}, connected);
-	});
-
-	return ret;
-} // }}}
-
 function ChapterRow(id, data) { // {{{
 	id = Number(id);
 	// Create the object.
@@ -107,7 +83,49 @@ function ChapterRow(id, data) { // {{{
 	return ret;
 } // }}}
 
-function AccessRow(group, chapter) { // {{{
+function AccessRow(groupid, data) { // {{{
+	groupid = Number(groupid);
+	// Create the object.
+	var ret = Create('tr');
+	ret.update = function() { server.call('update_group', [], {groupid: groupid, name: ret.name.value}); };
+
+	// Id.
+	ret.AddElement('td').AddText(groupid);
+
+	// Name.
+	ret.name = ret.AddElement('td').AddElement('input');
+	ret.name.type = 'text';
+	ret.name.value = data.name;
+	ret.name.AddEvent('change', ret.update);
+
+	// Chapter access.
+	for (var c in chapter) {
+		var box = ret.AddElement('td').AddElement('input');
+		box.type = 'checkbox';
+		box.chapter = c;
+		if (access_lookup[groupid][c])
+			box.checked = true;
+		box.AddEvent('change', function() {
+			if (this.checked) {
+				server.call('add_access', [Number(groupid), this.chapter], {}, connected);
+			}
+			else {
+				server.call('remove_access', [Number(groupid), this.chapter], {}, connected);
+			}
+		});
+	}
+
+	// Remove.
+	ret.remove = ret.AddElement('td').AddElement('button').AddText('Remove');
+	ret.remove.type = 'button';
+	ret.remove.AddEvent('click', function() {
+		server.call('remove_group', [groupid], {}, connected);
+	});
+
+	return ret;
+} // }}}
+
+/*function AccessRow(groupid, data) { // {{{
 	// Create the object.
 	var ret = Create('tr');
 
@@ -123,7 +141,7 @@ function AccessRow(group, chapter) { // {{{
 	});
 
 	return ret;
-} // }}}
+} // }}} */
 
 function show_errors(errors) { // {{{
 	if (errors.length > 0) {
@@ -448,14 +466,42 @@ function AudioRow(id, data) { // {{{
 
 function update_ui() { // {{{
 
-	// Groups.
-	var table = document.getElementById('group').ClearAll();
-	var tr = table.AddElement('tr');
-	var titles = ['Id', 'Name', 'Remove'];
+	// Chapters.
+	table = document.getElementById('chapter').ClearAll();
+	tr = table.AddElement('tr');
+	titles = ['Id', 'Name', 'Parent', 'Export', 'Remove'];
 	for (var t = 0; t < titles.length; ++t)
 		tr.AddElement('th').AddText(titles[t]);
+	for (var c in chapter)
+		table.Add(ChapterRow(c, chapter[c]));
+	tr = table.AddElement('tr');
+	tr.AddElement('th').AddText('New');
+	var td = tr.AddElement('td');
+	td.colSpan = 3;
+	var button = td.AddElement('button').AddText('Create');
+	button.AddEvent('click', function() { server.call('add_chapter', ['New', null], {}, connected); });
+
+	// Groups and access.
+	access_lookup = {};
 	for (var g in group)
-		table.Add(GroupRow(g, group[g]));
+		access_lookup[g] = {};
+	for (var a = 0; a < access.length; ++a) {
+		if (access_lookup[access[a][0]] === undefined) {
+			console.error('Access defined for unknown group', access[a]);
+			continue;
+		}
+		access_lookup[access[a][0]][access[a][1]] = true;
+	}
+	var table = document.getElementById('access').ClearAll();
+	var tr = table.AddElement('tr');
+	var titles = ['Group Id', 'Group Name'];
+	for (var t = 0; t < titles.length; ++t)
+		tr.AddElement('th').AddText(titles[t]);
+	for (var c in chapter)
+		tr.AddElement('th').AddText(c + ': ' + chapter[c].name);
+	tr.AddElement('th').AddText('Remove');
+	for (var g in group)
+		table.Add(AccessRow(g, group[g]));
 	tr = table.AddElement('tr');
 	tr.AddElement('th').AddText('New');
 	var input = tr.AddElement('td').AddElement('input');
@@ -466,22 +512,7 @@ function update_ui() { // {{{
 	button.input = input;
 	button.AddEvent('click', function() { server.call('add_group', [this.input.value], {}, connected); });
 
-	// Chapters.
-	table = document.getElementById('chapter').ClearAll();
-	tr = table.AddElement('tr');
-	titles = ['Id', 'Name', 'Parent', 'Remove'];
-	for (var t = 0; t < titles.length; ++t)
-		tr.AddElement('th').AddText(titles[t]);
-	for (var c in chapter)
-		table.Add(ChapterRow(c, chapter[c]));
-	tr = table.AddElement('tr');
-	tr.AddElement('th').AddText('New');
-	var td = tr.AddElement('td');
-	td.colSpan = 3;
-	var button = td.AddElement('button').AddText('Create');
-	button.AddEvent('click', function() { server.call('add_chapter', ['New'], {}, connected); });
-
-	// Access.
+	/* Access.
 	table = document.getElementById('access').ClearAll();
 	tr = table.AddElement('tr');
 	titles = ['Group', 'Chapter', 'Remove'];
@@ -497,6 +528,7 @@ function update_ui() { // {{{
 	var td = tr.AddElement('td');
 	var button = td.AddElement('button').AddText('Create');
 	button.AddEvent('click', function() { server.call('add_access', [Number(groupinput.value), Number(chapterinput.value)], {}, connected); });
+	*/
 
 	// Scripts.
 	table = document.getElementById('script').ClearAll();
