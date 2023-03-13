@@ -1,5 +1,8 @@
+vn = require "vn"
 python = require "python"
 math = require "math"
+
+name = vn.name
 
 function check(args)
 	--result, quantity = nil, value = nil, digits = nil, unit = nil, error = nil

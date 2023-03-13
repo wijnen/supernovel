@@ -73,6 +73,18 @@ function ChapterRow(id, data) { // {{{
 	ret.parentid.value = data.parentid;
 	ret.parentid.AddEvent('change', ret.update);
 
+	// Export.
+	ret.remove = ret.AddElement('td').AddElement('button').AddText('Export');
+	ret.remove.type = 'button';
+	ret.remove.AddEvent('click', function() {
+		server.call('export_chapter', [id], {}, function(zip) {
+			var a = document.getElementById('download');
+			a.href = zip;
+			a.download = ret.name.value + '.zip';
+			a.click();
+		});
+	});
+
 	// Remove.
 	ret.remove = ret.AddElement('td').AddElement('button').AddText('Remove');
 	ret.remove.type = 'button';
@@ -100,7 +112,9 @@ function AccessRow(groupid, data) { // {{{
 
 	// Chapter access.
 	for (var c in chapter) {
-		var box = ret.AddElement('td').AddElement('input');
+		var td = ret.AddElement('td');
+		td.style.textAlign = 'center';
+		var box = td.AddElement('input');
 		box.type = 'checkbox';
 		box.chapter = c;
 		if (access_lookup[groupid][c])
@@ -124,24 +138,6 @@ function AccessRow(groupid, data) { // {{{
 
 	return ret;
 } // }}}
-
-/*function AccessRow(groupid, data) { // {{{
-	// Create the object.
-	var ret = Create('tr');
-
-	// Group, chapter.
-	ret.AddElement('td').AddText(group);
-	ret.AddElement('td').AddText(chapter);
-
-	// Remove.
-	ret.remove = ret.AddElement('td').AddElement('button').AddText('Remove');
-	ret.remove.type = 'button';
-	ret.remove.AddEvent('click', function() {
-		server.call('remove_access', [group, chapter], {}, connected);
-	});
-
-	return ret;
-} // }}} */
 
 function show_errors(errors) { // {{{
 	if (errors.length > 0) {
@@ -250,53 +246,53 @@ function QuestionRow(id, data) { // {{{
 	return ret;
 } // }}}
 
-function SpriteRow(id, data) { // {{{
+function ImageRow(id, data, is_first, num_moods) { // {{{
 	// Create the object.
 	var ret = Create('tr');
-	ret.update = function() {
-		var sname = ret.name.value;
+	ret.update = function() { server.call('update_image', [], {imageid: id, sprite: Number(ret.sprite.value), mood: ret.mood.value, size: [Number(ret.width.value), Number(ret.height.value)], hotspot: [Number(ret.hotx.value), Number(ret.hoty.value)], url: null}); };
+	ret.update_sprite = function() {
+		var sname = ret.sprite_name.value;
 		var chapter = ret.chapter.value ? Number(ret.chapter.value) : null;
 		server.call('update_sprite', [], {spriteid: id, name: sname, chapter: chapter});
 	};
 
-	// Id.
-	ret.spriteid = ret.AddElement('td').AddText(id);
+	if (is_first) {
+		var rows = (num_moods == 0 ? 2 : num_moods + 1);
+		var s = sprite[data.sprite];
+		// Sprite Id.
+		ret.AddElement('td').AddText(data.sprite).rowSpan = rows;
 
-	// Name.
-	ret.name = ret.AddElement('td').AddElement('input');
-	ret.name.type = 'text';
-	ret.name.value = data.name;
-	ret.name.AddEvent('change', ret.update);
+		// Sprite Name.
+		var td = ret.AddElement('td');
+		td.rowSpan = rows;
+		ret.sprite_name = td.AddElement('input');
+		ret.sprite_name.value = s.name;
+		ret.sprite_name.type = 'text';
+		ret.sprite_name.AddEvent('change', ret.update_sprite);
 
-	// Chapter.
-	ret.chapter = ret.AddElement('td').AddElement('input');
-	ret.chapter.type = 'Number';
-	ret.chapter.value = data.chapter;
-	ret.chapter.AddEvent('change', ret.update);
+		// Chapter.
+		td = ret.AddElement('td');
+		td.rowSpan = rows;
+		ret.chapter = td.AddElement('input');
+		ret.chapter.type = 'Number';
+		ret.chapter.value = s.chapter;
+		ret.chapter.AddEvent('change', ret.update_sprite);
 
-	// Remove.
-	ret.remove = ret.AddElement('td').AddElement('button').AddText('Remove');
-	ret.remove.type = 'button';
-	ret.remove.AddEvent('click', function() {
-		server.call('remove_sprite', [qid, sid], {}, connected);
-	});
+		// Remove.
+		td = ret.AddElement('td');
+		td.rowSpan = rows;
+		ret.sprite_remove = td.AddElement('button').AddText('Remove');
+		ret.sprite_remove.type = 'button';
+		ret.sprite_remove.AddEvent('click', function() {
+			server.call('remove_sprite', [data.sprite], {}, connected);
+		});
+	}
 
-	return ret;
-} // }}}
-
-function ImageRow(id, data) { // {{{
-	// Create the object.
-	var ret = Create('tr');
-	ret.update = function() { server.call('update_image', [], {imageid: id, sprite: Number(ret.sprite.value), mood: ret.mood.value, size: [Number(ret.width.value), Number(ret.height.value)], hotspot: [Number(ret.hotx.value), Number(ret.hoty.value)], url: null}); };
+	if (num_moods == 0)
+		return ret;
 
 	// Id.
 	ret.AddElement('td').AddText(id);
-
-	// Sprite.
-	ret.sprite = ret.AddElement('td').AddElement('input');
-	ret.sprite.type = 'number';
-	ret.sprite.value = data.sprite;
-	ret.sprite.AddEvent('change', ret.update);
 
 	// Mood.
 	ret.mood = ret.AddElement('td').AddElement('input');
@@ -398,14 +394,26 @@ function ImageRow(id, data) { // {{{
 function AudioRow(id, data) { // {{{
 	// Create the object.
 	var ret = Create('tr');
-	ret.update = function() { server.call('update_audio', [], {audioid: id, duration: Number(ret.duration.value), url: null}); };
+	ret.update = function() { server.call('update_audio', [], {audioid: id, name: ret.audioname.value, chapter: Number(ret.chapter.value), duration: Number(ret.duration.value), url: null}); };
 
 	// Id.
 	ret.AddElement('td').AddText(id);
 
+	// Name.
+	ret.audioname = ret.AddElement('td').AddElement('input');
+	ret.audioname.type = 'text';
+	ret.audioname.value = data.name;
+	ret.audioname.AddEvent('change', ret.update);
+
+	// Chapter.
+	ret.chapter = ret.AddElement('td').AddElement('input');
+	ret.chapter.type = 'number';
+	ret.chapter.value = data.chapter;
+	ret.chapter.AddEvent('change', ret.update);
+
 	// Duration.
 	ret.duration = ret.AddElement('td').AddElement('input');
-	ret.duration.type = 'text';
+	ret.duration.type = 'number';
 	ret.duration.value = data.duration;
 	ret.duration.AddEvent('change', ret.update);
 
@@ -466,7 +474,7 @@ function AudioRow(id, data) { // {{{
 
 function update_ui() { // {{{
 
-	// Chapters.
+	// Chapters. {{{
 	table = document.getElementById('chapter').ClearAll();
 	tr = table.AddElement('tr');
 	titles = ['Id', 'Name', 'Parent', 'Export', 'Remove'];
@@ -474,14 +482,47 @@ function update_ui() { // {{{
 		tr.AddElement('th').AddText(titles[t]);
 	for (var c in chapter)
 		table.Add(ChapterRow(c, chapter[c]));
+
+	// Create button.
 	tr = table.AddElement('tr');
-	tr.AddElement('th').AddText('New');
 	var td = tr.AddElement('td');
-	td.colSpan = 3;
-	var button = td.AddElement('button').AddText('Create');
+	td.colSpan = 5;
+	var button = td.AddElement('button').AddText('Create Chapter');
 	button.AddEvent('click', function() { server.call('add_chapter', ['New', null], {}, connected); });
 
-	// Groups and access.
+	// Import button.
+	tr = table.AddElement('tr');
+	tr.AddElement('th').AddText('Import').colSpan = 2;
+	var td = tr.AddElement('td');
+	td.colSpan = 3;
+	var import_input = td.AddElement('input');
+	import_input.type = 'file';
+	import_input.AddEvent('change', function() {
+		var send = function(files, idx) {
+			// Finish if the last file has been sent.
+			if (idx >= files.length) {
+				document.getElementById('busy').style.display = 'none';
+				connected();
+				return;
+			}
+			
+			// Read and send the requested file.
+			var reader = new FileReader();
+			reader.AddEvent('load', function() {
+				// Send the requested file.
+				server.call('import_chapter', [btoa(reader.result)], {}, function(errors) {
+					show_errors(errors);
+					// Continue with next file.
+					send(files, idx + 1);
+				});
+			});
+			reader.readAsBinaryString(files[idx]);
+		};
+		document.getElementById('busy').style.display = 'block';
+		send(import_input.files, 0);
+	});
+	// }}}
+	// Groups and access. {{{
 	access_lookup = {};
 	for (var g in group)
 		access_lookup[g] = {};
@@ -498,39 +539,18 @@ function update_ui() { // {{{
 	for (var t = 0; t < titles.length; ++t)
 		tr.AddElement('th').AddText(titles[t]);
 	for (var c in chapter)
-		tr.AddElement('th').AddText(c + ': ' + chapter[c].name);
+		tr.AddElement('th').AddText(chapter[c].name);
 	tr.AddElement('th').AddText('Remove');
 	for (var g in group)
 		table.Add(AccessRow(g, group[g]));
 	tr = table.AddElement('tr');
-	tr.AddElement('th').AddText('New');
-	var input = tr.AddElement('td').AddElement('input');
-	input.type = 'text';
 	var td = tr.AddElement('td');
-	td.colSpan = 2;
-	var button = td.AddElement('button').AddText('Create');
-	button.input = input;
-	button.AddEvent('click', function() { server.call('add_group', [this.input.value], {}, connected); });
+	td.colSpan = 4;
+	var button = td.AddElement('button').AddText('Create Group');
+	button.AddEvent('click', function() { server.call('add_group', [''], {}, connected); });
+	// }}}
 
-	/* Access.
-	table = document.getElementById('access').ClearAll();
-	tr = table.AddElement('tr');
-	titles = ['Group', 'Chapter', 'Remove'];
-	for (var t = 0; t < titles.length; ++t)
-		tr.AddElement('th').AddText(titles[t]);
-	for (var a = 0; a < access.length; ++a)
-		table.Add(AccessRow(access[a][0], access[a][1]));
-	tr = table.AddElement('tr');
-	var groupinput = tr.AddElement('td').AddElement('input');
-	groupinput.type = 'text';
-	var chapterinput = tr.AddElement('td').AddElement('input');
-	chapterinput.type = 'text';
-	var td = tr.AddElement('td');
-	var button = td.AddElement('button').AddText('Create');
-	button.AddEvent('click', function() { server.call('add_access', [Number(groupinput.value), Number(chapterinput.value)], {}, connected); });
-	*/
-
-	// Scripts.
+	// Scripts. {{{
 	table = document.getElementById('script').ClearAll();
 	tr = table.AddElement('tr');
 	titles = ['Id', 'Name', 'Chapter', 'Edit', 'Download', 'Upload', 'Remove'];
@@ -539,13 +559,12 @@ function update_ui() { // {{{
 	for (var s in script)
 		table.Add(ScriptRow(s, script[s]));
 	tr = table.AddElement('tr');
-	tr.AddElement('th').AddText('New');
 	var td = tr.AddElement('td');
-	td.colSpan = 6;
-	var button = td.AddElement('button').AddText('Create');
+	td.colSpan = 7;
+	var button = td.AddElement('button').AddText('Create Script');
 	button.AddEvent('click', function() { server.call('add_script', ['New', 0, ''], {}, connected); });
-
-	// Questions.
+	// }}}
+	// Questions. {{{
 	table = document.getElementById('question').ClearAll();
 	tr = table.AddElement('tr');
 	titles = ['Id', 'Script', 'Type', 'Description'];
@@ -553,58 +572,60 @@ function update_ui() { // {{{
 		tr.AddElement('th').AddText(titles[t]);
 	for (var q in question)
 		table.Add(QuestionRow(q, question[q]));
+	// }}}
 
-	// Sprite IDs.
-	table = document.getElementById('spriteid').ClearAll();
-	tr = table.AddElement('tr');
-	titles = ['Id', 'Name', 'Chapter', 'Remove'];
-	for (var t = 0; t < titles.length; ++t)
-		tr.AddElement('th').AddText(titles[t]);
-	for (var s in sprite)
-		table.Add(SpriteRow(s, sprite[s]));
-	tr = table.AddElement('tr');
-	tr.AddElement('td').AddText('New ID:').colSpan = 2;
-	var td = tr.AddElement('td');
-	var input = td.AddElement('input');
-	input.type = 'number';
-	var td = tr.AddElement('td');
-	var button = td.AddElement('button').AddText('Create');
-	button.input = input;
-	button.AddEvent('click', function() { server.call('add_sprite', [Number(this.input.value), '', 0], {}, connected); });
-
-	// Images.
+	// Sprites. {{{
 	table = document.getElementById('image').ClearAll();
 	tr = table.AddElement('tr');
-	titles = ['Id', 'Sprite', 'Mood', 'Width', 'Height', 'Hotspot X', 'Hotspot Y', 'Preview', 'Download', 'Upload', 'Remove'];
+	titles = ['Id', 'Sprite', 'Chapter', 'Remove', 'Id', 'Mood', 'Width', 'Height', 'Hotspot X', 'Hotspot Y', 'Preview', 'Download', 'Upload', 'Remove'];
 	for (var t = 0; t < titles.length; ++t)
 		tr.AddElement('th').AddText(titles[t]);
-	for (var i in image)
-		table.Add(ImageRow(i, image[i]));
-	tr = table.AddElement('tr');
-	var input = tr.AddElement('td').AddElement('input');
-	input.type = 'text';
-	var td = tr.AddElement('td');
-	td.colSpan = 8;
-	var button = td.AddElement('button').AddText('Create');
-	button.input = input;
-	button.AddEvent('click', function() { server.call('add_image', [], {id: this.input.value, sprite: 0, mood: '', url: '', size: [0, 0], hotspot: [0, 0]}, connected); });
+	for (var s in sprite) {
+		var num = 0;
+		for (var i in image) {
+			if (image[i].sprite != s)
+				continue;
+			num += 1;
+		}
+		var first = true;
+		for (var i in image) {
+			if (image[i].sprite != s)
+				continue;
+			table.Add(ImageRow(i, image[i], first, num));
+			first = false;
+		}
 
-	// Audio.
+		// Add sprite info if there are no moods, so it can be renamed and removed.
+		if (first)
+			table.Add(ImageRow(null, {sprite: s}, true, 0));
+
+		tr = table.AddElement('tr');
+		var td = tr.AddElement('td');
+		td.colSpan = 12;
+		var button = td.AddElement('button').AddText('Create Mood');
+		button.AddEvent('click', function() { server.call('add_image', [], {sprite: s, mood: '', url: '', size: [0, 0], hotspot: [0, 0]}, connected); });
+	}
+	tr = table.AddElement('tr');
+	var td = tr.AddElement('td');
+	td.colSpan = 14;
+	var button = td.AddElement('button').AddText('Create Sprite');
+	button.AddEvent('click', function() { server.call('add_sprite', ['', 0], {}, connected); });
+	// }}}
+
+	// Audio. {{{
 	table = document.getElementById('audio').ClearAll();
 	tr = table.AddElement('tr');
-	titles = ['Id', 'Duration', 'Download', 'Upload', 'Remove'];
+	titles = ['Id', 'Name', 'Chapter', 'Duration', 'Download', 'Upload', 'Remove'];
 	for (var t = 0; t < titles.length; ++t)
 		tr.AddElement('th').AddText(titles[t]);
 	for (var a in audio)
 		table.Add(AudioRow(a, audio[a]));
 	tr = table.AddElement('tr');
-	var input = tr.AddElement('td').AddElement('input');
-	input.type = 'text';
 	var td = tr.AddElement('td');
-	td.colSpan = 5;
-	var button = td.AddElement('button').AddText('Create');
-	button.input = input;
-	button.AddEvent('click', function() { server.call('add_audio', [this.input.value, '', 0], {}, connected); });
+	td.colSpan = 7;
+	var button = td.AddElement('button').AddText('Create Audio');
+	button.AddEvent('click', function() { server.call('add_audio', ['', 0, '', 0], {}, connected); });
+	// }}}
 
 } // }}}
 

@@ -8,6 +8,7 @@ import base64
 import io
 import math
 import re
+import zipfile
 import traceback
 import time
 import random
@@ -68,6 +69,8 @@ def refresh_admins(wake): # {{{
 #	Run code in the game's namespace and return a value.
 #	The value is a str if as_str is True, a bool otherwise.
 #	This function must be a generator.
+# - module(self, name, value):
+#	Load the value dict into the environment as the name name.
 
 class Lua: # Run Lua code. {{{
 	'''This class handles the userspace lua environment.
@@ -86,6 +89,8 @@ class Lua: # Run Lua code. {{{
 			return str(ret)
 		else:
 			return bool(ret)
+	def module(self, name, value):
+		self.lua.module(name, value)
 # }}}
 
 import lua
@@ -151,9 +156,7 @@ class Content_Connection: # {{{ Class for handling content management.
 		return {d[0]: {'name': d[1]} for d in data}
 	def add_group(self, name):
 		wake = (yield)
-		yield from serverdata.insert('group', {'name': name}, wake = wake)
-		me = (yield from serverdata.select('group', ('id',), ('=', 'name', name), wake = wake))
-		return me[0][0]
+		return (yield from serverdata.insert('group', {'name': name}, wake = wake))
 	def update_group(self, groupid, name):
 		wake = (yield)
 		yield from serverdata.update('group', {'name': name}, ('=', 'id', groupid), wake = wake)
@@ -168,11 +171,11 @@ class Content_Connection: # {{{ Class for handling content management.
 	def list_chapters(self):
 		wake = (yield)
 		return (yield from self._list_chapters(wake))
+	def _add_chapter(self, wake, name, parent):
+		return (yield from serverdata.insert('chapter', {'name': name, 'parent': parent if parent else None}, wake = wake))
 	def add_chapter(self, name, parent):
 		wake = (yield)
-		yield from serverdata.insert('chapter', {'name': name, 'parent': parent if parent else None}, wake = wake)
-		me = (yield from serverdata.select('chapter', ('id',), ('=', 'name', name), wake = wake))
-		return me[0][0]
+		return (yield from self._add_chapter(wake, name, parent))
 	def update_chapter(self, chapterid, name, parent):
 		wake = (yield)
 		yield from serverdata.update('chapter', {'name': name, 'parent': parent if parent else None}, ('=', 'id', chapterid), wake = wake)
@@ -194,20 +197,23 @@ class Content_Connection: # {{{ Class for handling content management.
 		yield from serverdata.delete('access', ('and', ('=', 'groupid', groupid), ('=', 'chapter', chapterid)), wake = wake)
 	# }}}
 	# Scripts {{{
-	def list_scripts(self):
-		wake = (yield)
+	def _list_scripts(self, wake):
 		data = (yield from serverdata.select('script', ('id', 'name', 'chapter'), wake = wake))
 		return {d[0]: {'name': d[1], 'chapter': d[2]} for d in data}
-	def get_script(self, scriptid):
+	def list_scripts(self):
 		wake = (yield)
+		return (yield from self._list_scripts(wake))
+	def _get_script(self, wake, scriptid):
 		data = (yield from serverdata.select('script', ('script',), ('=', 'id', scriptid), wake = wake))
 		return None if len(data) == 0 else data[0][0]
+	def get_script(self, scriptid):
+		wake = (yield)
+		return (yield from self._get_script(wake, scriptid))
 	def _add_script(self, wake, name, chapter, script):
-		yield from serverdata.insert('script', {'name': name, 'chapter': chapter, 'script': script}, wake = wake)
+		return (yield from serverdata.insert('script', {'name': name, 'chapter': chapter, 'script': script}, wake = wake))
 	def add_script(self, name, chapter, script):
 		wake = (yield)
-		yield from self._add_script(wake, name, chapter, script)
-		new_scriptid = (yield from serverdata.select('script', ('id',), ('and', ('=', 'name', name), ('=', 'chapter', chapter)), wake = wake))[0]
+		new_scriptid = (yield from self._add_script(wake, name, chapter, script))
 		return (yield from self._update_questions(wake, new_scriptid, script))
 	def update_script(self, scriptid, name, chapter, script):
 		wake = (yield)
@@ -224,7 +230,7 @@ class Content_Connection: # {{{ Class for handling content management.
 	# }}}
 	# Questions {{{
 	def _update_questions(self, wake, scriptid, script):
-		parsed, errors, questions = content.parse_script(script)
+		parsed, errors, questions, labels = content.parse_script(script)
 		#print('questions', questions)
 		yield from serverdata.delete('question', ('=', 'script', scriptid), wake = wake)
 		for q in questions:
@@ -242,11 +248,11 @@ class Content_Connection: # {{{ Class for handling content management.
 	def list_sprites(self):
 		wake = (yield)
 		return (yield from self._list_sprites(wake))
-	def _add_sprite(self, wake, spriteid, name, chapter):
-		yield from serverdata.insert('sprite', {'name': name, 'chapter': chapter, 'id': spriteid}, wake = wake)
-	def add_sprite(self, spriteid, name, chapter):
+	def _add_sprite(self, wake, name, chapter):
+		return (yield from serverdata.insert('sprite', {'name': name, 'chapter': chapter}, wake = wake))
+	def add_sprite(self, name, chapter):
 		wake = (yield)
-		yield from self._add_sprite(wake, spriteid, name, chapter)
+		return (yield from self._add_sprite(wake, name, chapter))
 	def update_sprite(self, spriteid, name, chapter):
 		wake = (yield)
 		yield from serverdata.update('sprite', {'name': name, 'chapter': chapter}, ('=', 'id', spriteid), wake = wake)
@@ -267,12 +273,12 @@ class Content_Connection: # {{{ Class for handling content management.
 	def get_image(self, imageid):
 		wake = (yield)
 		return (yield from self._get_image(wake, imageid))
-	def _add_image(self, wake, imageid, sprite, mood, url, size, hotspot):
+	def _add_image(self, wake, sprite, mood, url, size, hotspot):
 		# TODO: load image and detect size.
-		yield from serverdata.insert('image', {'id': imageid, 'sprite': sprite, 'mood': mood, 'url': url, 'width': size[0], 'height': size[1], 'hotx': hotspot[0], 'hoty': hotspot[1]}, wake = wake)
-	def add_image(self, imageid, sprite, mood, url, size, hotspot):
+		return (yield from serverdata.insert('image', {'sprite': sprite, 'mood': mood, 'url': url, 'width': size[0], 'height': size[1], 'hotx': hotspot[0], 'hoty': hotspot[1]}, wake = wake))
+	def add_image(self, sprite, mood, url, size, hotspot):
 		wake = (yield)
-		yield from self._add_image(wake, imageid, sprite, mood, url, size, hotspot)
+		return (yield from self._add_image(wake, sprite, mood, url, size, hotspot))
 	def update_image(self, imageid, sprite, mood, url, size, hotspot):
 		wake = (yield)
 		# TODO: load image and detect size.
@@ -285,9 +291,13 @@ class Content_Connection: # {{{ Class for handling content management.
 		yield from serverdata.delete('image', ('=', 'id', imageid), wake = wake)
 	# }}}
 	# Audio {{{
-	def _list_audio(self, wake):
-		data = (yield from serverdata.select('audio', ('id', 'duration'), wake = wake))
-		return {d[0]: {'duration': d[1]} for d in data}
+	def _list_audio(self, wake, chapter = None):
+		if chapter is None:
+			data = (yield from serverdata.select('audio', ('id', 'name', 'chapter', 'duration'), wake = wake))
+			return {d[0]: {'name': d[1], 'chapter': d[2], 'duration': d[3]} for d in data}
+		else:
+			data = (yield from serverdata.select('audio', ('id', 'name', 'duration'), ('=', 'chapter', chapter), wake = wake))
+			return {d[0]: {'name': d[1], 'duration': d[2]} for d in data}
 	def list_audio(self):
 		wake = (yield)
 		return (yield from self._list_audio(wake))
@@ -297,53 +307,158 @@ class Content_Connection: # {{{ Class for handling content management.
 	def get_audio(self, audioid):
 		wake = (yield)
 		return (yield from self._get_audio(wake, audioid))
-	def _add_audio(self, wake, audioid, url, duration):
+	def _add_audio(self, wake, name, chapter, url, duration):
 		# TODO: load sound and detect duration.
-		yield from serverdata.insert('audio', {'id': audioid, 'url': url, 'duration': duration}, wake = wake)
-	def add_audio(self, audioid, url, duration):
+		return (yield from serverdata.insert('audio', {'name': name, 'chapter': chapter, 'url': url, 'duration': duration}, wake = wake))
+	def add_audio(self, name, chapter, url, duration):
 		wake = (yield)
-		return (yield from self._add_audio(wake, audioid, url, duration))
-	def update_audio(self, audioid, url, duration):
+		return (yield from self._add_audio(wake, name, chapter, url, duration))
+	def update_audio(self, audioid, name, chapter, url, duration):
 		wake = (yield)
 		# TODO: load sound and detect duration.
 		if url is None:
-			yield from serverdata.update('audio', {'duration': duration}, ('=', 'id', audioid), wake = wake)
+			yield from serverdata.update('audio', {'name': name, 'chapter': chapter, 'duration': duration}, ('=', 'id', audioid), wake = wake)
 		else:
-			yield from serverdata.update('audio', {'url': url, 'duration': duration}, ('=', 'id', audioid), wake = wake)
+			yield from serverdata.update('audio', {'name': name, 'chapter': chapter, 'url': url, 'duration': duration}, ('=', 'id', audioid), wake = wake)
 	def remove_audio(self, audioid):
 		wake = (yield)
 		yield from serverdata.delete('audio', ('=', 'id', audioid), wake = wake)
 	# }}}
 	def import_chapter(self, zipdata): # {{{
 		wake = (yield)
+		errors = []
 		z = zipfile.ZipFile(io.BytesIO(base64.b64decode(zipdata)), 'r')
+
+		# Read metadata as list of lines. {{{
+		metafiles = [x for x in z.infolist() if x.filename.endswith('/info.txt') and len(x.filename.split('/')) == 2]
+		if len(metafiles) != 1:
+			errors.append('Invalid chapter: must have exactly one metadata info file.')
+			return errors
+		meta = [x for x in z.read(metafiles[0]).decode('utf-8').split('\n') if x.strip() != '']
+		# }}}
+
+		# sprite <name>
+		# mood <mood> size <w> <h> hotspot <x> <y>
+		# audio <name> duration <duration>
+
+		sprite = {}
+		audio = {}
+		# Parse metadata into useable structure. {{{
+		current = None
+		for line in meta:
+			if len(line.strip()) == 0:
+				continue
+			parts = re.match('sprite (\S+)\s*$', line)
+			if parts:
+				name = parts.group(1)
+				if name in sprite:
+					errors.append('duplicate sprite in metadata: %s' % name)
+					continue
+				current = name
+				sprite[current] = {}
+				continue
+			parts = re.match('mood (\S*) size (\S+) (\S+) hotspot (\S+) (\S+)\s*$', line)
+			if parts:
+				if current is None:
+					errors.append('mood defined in metadata before sprite')
+					continue
+				name = parts.group(1)
+				if name in sprite[current]:
+					errors.append('duplicate mood %s defined for sprite %s' % (name, current))
+					continue
+				size = (float(parts.group(2)), float(parts.group(3)))
+				hotspot = (float(parts.group(4)), float(parts.group(5)))
+				sprite[current][name] = {'size': size, 'hotspot': hotspot}
+				continue
+			parts = re.match('audio (\S+) duration (\S+)\s*$', line)
+			if parts:
+				name = parts.group(1)
+				if name in audio:
+					errors.append('duplicate audio defined: %s' % name)
+					continue
+				audio[name] = float(parts.group(2))
+				continue
+			errors.append('imported content contains invalid metadata: %s' % line)
+			continue
+		# }}}
+
+		chaptername = metafiles[0].filename.split('/')[0]
+		chapterid = (yield from (self._add_chapter(wake, chaptername, None)))
+
+		# Create all new sprites.
+		for spritename in sprite:
+			# Store the id in None, because string keys are mood names.
+			sprite[spritename][None] = (yield from self._add_sprite(wake, spritename, chapterid))
+
 		for info in z.infolist():
 			parts = info.filename.split('/')
+			if parts[0] != chaptername:
+				errors.append('ignoring path with incorrect top level directory: %s != %s' % (parts[0], chaptername))
+				continue
+			target = parts[-1].rsplit('.', 1)
+			if len(target) == 1:
+				errors.append('ignoring path without extension: %s' % info.filename)
+				continue
+			if target[1] != 'txt':
+				errors.append('ignoring non-txt extension: %s' % info.filename)
+				continue
+			target = target[0]
+
+			# Do not attempt to parse the metadata here, it has been parsed above.
+			if target == 'info':
+				continue
+
+			# Sprite mood image.
 			if parts[1] == 'sprite':
 				if len(parts) != 4:
-					print('ignoring unknown path in imported zipfile: %s' % parts[1], file = sys.stderr)
+					errors.append('ignoring path in imported zipfile: %s' % parts[1])
 					continue
-				if parts[2] not in sprites:
-					yield from self._add_sprite(wwake)
-			if len(parts) != 3:
-				print('ignoring path in imported zipfile, because it does not have 3 parts: %s' % info.filename)
+				if parts[2] not in sprite:
+					errors.append('ignoring sprite without metadata: %s' % parts[2])
+					continue
+				if target not in sprite[parts[2]]:
+					errors.append('ignoring sprite: mood is not defined in metadata: %s,%s' % (parts[2], target))
+					continue
+				s = sprite[parts[2]][target]
+				yield from self._add_image(wake, sprite[parts[2]][None], target, z.read(info).decode('utf-8'), s['size'], s['hotspot'])
 				continue
+
+			# All other files need to have 3 path parts.
+			if len(parts) != 3:
+				errors.append('ignoring path in imported zipfile, because it does not have 3 parts: %s' % info.filename)
+				continue
+
+			# Script.
 			if parts[1] == 'script':
-				yield from self._add_script(wake, parts[2], parent, z.read(info).decode('utf-8', 'replace'))
+				yield from self._add_script(wake, target, chapterid, z.read(info).decode('utf-8', 'replace'))
+
+			# Audio.
 			elif parts[1] == 'audio':
-				yield from self._add_audio(wake, parts[2], z.read(info), 0)
+				if target not in audio:
+					errors.append('ignoring audio without metadata: %s' % target)
+					continue
+				yield from self._add_audio(wake, target, chapterid, z.read(info).decode('utf-8'), audio[target])
+
+			# Video (not implemented yet)
 			elif parts[1] == 'video':
-				print('ignoring video path in imported zipfile (not implemented yet)', file = sys.stderr)
+				errors.append('ignoring video path in imported zipfile (not implemented yet)')
+
+			# Unsupported path.
 			else:
-				print('ignoring unknown path in imported zipfile: %s' % parts[1], file = sys.stderr)
+				errors.append('ignoring unsupported path in imported zipfile: %s' % parts[1])
+		return errors
 	# }}}
 	def export_chapter(self, chapterid): # {{{
 		wake = (yield)
-		chaptername = (yield from serverdata.select('chapter', ('name',), ('=', 'id', chapterid), wake = wake))
+		chaptername = (yield from serverdata.select('chapter', ('name',), ('=', 'id', chapterid), wake = wake))[0][0]
 		ret = io.BytesIO()
 		z = zipfile.ZipFile(ret, 'w')
 		images = {}
 		info = b''
+		for scriptid, data in (yield from self._list_scripts(wake)).items():
+			script = (yield from self._get_script(wake, scriptid)).encode('utf-8')
+			with z.open('%s/script/%s.txt' % (chaptername, data['name']), 'w') as f:
+				f.write(script)
 		for imageid, im in (yield from self._list_images(wake)).items():
 			if im['sprite'] not in images:
 				images[im['sprite']] = {}
@@ -351,19 +466,20 @@ class Content_Connection: # {{{ Class for handling content management.
 		for spriteid, sprite in (yield from self._list_sprites(wake)).items():
 			if sprite['chapter'] != chapterid:
 				continue
-			info += b'sprite %s\n' % sprite['name']
+			info += b'sprite %s\n' % sprite['name'].encode('utf-8')
 			for mood in images[spriteid]:
 				imageid = images[spriteid][mood]['id']
-				url = (yield from self._get_image(wake, imageid))
-				with z.open('%s/%s/%s' % (chaptername, sprite['name'], mood + '.txt'), 'w') as f:
-					f.write(url.encode('utf-8'))
-				info += b'mood %s size %f %f hotspot %f %f\n' % (mood, images[spriteid][mood]['size'][0], images[spriteid][mood]['size'][1], images[spriteid][mood]['hotspot'][0], images[spriteid][mood]['hotspot'][1])
-		for audioid, duration in (yield from self._list_audio(wake)).items():
-			data = (yield from self._get_audio(wake, audioid))
+				url = (yield from self._get_image(wake, imageid))['url'].encode('utf-8')
+				with z.open('%s/sprite/%s/%s.txt' % (chaptername, sprite['name'], mood), 'w') as f:
+					f.write(url)
+				info += b'mood %s size %f %f hotspot %f %f\n' % (mood.encode('utf-8'), images[spriteid][mood]['size'][0], images[spriteid][mood]['size'][1], images[spriteid][mood]['hotspot'][0], images[spriteid][mood]['hotspot'][1])
+		for audioid, metadata in (yield from self._list_audio(wake, chapterid)).items():
+			data = (yield from self._get_audio(wake, audioid)).encode('utf-8')
 			if data is None:
 				print('ignoring invalid audio id %s' % audioid)
 				continue
-			with z.open('%s/audio/%s' % (chaptername, audioid), 'w') as f:
+			info += b'audio %s duration %f\n' % (metadata['name'].encode('utf-8'), metadata['duration'])
+			with z.open('%s/audio/%s.txt' % (chaptername, metadata['name']), 'w') as f:
 				f.write(data)
 		with z.open('%s/info.txt' % chaptername, 'w') as f:
 			f.write(info)
@@ -381,7 +497,6 @@ class Connection: # {{{
 		self.remote = my_remote
 		self.manged_name = managed_name
 		self.display_name = my_name + (' (%s)' % managed_name if managed_name is not None else '')
-		self.new_commands = None	# This is initialized to a list when running code and filled with new commands by it.
 	# }}}
 	def _close(self): # {{{
 		wake = (yield)
@@ -469,7 +584,7 @@ class Connection: # {{{
 				result += self._safe_eval(m.group(1), as_str = True)
 		return result
 	# }}}
-	def _parse_time(self, wake, t): # {{{
+	def _parse_time(self, t): # {{{
 		'Parse a string (possibly including substitutions) as a time. Units of s for seconds or ms for milliseconds are required. This should be called with "yield from".'
 		i = self._parse_text(t).strip()
 		r = re.match(r'([-+.e0-9]+)\s*(m?)s$', i)
@@ -487,6 +602,8 @@ class Connection: # {{{
 	# }}}
 	def _answer(self, wake, style): # {{{
 		'''Set style for last answer. This should be called with "yield from".'''
+		if wake is None:
+			wake = (yield)
 		if self.user['question'] is None:
 			debug(1, 'answer style given before a question was answered')
 			return
@@ -494,11 +611,237 @@ class Connection: # {{{
 		yield from self.userdata.update('answer', {'style': style}, ('and', ('=', 'question', self.user['question']), ('=', 'script', self.user['scripttag'])), wake = wake)
 		yield from refresh_admins(wake)
 	# }}}
+	def _sprite(self, tag, id, name, mood = ''): # {{{
+		print('activating sprite', tag, name, id, mood)
+		self.user['activesprite'][tag] = {'name': name, 'id': id, 'mood': mood}
+	# }}}
 	def _home(self, wake): # {{{
 		self.user['chapter'] = None
 		del self.user['environment']
 		yield from refresh_admins(wake)
 		self.remote.main.event(self.display_name)
+	# }}}
+	def _parse_animation_args(self, item_args): # {{{
+		def parse_location(loc): # {{{
+			'Parse location; return location and hotspot'
+			if loc is None:
+				return None, [0, 0]
+			raw = self._parse_text(loc)
+			if '@' in raw:
+				h, pos = loc.split('@')
+				hotspot = [float(x) for x in h.split(',')]
+			else:
+				pos = loc
+				hotspot = [None, None]
+			l = [x.strip() for x in pos.split(',')]
+			h = [None, None]
+			if l[0] == 'outleft':
+				l[0] = -1
+				h[0] = 1
+			elif l[0] == 'inleft':
+				l[0] = -1
+				h[0] = -1
+			elif l[0] == 'outright':
+				l[0] = 1
+				h[0] = -1
+			elif l[0] == 'inright':
+				l[0] = 1
+				h[0] = 1
+			elif l[0] == 'left':
+				l[0] = -.4
+				h[0] = 0
+			elif l[0] == 'center':
+				l[0] = 0
+				h[0] = 0
+			elif l[0] == 'right':
+				l[0] = .4
+				h[0] = 0
+			else:
+				try:
+					l[0] = float(l[0])
+				except:
+					l[0] = 0
+			if hotspot[0] is not None:
+				h[0] = hotspot[0]
+			if len(l) == 1:
+				l.append(None)
+			elif l[1] == 'outbottom':
+				l[1] = 0
+				h[1] = 1
+			elif l[1] == 'inbottom':
+				l[1] = 0
+				h[1] = -1
+			elif l[1] == 'outtop':
+				l[1] = 1
+				h[1] = -1
+			elif l[1] == 'intop':
+				l[1] = 1
+				h[1] = 1
+			elif l[1] == 'bottom':
+				l[1] = 0
+				h[1] = 0
+			elif l[1] == 'low':
+				l[1] = .2
+				h[1] = 0
+			elif l[1] == 'middle':
+				l[1] = .5
+				h[1] = 0
+			elif l[1] == 'high':
+				l[1] = .8
+				h[1] = 0
+			elif l[1] == 'top':
+				l[1] = 1
+				h[1] = 0
+			else:
+				try:
+					l[1] = float(l[1])
+				except:
+					l[1] = None
+			if hotspot[1] is not None:
+				h[1] = hotspot[1]
+			if len(l) == 2:
+				l.append(None)
+			else:
+				try:
+					l[2] = int(l[2])
+				except:
+					l[2] = None
+			if h == [None, None]:
+				h = None
+			return l, h
+		# }}}
+		def parse_around(loc): # {{{
+			if loc is None:
+				return None
+			l = [x.strip() for x in self._parse_text(loc).split()]
+			if l[-1] in ('cw', 'ccw'):
+				cw = l[-1] == 'cw'
+				l.pop()
+			else:
+				cw = False
+			if l[0] == 'left':
+				l[0] = -.4
+			elif l[0] == 'center':
+				l[0] = 0
+			elif l[0] == 'right':
+				l[0] = .4
+			else:
+				try:
+					l[0] = float(l[0])
+				except:
+					l[0] = 0
+			if len(l) == 1:
+				l.append(0)
+			elif l[1] == 'bottom':
+				l[1] = 0
+			elif l[1] == 'low':
+				l[1] = .2
+			elif l[1] == 'middle':
+				l[1] = .5
+			elif l[1] == 'high':
+				l[1] = .8
+			elif l[1] == 'top':
+				l[1] = 1
+			else:
+				try:
+					l[1] = float(l[1])
+				except:
+					l[1] = 0
+			return l[:2] + [cw]
+		# }}}
+		args = {}
+		if item_args['in'] is None: # {{{
+			args['in'] = None
+		else:
+			args['in'] = self._parse_time(item_args['in'])
+		# }}}
+		args['to'], args['to_hotspot'] = parse_location(item_args['to'])
+		if args['in'] is None:
+			args['with'] = 'jump'
+			args['from'], args['from_hotspot'] = args['to'], args['to_hotspot']
+		else:
+			args['from'], args['from_hotspot'] = parse_location(item_args['from'])
+		if args['from'] is not None:
+			if args['from'][0] is None:
+				args['from'][0] = 0
+			if args['from'][1] is None:
+				args['from'][1] = 0
+		if item_args['with'] is None: # {{{
+			args['with'] = 'move'
+		else:
+			w = self._parse_text(item_args['with'])
+			if w not in ('jump', 'fade', 'move'):
+				debug(0, 'invalid transition {}'.format(w))
+				args['with'] = None
+			else:
+				args['with'] = w
+		# }}}
+		args['around'] = parse_around(item_args['around'])
+		if item_args['scale'] is None: # {{{
+			args['scale'] = None
+			args['scale_hotspot'] = None
+		else:
+			raw = self._parse_text(item_args['scale'])
+			if '@' in raw:
+				value, hotspot = raw.split('@')
+				s = [x.strip() for x in value.split(',')]
+				h = [x.strip() for x in hotspot.split(',')]
+			else:
+				s = [x.strip() for x in raw.split(',')]
+				h = None
+			try:
+				def parse(num):
+					if num.endswith('%'):
+						return float(num[:-1]) / 100
+					return float(num)
+				s = [parse(x) for x in s]
+				if len(s) == 1:
+					s.append(s[0])
+				elif len(s) > 2:
+					s = [s[0], s[1]]
+			except:
+				debug(0, 'error parsing scale {}'.format(s))
+				s = None
+			args['scale'] = s
+			args['scale_hotspot'] = h
+		# }}}
+		if item_args['rotation'] is None: # {{{
+			args['rotation'] = None
+			args['rotation_hotspot'] = None
+		else:
+			raw = self._parse_text(item_args['rotation']).strip()
+			if '@' in raw:
+				r, hotspot = raw.split('@')
+				h = [x.strip() for x in hotspot.split(',')]
+			else:
+				r = raw
+				h = None
+			if r.endswith('°'):
+				f = 360
+				r = r[:-1]
+			else:
+				f = 1
+			try:
+				r = float(r) / f
+			except:
+				debug(0, 'error parsing rotation {}'.format(r))
+				r = None
+			args['rotation'] = r
+			args['rotation_hotspot'] = h
+		# }}}
+		return args
+	# }}}
+	def _continue_break(self, cmd): # {{{
+		while self.user['run_stack'][-1]['current'] >= len(self.user['run_stack'][-1]['program']) or self.user['run_stack'][-1]['program'][self.user['run_stack'][-1]['current']]['command'] != 'while':
+			self.user['run_stack'].pop()
+		if cmd == 'break':
+			self.user['run_stack'][-1]['current'] += 1
+	# }}}
+	def _goto(self, target): # {{{
+		# Break to top level and jump to requested label.
+		while len(self.user['run_stack']) > 1:
+			self.user['run_stack'].pop()
+		self.user['run_stack'][-1]['current'] = target
 	# }}}
 	def _clear_pending(self): # {{{
 		# update kinetic state.
@@ -537,7 +880,7 @@ class Connection: # {{{
 		self.user['_pending'] = []
 	# }}}
 	def _start(self, wake, script_content, send_errors): # {{{
-		self.user['program'], errors, question = script_content
+		self.user['program'], errors, question, self.user['labels'] = script_content
 		if send_errors:
 			if len(errors) > 0:
 				errors = markdown('# Errors:\n' + '\n\n'.join(errors))
@@ -568,13 +911,53 @@ class Connection: # {{{
 			self.user['sprite'][name] = {m[0]: m[1] for m in moods}
 		sprites = {name: list(self.user['sprite'][name].keys()) for name in spriteid}
 		# }}}
+		# Set up self.user['audio']. {{{
+		global_audio = (yield from serverdata.select('audio', ('id', 'name'), ('=', 'chapter', None), wake = wake))
+		local_audio = (yield from serverdata.select('audio', ('id', 'name'), ('=', 'chapter', self.user['chapter']), wake = wake))
+		audioid = {name: id for id, name in global_audio}
+		audioid.update({name: id for id, name in local_audio})
+		self.user['audio'] = audioid
+		# }}}
 		self.user['environment'] = Environment()
-		self.user['environment'].set('name', self.user['name'])
-		self.user['environment'].set('group', self.user['group'])
-		self.user['environment'].set('chapter', self.user['chapter'])
-		self.user['environment'].set('script', self.user['script'])
-		self.user['environment'].set('sprites', sprites);	# Available sprites (and moods).
-		self.user['environment'].set('sprite', self.user['activesprite']);	# Active sprites.
+		module = {
+			'name': self.user['name'],
+			'group': self.user['group'],
+			'chapter': self.user['chapter'],
+			'script': self.user['script'],
+			# Available sprites and moods. Example: {'person': ['', 'happy', 'sad'], 'bg': ['', 'inside', 'outside']}
+			'allsprites': sprites,
+			# Active sprites. This object can be manipulated to change the appearance of the sprite (speaker name and image collection; mood is changed through kinetic commands).
+			'activesprites': self.user['activesprite'],
+			# Available audio.
+			'audio': list(self.user['audio'].keys()),
+
+			# These are handled immediately.
+			# Record answer style
+			'answer': lambda style: (yield from self._answer(None, style)),
+			# Activate a sprite. call as sprite(tag, name, id, mood). Using lambda to make sure it's not a member.
+			'sprite': lambda tag, id, name, mood = '': self._sprite(tag, id, name, mood),
+			# Add kinetic commands to the pending queue.
+			'kinetic': lambda actions: self.user['_pending'].extend(actions),
+
+			# These are used for building kinetic commands.
+			'speech': lambda speaker, target, mood, side, text: {'action': 'speech', 'speaker': speaker, 'target': target, 'mood': mood, 'side': side, 'text': markdown(text)},
+			'wait': lambda seconds: {'action': 'wait', 'time': seconds},
+			'sound': lambda tag: {'action': 'sound', 'tag': tag},
+			'music': lambda tag: {'action': 'music', 'tag': tag},
+			'serial': lambda *parts: {'action': 'serial', 'parts': parts},
+			'parallel': lambda *parts: {'action': 'parallel', 'parts': parts},
+			'move': lambda target, mood, args: {'action': 'move', 'target': target, 'mood': mood, 'args': self._parse_animation_args(args)},
+			'hide': lambda target, mood, args: {'action': 'hide', 'target': target, 'mood': mood, 'args': self._parse_animation_args(args)},
+
+			# These can be returned.
+			'video': lambda tag: {'cmd': 'video', 'video': tag},
+			'question': lambda tag, type, text, options = None: {'cmd': 'question', 'tag': tag, 'type': type, 'text': text, 'options': options},
+			'continue': lambda: {'cmd': 'continue'},
+			'break': lambda: {'cmd': 'break'},
+			'goto': lambda label: {'cmd': 'goto', 'label': label}
+		}
+		self.user['environment'].module('vn', module)
+
 		startup = fhs.read_data(os.path.join('include', 'startup.lua'))
 		if startup is not None:
 			try:
@@ -584,18 +967,35 @@ class Connection: # {{{
 				traceback.print_exc()
 		yield from self._run(wake)
 	# }}}
-	def _question(self, qtype, last_answer, markdown, options): # {{{
+	def _question(self, wake, qtype, variable, markdown, options): # {{{
+		# Handle hidden type differently (don't inform player).
+		if qtype == 'hidden':
+			self._store_answer(variable, self._safe_eval(markdown, as_str = True))
+			return False
+
+		# Find last answer.
+		answers = (yield from self.userdata.select('answer', ('answer',), ('and', ('=', 'script', self.user['scripttag']), ('=', 'question', variable)), wake = wake))
+		if len(answers) == 0:
+			last_answer = None
+		else:
+			last_answer = json.loads(answers[-1][0])
+
+		# Modify type to make it easier for brower code.
 		if qtype == 'unit':
 			qtype = 'short'
 		if qtype == 'longunit':
 			qtype = 'longshort'
 		qtext = self._parse_text(markdown)
+
+		# Parse options.
 		parsed_options = []
 		if options is not None:
 			for x in options:
 				parsed_options.append(self._parse_text(x))
+
+		# Send question to player.
 		self.remote.question.event(self.user['_pending'], qtext, qtype, parsed_options, last_answer)
-		self.breaking = True
+
 		return True
 	# }}}
 	def _run(self, wake): # {{{
@@ -615,7 +1015,6 @@ class Connection: # {{{
 				if len(self.user['run_stack']) == 0:
 					# Send final "question".
 					self.remote.question.event(self.user['_pending'], '', 'choice', ['Done'])
-					self.breaking = True
 					yield from refresh_admins(wake)
 					return
 			# Run instructions.
@@ -654,41 +1053,41 @@ class Connection: # {{{
 			return False
 		# }}}
 		elif code['command'] in ('continue', 'break'): # {{{
-			while self.user['run_stack'][-1]['current'] >= len(self.user['run_stack'][-1]['program']) or self.user['run_stack'][-1]['program'][self.user['run_stack'][-1]['current']]['command'] != 'while':
-				self.user['run_stack'].pop()
-			if code['command'] == 'break':
-				self.user['run_stack'][-1]['current'] += 1
+			self._continue_break(code['command'])
 			return False
 		# }}}
 		elif code['command'] == 'goto': # {{{
-			# Break to top level and jump to requested label.
-			while len(self.user['run_stack']) > 1:
-				self.user['run_stack'].pop()
-			self.user['run_stack'][-1]['current'] = code['target']
+			self._goto(code['target'])
 			return False
 		# }}}
 		elif code['command'] == 'code': # {{{
-			self.breaking = False
 			self.user['run_stack'][-1]['current'] += 1	# Do this before running the code, so goto works.
 			try:
-				self.new_commands = []
-				self.user['environment'].run(code['code'])
-				if len(self.new_commands) > 0:
-					self.user['run_stack'].append({'program': self.new_commands, 'current': 0})
+				cmd = self.user['environment'].run(code['code'])
 			except:
 				debug(0, 'Error in script: {}'.format(code['code']))
 				traceback.print_exc()
 				self.remote.error.event(code['code'])
-			finally:
-				self.new_commands = None
-			return self.breaking
+			if isinstance(cmd, dict):
+				if cmd['cmd'] == 'video':
+					self.remote.video.event(self.user['_pending'], cmd['video'])
+					return True
+				elif cmd['cmd'] == 'question':
+					return (yield from self._question(wake, cmd['type'], cmd['variable'], code['markdown'], code['option']))
+				elif cmd['cmd'] in ('continue', 'break'):
+					self._continue_break(cmd['cmd'])
+					return False
+				elif cmd['cmd'] == 'goto':
+					self._goto(self.user['labels'][cmd['label']])
+					return False
+			return False
 		# }}}
 		elif code['command'] == 'video': # {{{
 			self.remote.video.event(self.user['_pending'], code['video'])
 			return True
 		# }}}
 		elif code['command'] == 'sprite': # {{{
-			self.user['activesprite'][code['tag']] = {'name': self._parse_text(code['name']), 'id': self._parse_text(code['images']), 'mood': ''}
+			self._sprite(code['tag'], self._parse_text(code['images']), self._parse_text(code['name']))
 		# }}}
 		elif code['command'] == 'kinetic': # {{{
 			def build_kinetic(wake, item): # {{{
@@ -724,7 +1123,7 @@ class Connection: # {{{
 					return {'action': 'speech', 'speaker': speaker, 'target': target, 'mood': mood, 'side': side, 'text': markdown(self._parse_text(item['markdown']))}
 				# }}}
 				if item['action'] == 'wait': # {{{
-					return {'action': 'wait', 'time': self._parse_time(wake, item['time'])}
+					return {'action': 'wait', 'time': self._parse_time(item['time'])}
 				# }}}
 				if item['action'] in ('sound', 'music'): # {{{
 					target = None if item['target'] is None else self._parse_text(item['target'])
@@ -737,221 +1136,13 @@ class Connection: # {{{
 					return {'action': item['action'], 'args': item['args'], 'actions': actions}
 				# }}}
 				# Something else: move, or hide.
-				args = {}
-				# Parse animation arguments. {{{
-				def parse_location(loc): # {{{
-					'Parse location; return location and hotspot'
-					if loc is None:
-						return None, [0, 0]
-					raw = self._parse_text(loc)
-					if '@' in raw:
-						h, pos = loc.split('@')
-						hotspot = [float(x) for x in h.split(',')]
-					else:
-						pos = loc
-						hotspot = [None, None]
-					l = [x.strip() for x in pos.split(',')]
-					h = [None, None]
-					if l[0] == 'outleft':
-						l[0] = -1
-						h[0] = 1
-					elif l[0] == 'inleft':
-						l[0] = -1
-						h[0] = -1
-					elif l[0] == 'outright':
-						l[0] = 1
-						h[0] = -1
-					elif l[0] == 'inright':
-						l[0] = 1
-						h[0] = 1
-					elif l[0] == 'left':
-						l[0] = -.4
-						h[0] = 0
-					elif l[0] == 'center':
-						l[0] = 0
-						h[0] = 0
-					elif l[0] == 'right':
-						l[0] = .4
-						h[0] = 0
-					else:
-						try:
-							l[0] = float(l[0])
-						except:
-							l[0] = 0
-					if hotspot[0] is not None:
-						h[0] = hotspot[0]
-					if len(l) == 1:
-						l.append(None)
-					elif l[1] == 'outbottom':
-						l[1] = 0
-						h[1] = 1
-					elif l[1] == 'inbottom':
-						l[1] = 0
-						h[1] = -1
-					elif l[1] == 'outtop':
-						l[1] = 1
-						h[1] = -1
-					elif l[1] == 'intop':
-						l[1] = 1
-						h[1] = 1
-					elif l[1] == 'bottom':
-						l[1] = 0
-						h[1] = 0
-					elif l[1] == 'low':
-						l[1] = .2
-						h[1] = 0
-					elif l[1] == 'middle':
-						l[1] = .5
-						h[1] = 0
-					elif l[1] == 'high':
-						l[1] = .8
-						h[1] = 0
-					elif l[1] == 'top':
-						l[1] = 1
-						h[1] = 0
-					else:
-						try:
-							l[1] = float(l[1])
-						except:
-							l[1] = None
-					if hotspot[1] is not None:
-						h[1] = hotspot[1]
-					if len(l) == 2:
-						l.append(None)
-					else:
-						try:
-							l[2] = int(l[2])
-						except:
-							l[2] = None
-					if h == [None, None]:
-						h = None
-					return l, h
-				# }}}
-				def parse_around(loc): # {{{
-					if loc is None:
-						return None
-					l = [x.strip() for x in self._parse_text(loc).split()]
-					if l[-1] in ('cw', 'ccw'):
-						cw = l[-1] == 'cw'
-						l.pop()
-					else:
-						cw = False
-					if l[0] == 'left':
-						l[0] = -.4
-					elif l[0] == 'center':
-						l[0] = 0
-					elif l[0] == 'right':
-						l[0] = .4
-					else:
-						try:
-							l[0] = float(l[0])
-						except:
-							l[0] = 0
-					if len(l) == 1:
-						l.append(0)
-					elif l[1] == 'bottom':
-						l[1] = 0
-					elif l[1] == 'low':
-						l[1] = .2
-					elif l[1] == 'middle':
-						l[1] = .5
-					elif l[1] == 'high':
-						l[1] = .8
-					elif l[1] == 'top':
-						l[1] = 1
-					else:
-						try:
-							l[1] = float(l[1])
-						except:
-							l[1] = 0
-					return l[:2] + [cw]
-				# }}}
-				if item['args']['in'] is None: # {{{
-					args['in'] = None
-				else:
-					args['in'] = self._parse_time(wake, item['args']['in'])
-				# }}}
-				args['to'], args['to_hotspot'] = parse_location(item['args']['to'])
-				if args['in'] is None:
-					args['with'] = 'jump'
-					args['from'], args['from_hotspot'] = args['to'], args['to_hotspot']
-				else:
-					args['from'], args['from_hotspot'] = parse_location(item['args']['from'])
-				if args['from'] is not None:
-					if args['from'][0] is None:
-						args['from'][0] = 0
-					if args['from'][1] is None:
-						args['from'][1] = 0
-				if item['args']['with'] is None: # {{{
-					args['with'] = 'move'
-				else:
-					w = self._parse_text(item['args']['with'])
-					if w not in ('jump', 'fade', 'move'):
-						debug(0, 'invalid transition {}'.format(w))
-						args['with'] = None
-					else:
-						args['with'] = w
-				# }}}
-				args['around'] = parse_around(item['args']['around'])
-				if item['args']['scale'] is None: # {{{
-					args['scale'] = None
-					args['scale_hotspot'] = None
-				else:
-					raw = self._parse_text(item['args']['scale'])
-					if '@' in raw:
-						value, hotspot = raw.split('@')
-						s = [x.strip() for x in value.split(',')]
-						h = [x.strip() for x in hotspot.split(',')]
-					else:
-						s = [x.strip() for x in raw.split(',')]
-						h = None
-					try:
-						def parse(num):
-							if num.endswith('%'):
-								return float(num[:-1]) / 100
-							return float(num)
-						s = [parse(x) for x in s]
-						if len(s) == 1:
-							s.append(s[0])
-						elif len(s) > 2:
-							s = [s[0], s[1]]
-					except:
-						debug(0, 'error parsing scale {}'.format(s))
-						s = None
-					args['scale'] = s
-					args['scale_hotspot'] = h
-				# }}}
-				if item['args']['rotation'] is None: # {{{
-					args['rotation'] = None
-					args['rotation_hotspot'] = None
-				else:
-					raw = self._parse_text(item['args']['rotation']).strip()
-					if '@' in raw:
-						r, hotspot = raw.split('@')
-						h = [x.strip() for x in hotspot.split(',')]
-					else:
-						r = raw
-						h = None
-					if r.endswith('°'):
-						f = 360
-						r = r[:-1]
-					else:
-						f = 1
-					try:
-						r = float(r) / f
-					except:
-						debug(0, 'error parsing rotation {}'.format(r))
-						r = None
-					args['rotation'] = r
-					args['rotation_hotspot'] = h
-				# }}}
+				args = self._parse_animation_args(item['args'])
 				if item['target'] is None: # {{{
 					target = None
 					mood = None
 				else:
 					target = self._parse_text(item['target'])
 					mood = self._parse_text(item['mood'])
-				# }}}
 				# }}}
 				#print('returning build', item['action'])
 				return {'action': item['action'], 'target': target, 'mood': mood, 'args': args}
@@ -964,20 +1155,11 @@ class Connection: # {{{
 			#print('now pending:', self.user['_pending'])
 		# }}}
 		elif code['command'] == 'question': # {{{
-			if code['type'] == 'hidden':
-				self._store_answer(code['variable'], self._safe_eval(code['markdown'], as_str = True))
-			else:
-				# Question.
-				answers = (yield from self.userdata.select('answer', ('answer',), ('and', ('=', 'script', self.user['scripttag']), ('=', 'question', code['variable'])), wake = wake))
-				if len(answers) == 0:
-					last_answer = None
-				else:
-					last_answer = json.loads(answers[-1][0])
-				#print('sending question', code['type'])
-				return self._question(code['type'], last_answer, code['markdown'], code['option'])
+			self.user['run_stack'][-1]['current'] += 1
+			return (yield from self._question(wake, code['type'], code['variable'], code['markdown'], code['option']))
+		# }}}
 		else:
 			debug(0, 'invalid command {}'.format(code))
-		# }}}
 		self.user['run_stack'][-1]['current'] += 1
 		return False
 	# }}}
@@ -1030,9 +1212,11 @@ class Connection: # {{{
 	def get_audio(self, audioid): # {{{
 		'Retrieve audio from database. Return data url.'
 		wake = (yield)
-		data = (yield from serverdata.select('audio', ('url', 'duration'), ('=', 'id', audioid), wake = wake))
+		if audioid not in self.user['audio']:
+			log('invalid audio tag %s requested' % audioid)
+		data = (yield from serverdata.select('audio', ('url', 'duration'), ('=', 'id', self.user['audio'][audioid]), wake = wake))
 		if len(data) != 1:
-			log('failed to get audio %s' % audioid)
+			log('failed to get audio %s (id %d)' % (audioid, self.user['audio'][audioid]))
 			return None
 		return {'url': data[0][0], 'duration': data[0][1]}
 	# }}}
@@ -1222,9 +1406,9 @@ db_config = { # {{{
 
 	# Images {{{
 	'sprite': [
+		('id', 'int(11) NOT NULL AUTO_INCREMENT PRIMARY KEY'),	# Sprite id.
 		('name', 'text NOT NULL'),	# Sprite name.
 		('chapter', 'int(11) DEFAULT NULL'),	# Chapter id, or NULL for global sprites.
-		('id', 'int(11) NOT NULL AUTO_INCREMENT UNIQUE'),	# Sprite id.
 	],
 	'image': [
 		('id', 'int(11) NOT NULL AUTO_INCREMENT PRIMARY KEY'),
@@ -1245,7 +1429,9 @@ db_config = { # {{{
 
 	# Media {{{
 	'audio': [
-		('id', 'varchar(255) NOT NULL PRIMARY KEY'),
+		('id', 'int(11) NOT NULL AUTO_INCREMENT PRIMARY KEY'),
+		('chapter', 'int(11) DEFAULT NULL'),
+		('name', 'varchar(255) NOT NULL'),
 		('url', 'longtext NOT NULL'),	# Data url.
 		('duration', 'int(11) NOT NULL'),
 	],

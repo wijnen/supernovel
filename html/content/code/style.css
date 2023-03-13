@@ -1,9 +1,23 @@
+input[type=number] {
+	width: 4em;
+}
+
 body {
 	background: navy;
 }
 
 button {
 	width: 100%;
+}
+
+#busy {
+	display: none;
+	position: fixed;
+	bottom: 2em;
+	width: 100%;
+	padding: 1em 3em;
+	box-sizing: border-box;
+	text-align: center;
 }
 
 #edit {

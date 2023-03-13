@@ -490,7 +490,7 @@ def parse_script(script): # {{{
 		else:
 			source['target'] = index['label'][label]
 	#print('parsed script:', repr(ret))
-	return ret, errors, question
+	return ret, errors, question, index['label']
 # }}}
 
 def parse_script_list(wake, script_list): # {{{
