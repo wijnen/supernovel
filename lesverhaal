@@ -516,7 +516,7 @@ class Connection: # {{{
 		if len(data) == 0:
 			groupname = (yield from serverdata.select('group', ('name',), ('=', 'id', 1), wake = wake))
 			if len(groupname) == 0:
-				groupname = ['']
+				groupname = [['']]
 			yield from self.userdata.insert('id', {'my_name': self.name, 'my_group': groupname[0][0]}, wake = wake)
 			my_group = 1
 		else:
