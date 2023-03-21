@@ -21,10 +21,10 @@ from markdown import markdown
 from websocketd import log
 
 fhs.option('port', 'network port to listen for players', default = '7000')
-fhs.option('proxy', 'virtual proxy directory', default = 'lesverhaal')
+fhs.option('proxy', 'virtual proxy directory', default = 'supernovel')
 fhs.option('logfile', 'file for logging events', default = '')
 fhs.option('loglimit', 'maximum loglevel that is written to screen', default = 1)
-config = userdata.fhs_init('http://localhost:8879', 'lesverhaal', help = 'Visual novel style tool for students to learn with teacher monitoring options', contact = 'Bas Wijnen <wijnen@debian.org>', version = '0.2')
+config = userdata.fhs_init('http://localhost:8879', 'supernovel', help = 'Visual novel style tool for students to learn with teacher monitoring options', contact = 'Bas Wijnen <wijnen@debian.org>', version = '0.2')
 from debug import debug
 # }}}
 
@@ -1061,7 +1061,6 @@ class Connection: # {{{
 			return False
 		# }}}
 		elif code['command'] == 'code': # {{{
-			self.user['run_stack'][-1]['current'] += 1	# Do this before running the code, so goto works.
 			try:
 				cmd = self.user['environment'].run(code['code'])
 			except:
@@ -1073,13 +1072,16 @@ class Connection: # {{{
 					self.remote.video.event(self.user['_pending'], cmd['video'])
 					return True
 				elif cmd['cmd'] == 'question':
-					return (yield from self._question(wake, cmd['type'], cmd['variable'], code['markdown'], code['option']))
+					if (yield from self._question(wake, cmd['type'], cmd['variable'], code['markdown'], code['option'])):
+						return True
+					# Fall through: increment command pointer.
 				elif cmd['cmd'] in ('continue', 'break'):
 					self._continue_break(cmd['cmd'])
 					return False
 				elif cmd['cmd'] == 'goto':
 					self._goto(self.user['labels'][cmd['label']])
 					return False
+			self.user['run_stack'][-1]['current'] += 1
 			return False
 		# }}}
 		elif code['command'] == 'video': # {{{
@@ -1116,7 +1118,7 @@ class Connection: # {{{
 						# Target is not an active sprite (not defined in script): no images.
 						mood = None
 					# }}}
-					if 'side' in self.user['activesprite'][target]:
+					if target in self.user['activesprite'] and 'side' in self.user['activesprite'][target]:
 						side = self.user['activesprite'][target]['side']
 					else:
 						side = None
@@ -1155,8 +1157,9 @@ class Connection: # {{{
 			#print('now pending:', self.user['_pending'])
 		# }}}
 		elif code['command'] == 'question': # {{{
-			self.user['run_stack'][-1]['current'] += 1
-			return (yield from self._question(wake, code['type'], code['variable'], code['markdown'], code['option']))
+			if (yield from self._question(wake, code['type'], code['variable'], code['markdown'], code['option'])):
+				# Don't increment current command; that happens in answer.
+				return True
 		# }}}
 		else:
 			debug(0, 'invalid command {}'.format(code))
@@ -1195,11 +1198,14 @@ class Connection: # {{{
 			else:
 				imageid = None
 		else:
-			s = self.user['sprite']['']
-			if sprite_mood in s:
-				imageid = s[sprite_mood]
-			elif '' in s:
-				imageid = s['']
+			if '' in self.user['sprite']:
+				s = self.user['sprite']['']
+				if sprite_mood in s:
+					imageid = s[sprite_mood]
+				elif '' in s:
+					imageid = s['']
+				else:
+					imageid = None
 			else:
 				imageid = None
 		data = (yield from serverdata.select('image', ('url', 'width', 'height', 'hotx', 'hoty'), ('=', 'id', imageid), wake = wake))

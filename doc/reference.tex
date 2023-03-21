@@ -1,40 +1,40 @@
 \documentclass{article}
 \usepackage{hyperref}
 \begin{document}
-\noindent\textbf{\Large Lesverhaal Script Syntax Reference}
+\noindent\textbf{\Large Supernovel Script Syntax Reference}
 
 \tableofcontents
 
 \tableofcontents
 
 \section{About This Document}
-This document describes the syntax of scripts written for Lesverhaal.
-Lesverhaal is a visual novel engine that is designed to be used in a classroom
+This document describes the syntax of scripts written for Supernovel.
+Supernovel is a visual novel engine that is designed to be used in a classroom
 setting. For the player it is similar to RenPy (although it is limited in terms
 of presentation). The features that make it useful for teaching, are that
 besides multiple choice it supports open questions, and that there is a teacher
 interface which allows the teacher to review the student's answers.
 
 \section{Directory Structure}
-When starting lesverhaal, there are three locations that are defined using
+When starting Supernovel, there are three locations that are defined using
 commandline arguments.
 \begin{enumerate}
-	\item The data location where lesverhaal reads all the information
+	\item The data location where Supernovel reads all the information
 		from, by default the current directory. 
 
 	\item The content directory, where image and sound files are stored.
-		These are never read by lesverhaal, but only by the player's
+		These are never read by Supernovel, but only by the player's
 		browser. As such, this is not a path from the current
 		directory, but an internet address. By default this is
-		``content'', which means that if lesverhaal is accessed at
-		http://example.com/lesverhaal, the content is searched at
-		http://example.com/lesverhaal/content/. It is possible to place
+		``content'', which means that if Supernovel is accessed at
+		http://example.com/Supernovel, the content is searched at
+		http://example.com/Supernovel/content/. It is possible to place
 		the content on a different server.
 
 	\item The sandbox directory. This is similar to the content directory,
 		but for files uploaded by players using the sandbox interface.
 		However, these cannot be at a different server, because
-		lesverhaal needs to be able to access those files.
+		Supernovel needs to be able to access those files.
 \end{enumerate}
 
 \subsection{The Data Structure}
@@ -305,7 +305,7 @@ command, it takes precedence. It does not change the fact that the characters
 move simultaneously.
 
 \subsection{Question Commands}
-There are may ways to ask a question in lesverhaal. Some look different to the
+There are may ways to ask a question in Supernovel. Some look different to the
 player. All are different for the script author.
 
 All question commands can be preceded by a text. This text is shown to the
@@ -444,10 +444,10 @@ The initial variables in the Python environment are:
 \end{enumerate}
 
 \section{Security Considerations}
-Lesverhaal runs scripts in a relatively closed environment, which makes it near
+Supernovel runs scripts in a relatively closed environment, which makes it near
 impossible that a malfunctioning script will cause damage to the system.
 However, there is no protection against malicious scripts. The script can
-execute any code on the system that the user running lesverhaal can. Because of
+execute any code on the system that the user running Supernovel can. Because of
 this, access to the sandbox must be explicitly enabled in the user's file, and
 this should only be done for trusted users.
 
@@ -455,7 +455,7 @@ If scripts should be written by untrusted users, the entire program must be run
 in a protected environment, such as a virtual server.
 
 \section{Moving Images}
-Lesverhaal does not support images that keep moving while waiting for user
+Supernovel does not support images that keep moving while waiting for user
 input. However, it does support svg images, and the svg format supports simple
 animations. When an svg file which includes an animation is displayed, the
 animation is shown.

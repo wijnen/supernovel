@@ -1,5 +1,5 @@
 # Purpose
-Lesverhaal is a visual novel engine for use in a school setting.
+Supernovel is a visual novel engine for use in a school setting.
 
 # Features
 
@@ -10,7 +10,7 @@ Lesverhaal is a visual novel engine for use in a school setting.
   - Sandbox allows players to create their own games.
 
 # Requirements
-To install lesverhaal, you need a computer that runs GNU/Linux. The system is
+To install Supernovel, you need a computer that runs GNU/Linux. The system is
 web based, which means that the players only need a web browser and there are
 no limitations on their platform.
 
@@ -18,7 +18,7 @@ no limitations on their platform.
 If your system is Debian-based, you will want to download the script I use for
 building packages from [here](https://people.debian.org/~wijnen/mkdeb).
 
-You will need to clone the following repositories (and lesverhaal itself):
+You will need to clone the following repositories (and Supernovel itself):
 
   - [https://github.com/wijnen/python-fhs](https://github.com/wijnen/python-fhs)
   - [https://github.com/wijnen/python-network](https://github.com/wijnen/python-network)
@@ -26,7 +26,7 @@ You will need to clone the following repositories (and lesverhaal itself):
 
 If you downloaded mkdeb, run it in each of those directories to create the
 packages. Then run dpkg -i /tmp/\*.deb to install them. Otherwise, just copy or
-link the python files (fhs.py, network.py, websocketd.py) to the lesverhaal
+link the python files (fhs.py, network.py, websocketd.py) to the Supernovel
 directory.
 
 The files rpc.js and builders.js from the websocketd package need to be copied
@@ -74,7 +74,7 @@ Install the dependencies
 ```pip install -r requirements.txt```
 
 
-From the top level directory of the lesverhaal source tree, run ```python3 lesverhaal```.
+From the top level directory of the Supernovel source tree, run ```python3 supernovel```.
 This should start the system and tell you that servers are running.
 
 Using a browser from the same computer, go to http://localhost:7000 and log in
@@ -94,7 +94,7 @@ the players.
 
 ## Integration with the machine's main web site
 It is recommended to use Apache as a web server. Apache can be set up to act as
-a virtual proxy to tunnel the websocket from lesverhaal. All other files can be
+a virtual proxy to tunnel the websocket from Supernovel. All other files can be
 hosted directly by Apache. Using this system also allows Apache to use an
 encrypted connection. This is recommended, because there are passwords sent
 over the connection.
@@ -137,10 +137,9 @@ The files are stored under sandbox\_html and can be copied to the main content
 directories to publish them.
 
 # Note for Windows users
-While lesverhaal has been tested and can run on Windows, some features don't
+While Supernovel has been tested and can run on Windows, some features don't
 work. In particular:
 
-  - Chroot and firejail are not available, which means secure mode is not possible. You need to use the --insecure option or lesverhaal will crash instead of starting. Of course this also means that you must not run scripts from untrusted sources.
   - Crypt has been reported to not work. If it fails to import, as a fallback passwords will be stored in plain text. This is a very bad idea, but doing this will allow the program to run.
 
 It is strongly recommended not to use Windows for anything other than personal

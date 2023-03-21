@@ -249,7 +249,7 @@ function QuestionRow(id, data) { // {{{
 function ImageRow(id, data, is_first, num_moods) { // {{{
 	// Create the object.
 	var ret = Create('tr');
-	ret.update = function() { server.call('update_image', [], {imageid: id, sprite: Number(ret.sprite.value), mood: ret.mood.value, size: [Number(ret.width.value), Number(ret.height.value)], hotspot: [Number(ret.hotx.value), Number(ret.hoty.value)], url: null}); };
+	ret.update = function() { server.call('update_image', [], {imageid: id, sprite: data.sprite, mood: ret.mood.value, size: [Number(ret.width.value), Number(ret.height.value)], hotspot: [Number(ret.hotx.value), Number(ret.hoty.value)], url: null}); };
 	ret.update_sprite = function() {
 		var sname = ret.sprite_name.value;
 		var chapter = ret.chapter.value ? Number(ret.chapter.value) : null;
@@ -344,11 +344,11 @@ function ImageRow(id, data, is_first, num_moods) { // {{{
 			var t = data.url.match(/\/(.*?)[,;]/);
 			if (t === null) {
 				a.href = 'data:application/octet-stream;base64,' + btoa(data);
-				a.download = ret.imgname.value + id + '.bin';
+				a.download = ret.mood.value + id + '.bin';
 			}
 			else {
 				a.href = data.url;
-				a.download = ret.imgname.value + '.' + t[1];
+				a.download = ret.mood.value + '.' + t[1];
 			}
 			a.click();
 		});
@@ -371,7 +371,7 @@ function ImageRow(id, data, is_first, num_moods) { // {{{
 				// Send the requested file.
 				var img = Create('img');
 				img.src = reader.result;
-				server.call('update_image', [], {imageid: id, name: ret.imgname.value, size: [Number(img.width), Number(img.height)], hotspot: [Number(img.width) / 2, Number(img.height) / 5], url: reader.result}, function() {
+				server.call('update_image', [], {imageid: id, sprite: data.sprite, mood: ret.mood.value, size: [Number(img.width), Number(img.height)], hotspot: [Number(img.width) / 2, Number(img.height) / 5], url: reader.result}, function() {
 					// Continue with next file.
 					send(files, idx + 1);
 				});
