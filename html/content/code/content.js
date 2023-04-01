@@ -253,7 +253,7 @@ function ImageRow(id, data, is_first, num_moods) { // {{{
 	ret.update_sprite = function() {
 		var sname = ret.sprite_name.value;
 		var chapter = ret.chapter.value ? Number(ret.chapter.value) : null;
-		server.call('update_sprite', [], {spriteid: id, name: sname, chapter: chapter});
+		server.call('update_sprite', [], {spriteid: id, name: sname, chapter: chapter || null});
 	};
 
 	if (is_first) {
@@ -609,7 +609,7 @@ function update_ui() { // {{{
 	var td = tr.AddElement('td');
 	td.colSpan = 14;
 	var button = td.AddElement('button').AddText('Create Sprite');
-	button.AddEvent('click', function() { server.call('add_sprite', ['', 0], {}, connected); });
+	button.AddEvent('click', function() { server.call('add_sprite', ['', null], {}, connected); });
 	// }}}
 
 	// Audio. {{{

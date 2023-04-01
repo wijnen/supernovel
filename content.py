@@ -188,7 +188,17 @@ def parse_anim_element(ln, c, d, parent_args): # {{{
 	# Code: wait <time>
 	r = re.match(r'wait\s+(\S.*?)\s*$', c)
 	if r is not None:
+		if len(d['children']) > 0:
+			parse_error(ln, 'wait cannot have indented block argument')
+			return False
 		return {'action': 'wait', 'line': ln, 'time': r.group(1)}
+	# }}}
+
+	# font {{{
+	# Code: font <css-code>
+	r = re.match(r'font(?:\s*(\S.*?))?\s*$', c)
+	if r is not None:
+		return {'action': 'font', 'line': ln, 'css': r.group(1)}
 	# }}}
 
 	# scene, hide, move, sound, music {{{
@@ -434,7 +444,7 @@ def parse_line(d, ln, istack, ostack, index, question): # {{{
 
 	# video {{{
 	# Code: video <name>
-	r = re.match(r'video\s*(.*)\s*$', c)
+	r = re.match(r'video\s+(.*)\s*$', c)
 	if r is not None:
 		ostack[-1].append({'command': 'video', 'line': ln, 'video': r.group(1)})
 		return True

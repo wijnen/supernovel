@@ -555,6 +555,9 @@ function activate(name, now, extra, fast_forward) { // {{{
 				});
 			}
 		} // }}}
+		else if (action.action == 'font') { // {{{
+			elements.speechbox.style.font = action.css;
+		} // }}}
 		else if (action.action == 'serial') { // {{{
 			//console.info('running serial', action);
 			new_thread(action.actions, function(extra) {
@@ -749,6 +752,7 @@ var Connection = { // {{{
 		init();
 	}, // }}}
 	contents: function(data) {	// {{{ Update chapter and script contents.
+		console.info('contents', data);
 		scripts.ClearAll();
 		var buttons = [];
 		for (var c = 0; c < data.length; ++c) {
@@ -761,6 +765,7 @@ var Connection = { // {{{
 		}
 	}, // }}}
 	main: function(myname) {	// {{{ Show book and chapter selection.
+		console.info('main', myname);
 		elements.bg.AddClass('hidden');
 		select_ui('contents');
 		document.getElementById('login').ClearAll().AddText(myname);
@@ -774,13 +779,14 @@ var Connection = { // {{{
 		prev_states = [];
 	}, // }}}
 	kinetic: function(story, music) { // {{{ Run a story without a question; used for setting up current state on login.
-		//console.info('setup kinetic', music, story)
+		console.info('setup kinetic', music, story);
 		server.lock();
+		console.info('locked');
 		pending_music = music;
-		run_story(story, function() { server.unlock(); });
+		run_story(story, function() { console.info('unlock'); server.unlock(); });
 	}, // }}}
 	question: function(story, text, type, options, last_answer) { // {{{ Run a story, followed by a question.
-		//console.info('question', text, type, story);
+		console.info('question', text, type, story);
 		run_story(story, function() {
 			if (state.show_question)
 				return;

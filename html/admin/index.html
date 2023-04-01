@@ -11,18 +11,11 @@
 	</head>
 	<body>
 		<div id='disconnected'><h1>Warning: connection with server is lost</h1></div>
-		<div id='userdata'></div>
 		<div id='error'>
 			<h1>Please Wait</h1>
 			<p>The connection with the server is attempted.</p>
 			<p>If this message does not disappear, there is a problem. There may be messages in the debugging console that identify the problem.</p>
 		</div>
-		<div>Script: <select id='script'></select></div>
-		<input type='radio' class='tabselect' name='tabselect' id='overview' checked='checked'/><label class='tab' id='overlabel' for='overview'>Overview</label>
-		<input type='radio' class='tabselect' name='tabselect' id='studentview'/><label class='tab' id='studentlabel' for='studentview'>Student</label>
-		<input type='radio' class='tabselect' name='tabselect' id='questionview'/><label class='tab' id='questionlabel' for='questionview'>Question</label>
-		<div class='page' id='over'>Over</div>
-		<div class='page' id='student'>Student</div>
-		<div class='page' id='question'>Question</div>
+		<div id='contents'></div>
 	</body>
 </html>

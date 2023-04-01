@@ -48,10 +48,11 @@ def fromsuper(src):
 # List of all currently logged in users.
 users = {}
 admins = {}
+disconnected_players = {}
 
 def refresh_admins(wake): # {{{
 	for a in admins:
-		yield from admins[a].refresh(wake)
+		yield from admins[a]._refresh(wake)
 # }}}
 
 # Class for handling user script commands. {{{
@@ -105,35 +106,112 @@ class Admin_Connection: # {{{ Class for handling admin connections.
 		self.name = my_name
 		self.userdata = my_userdata
 		self.remote = my_remote
-		self.remote._websocket_closed = self._closed
 		admins[my_id] = self
 		debug(1, 'admin {} connected'.format(self.name))
 	# }}}
 	def _init(self, wake): # {{{
+		self.group = None
 		self.script = None
-		self.refresh = lambda wake: self.remote.scripts.event((yield from content.list(wake, None)))
-		yield from self.refresh(wake)
+		yield from self.select_group(wake)
 	# }}}
 	def _closed(self): # {{{
 		del admins[self.id]
-		self.remote._websocket_close()
-		debug(1, 'disconnecting admin {}'.format(self.name))
+		debug(1, 'disconnected admin {}'.format(self.name))
 	# }}}
-	def _send_script(self, wake): # {{{
-		log('sending script')
-		questions = (yield from content.list_questions(wake, self.script))
-		players = (yield from content.list_players(wake, self.script))
-		log('sending qp', questions, players)
-		self.remote.script.event(questions, players)
+
+	# Set new state. {{{
+	def select_group(self, wake = None): # {{{
+		if wake is None:
+			wake = (yield)
+		self.group = None
+		self.script = None
+		self.chapter = None
+		self.player = None
+		self.question = None
+		def refresh(wake):
+			groups = (yield from serverdata.select('group', ('name',), wake = wake))
+			self.remote.select_group.event([x[0] for x in groups])
+		self._refresh = refresh
+		yield from self._refresh(wake)
 	# }}}
-	def select_script(self, script): # {{{
+	def select_script(self, group): # {{{
 		wake = (yield)
-		if script is None:
-			yield from self._init(wake)
-		else:
-			self.script = (yield from content.get_scriptid(wake, script))
-			self.refresh = self._send_script
-			yield from self.refresh(wake)
+		self.group = (yield from serverdata.select('group', ('id',), ('=', 'name', group), wake = wake))[0][0]
+		self.script = None
+		self.chapter = None
+		self.player = None
+		self.question = None
+		self._refresh = lambda wake: self.remote.select_script(group, (yield from content.list(wake, self.group)))
+		yield from self._refresh(wake)
+	# }}}
+	def show_script(self, script): # {{{
+		wake = (yield)
+		self.script = ((yield from content.get_scriptid(wake, script)), '\t'.join(script))
+		self.chapter = (yield from content.parse_script_list(wake, script))
+		self.player = None
+		self.question = None
+		if len((yield from serverdata.select('access', ('groupid',), ('and', ('=', 'groupid', self.group), ('=', 'chapter', self.chapter)), wake = wake))) != 1:
+			# Ignore this request; refresh with old settings.
+			self.script = None
+			self.chapter = None
+			yield from self._refresh(wake)
+			return
+		def refresh(wake):
+			q = (yield from serverdata.select('question', ('id', 'description', 'type'), ('=', 'script', self.script[0]), wake = wake))
+			questions = [{key: iq[idx] for idx, key in enumerate(('id', 'description', 'type'))} for iq in q]
+			players = (yield from serverdata.list_managed_players(wake = wake))
+			ret = []
+			answers = []
+			for p in players:
+				answers.append((yield from self._get_answers(wake, self.script[1], p['name'])))
+			for q in questions:
+				ret.append({'tag': q['id'], 'type': q['type'], 'description': q['description'], 'answers': []})
+				for ip, p in enumerate(players):
+					if q['id'] not in answers[ip]:
+						ret[-1]['answers'].append(None)
+						continue
+					ret[-1]['answers'].append(answers[ip][q['id']][-1])
+			self.remote.show_script.event(script, players, ret)
+		self._refresh = refresh
+		yield from self._refresh(wake)
+	# }}}
+	def show_player(self, player): # {{{
+		wake = (yield)
+		if self.chapter is None:
+		    return
+		self.player = player
+		self.question = None
+		def refresh(wake):
+			questions = (yield from serverdata.select('question', ('id', 'description', 'type'), ('=', 'script', self.script[0]), wake = wake))
+			answers = (yield from self._get_answers(wake, self.script[1], self.player))
+			self.remote.show_player.event(player, questions, answers)
+		self._refresh = refresh
+		yield from self._refresh(wake)
+	# }}}
+	def show_question(self, question): # {{{
+		wake = (yield)
+		self.player = None
+		self.question = question
+		def refresh(wake):
+			players = (yield from serverdata.list_managed_players(wake = wake))
+			ret = []
+			for p in players:
+				a = (yield from p['userdata'].select('answer', ('answer', 'style'), ('and', ('=', 'script', script), ('=', 'question', self.question)), wake = wake))
+				ret.append({'player': p['name'], 'answers': [{'answer': json.loads(x[0]), 'style': x[1]} for x in a]})
+			self.remote.show_question.event(question, ret)
+		self._refresh = refresh
+		yield from self._refresh(wake)
+	# }}}
+	# }}}
+
+	def _get_answers(self, wake, script, player): # {{{
+		ret = {}
+		a = (yield from serverdata.managed_select(player, 'answer', ('question', 'answer', 'style'), ('=', 'script', script), wake = wake))
+		for question, answer, style in a:
+			if question not in ret:
+				ret[question] = []
+			ret[question].append({'answer': json.loads(answer), 'style': style})
+		return ret
 	# }}}
 # }}}
 
@@ -476,7 +554,7 @@ class Content_Connection: # {{{ Class for handling content management.
 		for audioid, metadata in (yield from self._list_audio(wake, chapterid)).items():
 			data = (yield from self._get_audio(wake, audioid)).encode('utf-8')
 			if data is None:
-				print('ignoring invalid audio id %s' % audioid)
+				print('ignoring invalid audio id %s' % audioid, file = sys.stderr)
 				continue
 			info += b'audio %s duration %f\n' % (metadata['name'].encode('utf-8'), metadata['duration'])
 			with z.open('%s/audio/%s.txt' % (chaptername, metadata['name']), 'w') as f:
@@ -495,75 +573,85 @@ class Connection: # {{{
 		self.name = my_name
 		self.userdata = my_userdata
 		self.remote = my_remote
-		self.manged_name = managed_name
+		self.managed_name = managed_name
 		self.display_name = my_name + (' (%s)' % managed_name if managed_name is not None else '')
 	# }}}
-	def _close(self): # {{{
+	def _closed(self): # {{{
 		wake = (yield)
+		if self.managed_name is not None:
+			users[self.id]['connection'] = None
+			assert self.managed_name not in disconnected_players
+			disconnected_players[self.managed_name] = users[self.id]
 		del users[self.id]
 		yield from refresh_admins(wake)
 	# }}}
 	def _init(self, wake): # {{{
-		# Delayed contructor. Must be a generator.
-		self._websocket_closed = self._close
 		self.busy = False
 		debug(2, 'New connection from {}:{}'.format(*self.remote.socket.remote))
-		u = {}
+		if self.managed_name in disconnected_players:
+			u = disconnected_players.pop(self.managed_name)
+		else:
+			u = {
+				'program': [],
+				'run_stack': [],
+				'chapter': None,	# Current chapter.
+				'question': None,	# Question that is currently being asked.
+			}
 		users[self.id] = u
+		u['name'] = self.name
 		u['connection'] = self
 		self.user = u
-		data = (yield from self.userdata.select('id', ('my_name', 'my_group'), wake = wake))
+		# Find user's group. {{{
+		data = (yield from self.userdata.select('id', ('my_group',), wake = wake))
+		print('found group', data)
 		if len(data) == 0:
 			groupname = (yield from serverdata.select('group', ('name',), ('=', 'id', 1), wake = wake))
 			if len(groupname) == 0:
 				groupname = [['']]
-			yield from self.userdata.insert('id', {'my_name': self.name, 'my_group': groupname[0][0]}, wake = wake)
+			yield from self.userdata.insert('id', {'my_group': groupname[0][0]}, wake = wake)
+			print('added group', groupname[0][0])
 			my_group = 1
 		else:
-			self.name = data[0][0]
-			g = (yield from serverdata.select('group', ('id',), ('=', 'name', data[0][1]), wake = wake))
+			g = (yield from serverdata.select('group', ('id',), ('=', 'name', data[0][0]), wake = wake))
+			print('lookup group', g)
 			if len(g) != 1:
 				my_group = 1
 			else:
 				my_group = g[0][0]
-		debug(1, 'User {}:{} logged in from {}:{}'.format(self.name, my_group, *self.remote.socket.remote))
-		u['name'] = self.name
+		print('use group', my_group)
 		u['group'] = my_group
-		u['program'] = []
-		u['run_stack'] = []
-		u['chapter'] = None	# Current chapter.
-		u['question'] = None	# Question that is currently being asked.
+		# }}}
+		debug(1, 'User {}:{} logged in from {}:{}'.format(self.name, my_group, *self.remote.socket.remote))
 		scripts = (yield from content.list(wake, my_group))
+		# Strip common chapters from script names. {{{
 		u['chapterprefix'] = []
 		if len(scripts) > 0:
 			while len(scripts[0]) > 1 and all(x[0] == scripts[0][0] for x in scripts):
 				u['chapterprefix'].append(scripts[0][0])
 				for s in scripts:
 					s.pop(0)
+		# }}}
 		self.remote.contents.event(scripts)
 		self.remote.main.event(self.display_name)
-		yield from refresh_admins(wake)
-	# }}}
-	def _finish_login(self, wake = None): # {{{
-		# TODO: This function is never called anymore. It should be called when (managed?) players reconnect.
-		if wake is None:
-			wake = (yield)
-		if self.user['chapter'] is not None:
-			if len(self.user['run_stack']) > 0 and len(self.user['run_stack'][-1]['program']) > 1:
+		if u['chapter'] is not None:
+			if len(u['run_stack']) > 0 and len(u['run_stack'][-1]['program']) > 1:
 				setup = []
-				state = self.user['_kinetic_state']
+				state = u['_kinetic_state']
 				if state['background'] is not None:
-					setup.append({'action': 'scene', 'target': state['background'], 'args': {'with': None}})
+					setup.append({'action': 'scene', 'target': state['background'][0], 'mood': state['background'][1], 'args': {'with': None}})
+				if state['font']:
+					setup.append({'action': 'font', 'css': state['font']})
 				for spr in state['sprite']:
 					s = state['sprite'][spr]
-					arg = {'action': 'move', 'target': spr, 'image': s['image']}
+					arg = {'action': 'move', 'target': spr, 'mood': s['mood']}
 					arg.args = {x: s[x] for x in ('from', 'from_hotspot', 'to', 'to_hotspot', 'scale', 'scale_hotspot', 'rotation', 'rotation_hotspot')}
 					arg.args.update({'with': None, 'around': None, 'in': None})
 					setup.append(arg)
 				self.remote.kinetic.event(setup, state['music'])
-				if not (yield from self._run_item(wake, self.user['run_stack'][-1]['program'][self.user['run_stack'][-1]['current']])):
+				if not (yield from self._run_item(wake, u['run_stack'][-1]['program'][u['run_stack'][-1]['current']])):
 					debug(0, 'Bug: saved state of user {}:{} was not a waiting state'.format(name, group))
 					yield from self._run(wake)
+		yield from refresh_admins(wake)
 	# }}}
 	def _safe_eval(self, expr, as_str): # {{{
 		'Evaluate an expression through Lua.'
@@ -612,7 +700,6 @@ class Connection: # {{{
 		yield from refresh_admins(wake)
 	# }}}
 	def _sprite(self, tag, id, name, mood = ''): # {{{
-		print('activating sprite', tag, name, id, mood)
 		self.user['activesprite'][tag] = {'name': name, 'id': id, 'mood': mood}
 	# }}}
 	def _home(self, wake): # {{{
@@ -850,9 +937,11 @@ class Connection: # {{{
 				# Nothing to update.
 				pass
 			elif action['action'] == 'scene':
-				state['background'] = action['target']
+				state['background'] = (action['target'], action['mood'])
 			elif action['action'] == 'music':
 				state['music'] = action['target']
+			elif action['action'] == 'font':
+				state['font'] = action['css']
 			elif action['action'] in ('serial', 'parallel'):
 				for a in action['actions']:
 					handle_action(a, state)
@@ -970,7 +1059,7 @@ class Connection: # {{{
 	def _question(self, wake, qtype, variable, markdown, options): # {{{
 		# Handle hidden type differently (don't inform player).
 		if qtype == 'hidden':
-			self._store_answer(variable, self._safe_eval(markdown, as_str = True))
+			yield from self._store_answer(wake, variable, self._safe_eval(markdown, as_str = True))
 			return False
 
 		# Find last answer.
@@ -1127,6 +1216,9 @@ class Connection: # {{{
 				if item['action'] == 'wait': # {{{
 					return {'action': 'wait', 'time': self._parse_time(item['time'])}
 				# }}}
+				if item['action'] == 'font': # {{{
+					return {'action': 'font', 'css': item['css']}
+				# }}}
 				if item['action'] in ('sound', 'music'): # {{{
 					target = None if item['target'] is None else self._parse_text(item['target'])
 					return {'action': item['action'], 'target': target}
@@ -1173,10 +1265,10 @@ class Connection: # {{{
 		c = self.user['characters'][tag]
 		data['url'] = c['imgs'] + (data.pop('mood') if 'mood' in data else 'default') + c['ext']
 	# }}}
-	def _store_answer(self, question, answer, store = True): # {{{
+	def _store_answer(self, wake, question, answer, store = True): # {{{
 		self.user['environment'].set(question, answer)
 		if store:
-			self.userdata.insert('answer', {'script': self.user['scripttag'], 'question': question, 'answer': json.dumps(answer)})
+			yield from self.userdata.insert('answer', {'script': self.user['scripttag'], 'question': question, 'answer': json.dumps(answer)}, wake = wake)
 			self.user['question'] = question
 		else:
 			self.user['question'] = None
@@ -1185,7 +1277,6 @@ class Connection: # {{{
 	def get_sprite_image(self, sprite_tag, sprite_mood): # {{{
 		'Retrieve image from database. Return data url.'
 		wake = (yield)
-		#print('getting image for sprite', repr(sprite_tag), repr(sprite_mood))
 		if sprite_tag in self.user['activesprite']:
 			sprite_name = self.user['activesprite'][sprite_tag]['id']
 		else:
@@ -1210,7 +1301,7 @@ class Connection: # {{{
 				imageid = None
 		data = (yield from serverdata.select('image', ('url', 'width', 'height', 'hotx', 'hoty'), ('=', 'id', imageid), wake = wake))
 		if len(data) != 1:
-			print('Warning: sprite %s mood %s not found and no fallback found either' % (sprite_tag, sprite_mood))
+			print('Warning: sprite %s mood %s not found and no fallback found either' % (sprite_tag, sprite_mood), file = sys.stderr)
 			return {'url': None, 'size': (0, 0), 'hotspot': (0, 0)}
 		#print('image id', imageid, 'from', repr(self.user['sprite']), 'data', data[0][0][:30])
 		return {'url': data[0][0], 'size': (data[0][1], data[0][2]), 'hotspot': (data[0][3], data[0][4])}
@@ -1243,7 +1334,7 @@ class Connection: # {{{
 		self.user['_kinetic_state'] = {'background': None, 'sprite': {}, 'music': None}
 		self.busy = True
 		chapterid, scriptid, code = (yield from content.get(wake, self.user['group'], self.user['chapterprefix'] + script))
-		self.user['scripttag'] = '\t'.join(script)
+		self.user['scripttag'] = '\t'.join(self.user['chapterprefix'] + script)
 		self.user['chapter'] = chapterid
 		self.user['script'] = scriptid
 		try:
@@ -1257,12 +1348,14 @@ class Connection: # {{{
 			log('attempt to answer while busy')
 			return
 		self._clear_pending()
-		debug(3, '{}:{} answers {}'.format(self.user['name'], self.user['group'], answer))
+		debug(2, '{}:{} answers {}'.format(self.user['name'], self.user['group'], answer))
 		if len(self.user['run_stack']) == 0:
 			# Ignore answer for final "Done" button.
+			debug(1, 'ignoring final Done button')
 			yield from self._home(wake)
 			return
 		if self.user['run_stack'][-1]['current'] >= len(self.user['run_stack'][-1]['program']):
+			debug(1, 'end of stack frame?!')
 			self.busy = True
 			try:
 				yield from self._run(wake)
@@ -1274,7 +1367,7 @@ class Connection: # {{{
 			debug(1, 'answer given by {}:{} for non-question: {}'.format(self.remote.socket.remote[0], self.remote.socket.remote[1], current))
 			return
 		store = not current['variable'].startswith('_')
-		def parse_unit(src):
+		def parse_unit(src): # {{{
 			r = re.match(r'\s*(?:(\S+)\s*=\s*)?([+-]?[0-9]*(?:[.,]\d*)?)(?:·10([⁻⁺]?[⁰¹²³⁴⁵⁶⁷⁸⁹]+))?\s*(\S*)\s*$', src)
 			# groups:
 			# 1: quantity	(\S+)
@@ -1298,7 +1391,9 @@ class Connection: # {{{
 					answer = {'quantity': None, 'unit': None, 'digits': None, 'value': None}
 			debug(3, 'unit-split answer: {}'.format(answer))
 			return answer
+		# }}}
 		raw = answer
+		debug(1, 'raw: %s store %d' % (repr(raw), store))
 		if current['type'] == 'choice':
 			if isinstance(answer, int) and 1 <= answer <= len(current['option']):
 				answer = {'index': answer, 'text': current['option'][answer - 1]}
@@ -1335,7 +1430,8 @@ class Connection: # {{{
 			answer = {'text': answer}
 		answer['raw'] = raw
 		answer['style'] = []
-		self._store_answer(current['variable'], answer, store)
+		debug(1, 'answer: %s store %d' % (repr(answer), store))
+		yield from self._store_answer(wake, current['variable'], answer, store)
 		self.user['run_stack'][-1]['current'] += 1
 		self.busy = True
 		try:
@@ -1445,14 +1541,13 @@ db_config = { # {{{
 } # }}}
 player_config = { # {{{
 	'id': [	# This table has only one row.
-		('my_name', 'varchar(255) NOT NULL'),
-		('my_group', 'varchar(255) NOT NULL')
+		('my_group', 'varchar(255) NOT NULL'),
 	],
 	'answer': [
 		('script', 'mediumtext NOT NULL'),	# tab-separated list of chapters.
 		('question', 'text NOT NULL'),
-		('answer', 'longblob NOT NULL'),
-		('style', 'mediumtext DEFAULT NULL')
+		('answer', 'mediumtext NOT NULL'),
+		('style', 'mediumtext DEFAULT NULL'),
 	]
 } # }}}
 
@@ -1460,7 +1555,7 @@ player_config = { # {{{
 server, serverdata = userdata.setup(connection_selector, config, db_config, player_config, httpdirs = ('html',), proxy = config['proxy'])
 content.init(serverdata)
 
-print('server is running on port {}'.format(config['port']))
+print('server is running on port {}'.format(config['port']), file = sys.stderr)
 websocketd.fgloop()
 # }}}
 
