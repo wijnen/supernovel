@@ -6,6 +6,7 @@ var server;	// Handle for server communication.
 var group, chapter, access, script, question, sprite, image, audio;	// Results of list_*()
 var access_lookup;	// {group: [chapter, ...], ...}
 var edit = {};	// Current contents of script editing window.
+var permissions = {};
 // }}}
 
 // Server communication. {{{
@@ -21,32 +22,56 @@ function init() { // {{{
 } // }}}
 window.AddEvent('load', init);
 
-function connected() { // {{{
+function update_groups() { // {{{
 	server.call('list_groups', [], {}, function(g) {
 		group = g;
 		server.call('list_chapters', [], {}, function(c) {
 			chapter = c;
 			server.call('list_access', [], {}, function(a) {
 				access = a;
-				server.call('list_scripts', [], {}, function(s) {
-					script = s;
-					server.call('list_questions', [], {}, function(s) {
-						question = s;
-						server.call('list_sprites', [], {}, function(s) {
-							sprite = s;
-							server.call('list_images', [], {}, function(i) {
-								image = i;
-								server.call('list_audio', [], {}, function(a) {
-									audio = a;
-									document.getElementById('error').style.display = 'none';
-									update_ui();
-								});
-							});
-						});
+				if (permissions.edit)
+					update_edit();
+				else {
+					document.getElementById('error').style.display = 'none';
+					update_ui();
+				}
+			});
+		});
+	});
+} // }}}
+
+function update_edit() { // {{{
+	server.call('list_scripts', [], {}, function(s) {
+		script = s;
+		server.call('list_questions', [], {}, function(s) {
+			question = s;
+			server.call('list_sprites', [], {}, function(s) {
+				sprite = s;
+				server.call('list_images', [], {}, function(i) {
+					image = i;
+					server.call('list_audio', [], {}, function(a) {
+						audio = a;
+						document.getElementById('error').style.display = 'none';
+						update_ui();
 					});
 				});
 			});
 		});
+	});
+} // }}}
+
+function connected() { // {{{
+	server.call('get_permissions', [], {}, function(p) {
+		// Return value is an object with attributes 'group' and 'edit' set to true or undefined.
+		permissions = p;
+		if (permissions.group)
+			update_groups();
+		else if (permissions.edit)
+			update_edit();
+		else {
+			document.getElementById('error').style.display = 'none';
+			update_ui();
+		}
 	});
 } // }}}
 // }}}
@@ -204,7 +229,7 @@ function ScriptRow(id, data) { // {{{
 				connected();
 				return;
 			}
-			
+
 			// Read and send the requested file.
 			var reader = new FileReader();
 			reader.AddEvent('load', function() {
@@ -252,8 +277,9 @@ function ImageRow(id, data, is_first, num_moods) { // {{{
 	ret.update = function() { server.call('update_image', [], {imageid: id, sprite: data.sprite, mood: ret.mood.value, size: [Number(ret.width.value), Number(ret.height.value)], hotspot: [Number(ret.hotx.value), Number(ret.hoty.value)], url: null}); };
 	ret.update_sprite = function() {
 		var sname = ret.sprite_name.value;
+		var stag = ret.sprite_tag.value;
 		var chapter = ret.chapter.value ? Number(ret.chapter.value) : null;
-		server.call('update_sprite', [], {spriteid: id, name: sname, chapter: chapter || null});
+		server.call('update_sprite', [], {spriteid: data.sprite, tag: stag, name: sname, chapter: chapter || null});
 	};
 
 	if (is_first) {
@@ -261,6 +287,14 @@ function ImageRow(id, data, is_first, num_moods) { // {{{
 		var s = sprite[data.sprite];
 		// Sprite Id.
 		ret.AddElement('td').AddText(data.sprite).rowSpan = rows;
+
+		// Sprite Tag.
+		var td = ret.AddElement('td');
+		td.rowSpan = rows;
+		ret.sprite_tag = td.AddElement('input');
+		ret.sprite_tag.value = s.tag;
+		ret.sprite_tag.type = 'text';
+		ret.sprite_tag.AddEvent('change', ret.update_sprite);
 
 		// Sprite Name.
 		var td = ret.AddElement('td');
@@ -364,7 +398,7 @@ function ImageRow(id, data, is_first, num_moods) { // {{{
 				connected();
 				return;
 			}
-			
+
 			// Create a data url from the requested file.
 			var reader = new FileReader();
 			reader.AddEvent('load', function() {
@@ -447,7 +481,7 @@ function AudioRow(id, data) { // {{{
 				connected();
 				return;
 			}
-			
+
 			// Create a data url from the requested file.
 			var reader = new FileReader();
 			reader.AddEvent('load', function() {
@@ -474,158 +508,163 @@ function AudioRow(id, data) { // {{{
 
 function update_ui() { // {{{
 
-	// Chapters. {{{
-	table = document.getElementById('chapter').ClearAll();
-	tr = table.AddElement('tr');
-	titles = ['Id', 'Name', 'Parent', 'Export', 'Remove'];
-	for (var t = 0; t < titles.length; ++t)
-		tr.AddElement('th').AddText(titles[t]);
-	for (var c in chapter)
-		table.Add(ChapterRow(c, chapter[c]));
+	if (permissions.group) {
+		// Chapters. {{{
+		table = document.getElementById('chapter').ClearAll();
+		tr = table.AddElement('tr');
+		titles = ['Id', 'Name', 'Parent', 'Export', 'Remove'];
+		for (var t = 0; t < titles.length; ++t)
+			tr.AddElement('th').AddText(titles[t]);
+		for (var c in chapter)
+			table.Add(ChapterRow(c, chapter[c]));
 
-	// Create button.
-	tr = table.AddElement('tr');
-	var td = tr.AddElement('td');
-	td.colSpan = 5;
-	var button = td.AddElement('button').AddText('Create Chapter');
-	button.AddEvent('click', function() { server.call('add_chapter', ['New', null], {}, connected); });
-
-	// Import button.
-	tr = table.AddElement('tr');
-	tr.AddElement('th').AddText('Import').colSpan = 2;
-	var td = tr.AddElement('td');
-	td.colSpan = 3;
-	var import_input = td.AddElement('input');
-	import_input.type = 'file';
-	import_input.AddEvent('change', function() {
-		var send = function(files, idx) {
-			// Finish if the last file has been sent.
-			if (idx >= files.length) {
-				document.getElementById('busy').style.display = 'none';
-				connected();
-				return;
-			}
-			
-			// Read and send the requested file.
-			var reader = new FileReader();
-			reader.AddEvent('load', function() {
-				// Send the requested file.
-				server.call('import_chapter', [btoa(reader.result)], {}, function(errors) {
-					show_errors(errors);
-					// Continue with next file.
-					send(files, idx + 1);
-				});
-			});
-			reader.readAsBinaryString(files[idx]);
-		};
-		document.getElementById('busy').style.display = 'block';
-		send(import_input.files, 0);
-	});
-	// }}}
-	// Groups and access. {{{
-	access_lookup = {};
-	for (var g in group)
-		access_lookup[g] = {};
-	for (var a = 0; a < access.length; ++a) {
-		if (access_lookup[access[a][0]] === undefined) {
-			console.error('Access defined for unknown group', access[a]);
-			continue;
-		}
-		access_lookup[access[a][0]][access[a][1]] = true;
-	}
-	var table = document.getElementById('access').ClearAll();
-	var tr = table.AddElement('tr');
-	var titles = ['Group Id', 'Group Name'];
-	for (var t = 0; t < titles.length; ++t)
-		tr.AddElement('th').AddText(titles[t]);
-	for (var c in chapter)
-		tr.AddElement('th').AddText(chapter[c].name);
-	tr.AddElement('th').AddText('Remove');
-	for (var g in group)
-		table.Add(AccessRow(g, group[g]));
-	tr = table.AddElement('tr');
-	var td = tr.AddElement('td');
-	td.colSpan = 4;
-	var button = td.AddElement('button').AddText('Create Group');
-	button.AddEvent('click', function() { server.call('add_group', [''], {}, connected); });
-	// }}}
-
-	// Scripts. {{{
-	table = document.getElementById('script').ClearAll();
-	tr = table.AddElement('tr');
-	titles = ['Id', 'Name', 'Chapter', 'Edit', 'Download', 'Upload', 'Remove'];
-	for (var t = 0; t < titles.length; ++t)
-		tr.AddElement('th').AddText(titles[t]);
-	for (var s in script)
-		table.Add(ScriptRow(s, script[s]));
-	tr = table.AddElement('tr');
-	var td = tr.AddElement('td');
-	td.colSpan = 7;
-	var button = td.AddElement('button').AddText('Create Script');
-	button.AddEvent('click', function() { server.call('add_script', ['New', 0, ''], {}, connected); });
-	// }}}
-	// Questions. {{{
-	table = document.getElementById('question').ClearAll();
-	tr = table.AddElement('tr');
-	titles = ['Id', 'Script', 'Type', 'Description'];
-	for (var t = 0; t < titles.length; ++t)
-		tr.AddElement('th').AddText(titles[t]);
-	for (var q in question)
-		table.Add(QuestionRow(q, question[q]));
-	// }}}
-
-	// Sprites. {{{
-	table = document.getElementById('image').ClearAll();
-	tr = table.AddElement('tr');
-	titles = ['Id', 'Sprite', 'Chapter', 'Remove', 'Id', 'Mood', 'Width', 'Height', 'Hotspot X', 'Hotspot Y', 'Preview', 'Download', 'Upload', 'Remove'];
-	for (var t = 0; t < titles.length; ++t)
-		tr.AddElement('th').AddText(titles[t]);
-	for (var s in sprite) {
-		var num = 0;
-		for (var i in image) {
-			if (image[i].sprite != s)
-				continue;
-			num += 1;
-		}
-		var first = true;
-		for (var i in image) {
-			if (image[i].sprite != s)
-				continue;
-			table.Add(ImageRow(i, image[i], first, num));
-			first = false;
-		}
-
-		// Add sprite info if there are no moods, so it can be renamed and removed.
-		if (first)
-			table.Add(ImageRow(null, {sprite: s}, true, 0));
-
+		// Create button.
 		tr = table.AddElement('tr');
 		var td = tr.AddElement('td');
-		td.colSpan = 12;
-		var button = td.AddElement('button').AddText('Create Mood');
-		button.AddEvent('click', function() { server.call('add_image', [], {sprite: s, mood: '', url: '', size: [0, 0], hotspot: [0, 0]}, connected); });
-	}
-	tr = table.AddElement('tr');
-	var td = tr.AddElement('td');
-	td.colSpan = 14;
-	var button = td.AddElement('button').AddText('Create Sprite');
-	button.AddEvent('click', function() { server.call('add_sprite', ['', null], {}, connected); });
-	// }}}
+		td.colSpan = 5;
+		var button = td.AddElement('button').AddText('Create Chapter');
+		button.AddEvent('click', function() { server.call('add_chapter', ['New', null], {}, connected); });
 
-	// Audio. {{{
-	table = document.getElementById('audio').ClearAll();
-	tr = table.AddElement('tr');
-	titles = ['Id', 'Name', 'Chapter', 'Duration', 'Download', 'Upload', 'Remove'];
-	for (var t = 0; t < titles.length; ++t)
-		tr.AddElement('th').AddText(titles[t]);
-	for (var a in audio)
-		table.Add(AudioRow(a, audio[a]));
-	tr = table.AddElement('tr');
-	var td = tr.AddElement('td');
-	td.colSpan = 7;
-	var button = td.AddElement('button').AddText('Create Audio');
-	button.AddEvent('click', function() { server.call('add_audio', ['', 0, '', 0], {}, connected); });
-	// }}}
+		// Import button.
+		tr = table.AddElement('tr');
+		tr.AddElement('th').AddText('Import').colSpan = 2;
+		var td = tr.AddElement('td');
+		td.colSpan = 3;
+		var import_input = td.AddElement('input');
+		import_input.type = 'file';
+		import_input.AddEvent('change', function() {
+			var send = function(files, idx) {
+				// Finish if the last file has been sent.
+				if (idx >= files.length) {
+					document.getElementById('busy').style.display = 'none';
+					connected();
+					return;
+				}
+
+				// Read and send the requested file.
+				var reader = new FileReader();
+				reader.AddEvent('load', function() {
+					// Send the requested file.
+					server.call('import_chapter', [btoa(reader.result)], {}, function(errors) {
+						show_errors(errors);
+						// Continue with next file.
+						send(files, idx + 1);
+					});
+				});
+				reader.readAsBinaryString(files[idx]);
+			};
+			document.getElementById('busy').style.display = 'block';
+			send(import_input.files, 0);
+		});
+		// }}}
+		// Groups and access. {{{
+		access_lookup = {};
+		for (var g in group)
+			access_lookup[g] = {};
+		for (var a = 0; a < access.length; ++a) {
+			if (access_lookup[access[a][0]] === undefined) {
+				console.error('Access defined for unknown group', access[a]);
+				continue;
+			}
+			access_lookup[access[a][0]][access[a][1]] = true;
+		}
+		var table = document.getElementById('access').ClearAll();
+		var tr = table.AddElement('tr');
+		var titles = ['Group Id', 'Group Name'];
+		for (var t = 0; t < titles.length; ++t)
+			tr.AddElement('th').AddText(titles[t]);
+		for (var c in chapter)
+			tr.AddElement('th').AddText(chapter[c].name);
+		tr.AddElement('th').AddText('Remove');
+		for (var g in group)
+			table.Add(AccessRow(g, group[g]));
+		tr = table.AddElement('tr');
+		var td = tr.AddElement('td');
+		td.colSpan = 4;
+		var button = td.AddElement('button').AddText('Create Group');
+		button.AddEvent('click', function() { server.call('add_group', [''], {}, connected); });
+		// }}}
+	}
+
+	if (permissions.edit) {
+		// Scripts. {{{
+		table = document.getElementById('script').ClearAll();
+		tr = table.AddElement('tr');
+		titles = ['Id', 'Name', 'Chapter', 'Edit', 'Download', 'Upload', 'Remove'];
+		for (var t = 0; t < titles.length; ++t)
+			tr.AddElement('th').AddText(titles[t]);
+		for (var s in script)
+			table.Add(ScriptRow(s, script[s]));
+		tr = table.AddElement('tr');
+		var td = tr.AddElement('td');
+		td.colSpan = 7;
+		var button = td.AddElement('button').AddText('Create Script');
+		button.AddEvent('click', function() { server.call('add_script', ['New', 0, ''], {}, connected); });
+		// }}}
+		// Questions. {{{
+		table = document.getElementById('question').ClearAll();
+		tr = table.AddElement('tr');
+		titles = ['Id', 'Script', 'Type', 'Description'];
+		for (var t = 0; t < titles.length; ++t)
+			tr.AddElement('th').AddText(titles[t]);
+		for (var q in question)
+			table.Add(QuestionRow(q, question[q]));
+		// }}}
+
+		// Sprites. {{{
+		table = document.getElementById('image').ClearAll();
+		tr = table.AddElement('tr');
+		titles = ['Id', 'Tag', 'Name', 'Chapter', 'Remove', 'Id', 'Mood', 'Width', 'Height', 'Hotspot X', 'Hotspot Y', 'Preview', 'Download', 'Upload', 'Remove'];
+		for (var t = 0; t < titles.length; ++t)
+			tr.AddElement('th').AddText(titles[t]);
+		for (var s in sprite) {
+			var num = 0;
+			for (var i in image) {
+				if (image[i].sprite != s)
+					continue;
+				num += 1;
+			}
+			var first = true;
+			for (var i in image) {
+				if (image[i].sprite != s)
+					continue;
+				table.Add(ImageRow(i, image[i], first, num));
+				first = false;
+			}
+
+			// Add sprite info if there are no moods, so it can be renamed and removed.
+			if (first)
+				table.Add(ImageRow(null, {sprite: s}, true, 0));
+
+			tr = table.AddElement('tr');
+			var td = tr.AddElement('td');
+			td.colSpan = 13;
+			var button = td.AddElement('button').AddText('Create Mood');
+			button.sprite = s;
+			button.AddEvent('click', function() { server.call('add_image', [], {sprite: this.sprite, mood: '', url: '', size: [0, 0], hotspot: [0, 0]}, connected); });
+		}
+		tr = table.AddElement('tr');
+		var td = tr.AddElement('td');
+		td.colSpan = 15;
+		var button = td.AddElement('button').AddText('Create Sprite');
+		button.AddEvent('click', function() { server.call('add_sprite', ['', '', null], {}, connected); });
+		// }}}
+
+		// Audio. {{{
+		table = document.getElementById('audio').ClearAll();
+		tr = table.AddElement('tr');
+		titles = ['Id', 'Name', 'Chapter', 'Duration', 'Download', 'Upload', 'Remove'];
+		for (var t = 0; t < titles.length; ++t)
+			tr.AddElement('th').AddText(titles[t]);
+		for (var a in audio)
+			table.Add(AudioRow(a, audio[a]));
+		tr = table.AddElement('tr');
+		var td = tr.AddElement('td');
+		td.colSpan = 7;
+		var button = td.AddElement('button').AddText('Create Audio');
+		button.AddEvent('click', function() { server.call('add_audio', ['', 0, '', 0], {}, connected); });
+		// }}}
+	}
 
 } // }}}
 

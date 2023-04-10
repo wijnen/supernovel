@@ -239,6 +239,7 @@ function get_img(tag, mood, cb) { // {{{
 	// Get an image from the cache, or load it if it wasn't in the cache yet.
 	// Call cb when the image is loaded. Its argument is the image with attributes url (the data url), size (w, h), hotspot (x, y), tag and mood.
 	// Returns undefined.
+	//console.info('get img', tag, mood);
 	if (tag === undefined)
 		console.error('undefined image requested');
 	if (mood === undefined)
@@ -248,8 +249,8 @@ function get_img(tag, mood, cb) { // {{{
 		cb(img_cache[tag][mood]);
 		return;
 	}
+	//console.info('getting image from server', tag, mood);
 	server.call('get_sprite_image', [tag, mood], {}, function(image) {
-		//console.info('getting image from server', tag, mood);
 		image.tag = tag;
 		image.mood = mood;
 		if (img_cache[tag] === undefined)
@@ -490,13 +491,13 @@ function activate(name, now, extra, fast_forward) { // {{{
 			state.speaker.text = action.text;
 			state.speaker.image = action.side;
 			if (action.side !== null) {
-				get_img(action.target, action.side, function(image) {
+				get_img(action.image, action.side, function(image) {
 					// XXX use size and hotspot?
 					elements.speaker_image.src = image.url;
 				});
 			}
 			if (action.mood !== null) {
-				get_img(action.target, action.mood, function(image) {
+				get_img(action.image, action.mood, function(image) {
 					var current_sprite = state.sprite[action.target];
 					current_sprite.to.image = image;
 					if (current_sprite.start_time + current_sprite.duration <= now)
@@ -588,16 +589,16 @@ function activate(name, now, extra, fast_forward) { // {{{
 				all_sprites[s].remove();
 			all_sprites = [];
 			// Set new background.
-			if (action.target) {
+			if (action.image) {
 				var mood = (action.mood === null ? '' : action.mood);
-				get_img(action.target, action.mood, function(img) {
+				get_img(action.image, action.mood, function(img) {
 					state.background = img.url;
 					resize();
 					activate(name, now, 0, fast_forward);
 				});
 			}
 			else {
-				state.backgorund = null;
+				state.background = null;
 				resize();
 				activate(name, now, 0, fast_forward);
 			}
@@ -624,7 +625,7 @@ function activate(name, now, extra, fast_forward) { // {{{
 					mood = mixed.mood || '';
 				}
 			}
-			get_img(action.target, mood, function(image) {
+			get_img(action.image, mood, function(image) {
 				var args = action.args;
 				var current_sprite;
 				if (action.action == 'hide') {
@@ -773,6 +774,8 @@ var Connection = { // {{{
 		music.pause();
 		sound.pause();
 		state = new State();
+		state.background = null;
+		resize();
 		for (var s in all_sprites)
 			all_sprites[s].remove();
 		all_sprites = [];

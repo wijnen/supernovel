@@ -234,13 +234,16 @@ def parse_anim_element(ln, c, d, parent_args): # {{{
 		return False
 
 	t = r.group(2)
-	if ',' in t:
+	if t is not None and ',' in t:
 		target, mood = map(str.strip, t.split(',', 1))
 	else:
 		target = t
 		mood = None
 
-	return {'action': r.group(1), 'target': target, 'mood': mood, 'args': args, 'line': ln}
+	if r.group(1) == 'scene':
+		return {'action': r.group(1), 'image': target, 'mood': mood, 'args': args, 'line': ln}
+	else:
+		return {'action': r.group(1), 'target': target, 'mood': mood, 'args': args, 'line': ln}
 	# }}}
 # }}}
 
@@ -387,7 +390,7 @@ def parse_line(d, ln, istack, ostack, index, question): # {{{
 	# }}}
 
 	# code {{{
-	# Code code <lua|indented>
+	# Code: code <lua|indented>
 	r = re.match(r'code\b\s*(.*?)\s*$', c)
 	if r is not None:
 		if len(r.group(1)) > 0:
@@ -455,17 +458,6 @@ def parse_line(d, ln, istack, ostack, index, question): # {{{
 	r = re.match(r'answer\s*(.*)\s*$', c)
 	if r is not None:
 		ostack[-1].append({'command': 'answer', 'line': ln, 'answer': r.group(1)})
-		return True
-	# }}}
-
-	# sprite {{{
-	# Code: sprite <tag> <image-collection> <display-name>
-	r = re.match(r'sprite\s+(\S+)(?:\s+(\S+)(?:\s+(.+?))?)?\s*$', c)
-	if r is not None:
-		tag = r.group(1)
-		images = r.group(2) or ''
-		name = r.group(3) or ''
-		ostack[-1].append({'command': 'sprite', 'line': ln, 'images': images, 'name': name, 'tag': tag})
 		return True
 	# }}}
 	# }}}
