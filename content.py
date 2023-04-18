@@ -11,8 +11,10 @@ serverdata = [None]
 def init(data):
 	serverdata[0] = data
 
-def list(wake, groupid): # {{{
+# Get information from the database. {{{
+def list(wake, groupid):
 	'''Get a list of available scripts.'''
+	# {{{
 
 	# Load all chapters that can be accessed.
 	if groupid is None:
@@ -59,444 +61,23 @@ def list(wake, groupid): # {{{
 	return ret
 # }}}
 
-def list_questions(wake, scriptid): # {{{
+def list_questions(wake, scriptid):
 	'Get information about all questions in a script.'
+	# {{{
 	data = (yield from serverdata[0].select('question', ('id', 'type', 'description'), ('=', 'script', scriptid), wake = wake))
 	return [{'id': d[0], 'type': d[1], 'description': d[2]} for d in data] 
 # }}}
 
-def list_players(wake, scriptid): # {{{
+def list_players(wake, scriptid):
 	'Get answers to all questions by managed users.'
+	# {{{
 	players = (yield from serverdata[0].list_managed_players(None, wake = wake))
 	return players
 # }}}
 
-errors = []
-def parse_error(line, message): # {{{
-	errors.append('{}: {}'.format(line if line is not None else '(from code)', message))
-	debug(1, '{}: parse error: {}'.format(line, message))
-# }}}
-
-def read_structure(f): # {{{
-	'''Parse script text into structured format.
-	Input: iterable (text file or sequence of strings).
-	Returns: dict of
-	{
-		'line': int,
-		'code': str,
-		'children': dicts of indented lines (same format),
-		'rawchildren': str of indented block, for when it is not code.
-	}
-	'''
-	indentstack = ['']
-	stack = [[]]
-	ln = 0
-	for line in f:
-		ln += 1
-		l = line.lstrip()
-		if l == '' or l.startswith('--'):
-			continue
-		i = line[:len(line) - len(l)]
-		if len(i) > len(indentstack[-1]):
-			# Indentation has increased.
-			if len(stack[-1]) == 0:
-				parse_error(ln, 'first line of file must not be indented')
-				continue
-			if not i.startswith(indentstack[-1]):
-				parse_error(ln, 'indentation changed during increase')
-			stack.append(stack[-1][-1]['children'])
-			indentstack.append(i)
-		while len(i) < len(indentstack[-1]):
-			# Indentation has decreased.
-			stack.pop()
-			indentstack.pop()
-		if indentstack[-1] != i:
-			parse_error(ln, 'indentation changed')
-		stack[-1].append({'line': ln, 'code': line.strip(), 'children': [], 'rawchildren': ''})
-		# Add line to all raw children. Use indent of next level (which is the child's level).
-		for frames, indent in zip(stack[:-1], indentstack[1:]):
-			frames[-1]['rawchildren'] += line[len(indent):] + '\n'
-	return stack[0]
-# }}}
-
-def parse_raw(ln, d, firstline): # {{{
-	if firstline != '':
-		if d['rawchildren'] != '':
-			print(repr(d), repr(firstline))
-			parse_error(ln, 'raw block present after inline data')
-		return firstline
-	return d['rawchildren']
-# }}}
-
-def parse_anim_args(ln, cmd, a, parent_args): # {{{
-	args = {'with': None, 'in': None, 'to': None, 'from': None, 'scale': None, 'rotation': None, 'around': None}
-	if a is None:
-		return args
-	while len(a) > 0:
-		ra = re.match(r'.*\b((with|in|to|from|scale|rotation|around)\s+(.+?))$', a)
-		if ra is None:
-			print('error string:', repr(a))
-			parse_error(ln, 'syntax error parsing animation arguments')
-			return None
-		full = ra.group(1)
-		key = ra.group(2)
-		expr = ra.group(3)
-		a = a[:-len(full)].strip()
-		if args[key] is not None:
-			parse_error(ln, 'duplicate attribute')
-			continue
-		args[key] = expr
-	if parent_args is not None:
-		for a in args:
-			if args[a] is None:
-				args[a] = parent_args[a]
-	return args
-# }}}
-
-def parse_anim_element(ln, c, d, parent_args): # {{{
-	'''Read and return single animation command, possibly including children
-	Returns None if this was not an animation command, False if there was an error and the action otherwise.'''
-	# parallel, serial {{{
-	# Code: parallel <anim parameters>
-	# Code: serial <anim parameters>
-	r = re.match(r'(parallel|serial)\b\s*(.*)\s*$', c)
-	if r is not None:
-		args = parse_anim_args(ln, r.group(1), r.group(2), parent_args)
-		if args is None:
-			# Parsing arguments triggered an error. Abort.
-			return False
-		ret = {'action': r.group(1), 'target': None, 'line': ln, 'args': args, 'actions': []}
-		for ch in d['children']:
-			action = parse_anim_element(ch['line'], ch['code'], ch, args)
-			if action is None:
-				parse_error(ch['line'], 'only animation commands are allowed in this context')
-				continue
-			if action is False:
-				continue
-			ret['actions'].append(action)
-		return ret
-	# }}}
-
-	# speech {{{
-	# Code: <speakertag> [<mood>]: <text|indented>
-	r = re.match(r'(\w+)(?:,(\w+))?:\s*(.*?)\s*$', c)
-	if r is not None:
-		return {'action': 'speech', 'line': ln, 'speaker': r.group(1), 'mood': r.group(2), 'markdown': parse_raw(ln, d, r.group(3))}
-	# }}}
-	
-	# wait {{{
-	# Code: wait <time>
-	r = re.match(r'wait\s+(\S.*?)\s*$', c)
-	if r is not None:
-		if len(d['children']) > 0:
-			parse_error(ln, 'wait cannot have indented block argument')
-			return False
-		return {'action': 'wait', 'line': ln, 'time': r.group(1)}
-	# }}}
-
-	# font {{{
-	# Code: font <css-code>
-	r = re.match(r'font(?:\s*(\S.*?))?\s*$', c)
-	if r is not None:
-		return {'action': 'font', 'line': ln, 'css': r.group(1)}
-	# }}}
-
-	# scene, hide, move, sound, music {{{
-	# Code: scene <target> [<anim-attributes>]
-	# Code: hide <target>[,<mood>] [<anim-attributes>]
-	# Code: move <target>[,<mood>] [<anim-attributes>]
-	# Code: sound <target>
-	# Code: music <target>
-	r = re.match(r'(scene|hide|move|sound|music)\s*(?:\s(\S+?(?:\s*,\s*\S+)?)\s*(?:\s+(\S.*?)\s*)?)?$', c)
-	# group 1: command
-	# group 2: target[,mood]
-	# group 3: anim attributes
-	if r is None:
-		return None
-
-	if len(d['children']) > 0:
-		parse_error(ln, 'command cannot have indented block argument')
-		return False
-
-	if r.group(1) in ('sound', 'music'):
-		if r.group(3):
-			parse_error(ln, 'command does not support animation arguments')
-			return False
-		return {'action': r.group(1), 'target': r.group(2)}
-
-	if r.group(1) != 'scene' and r.group(2) is None:
-		parse_error(ln, 'command needs a target')
-		return False
-
-	args = parse_anim_args(ln, r.group(1), r.group(3), parent_args)
-	if args is None:
-		# There was an error.
-		return False
-
-	t = r.group(2)
-	if t is not None and ',' in t:
-		target, mood = map(str.strip, t.split(',', 1))
-	else:
-		target = t
-		mood = None
-
-	if r.group(1) == 'scene':
-		return {'action': r.group(1), 'image': target, 'mood': mood, 'args': args, 'line': ln}
-	else:
-		return {'action': r.group(1), 'target': target, 'mood': mood, 'args': args, 'line': ln}
-	# }}}
-# }}}
-
-def parse_anim(ln, c, d, ostack): # {{{
-	'''Check if a line is an animation command. Parse it and return True if it is.'''
-	action = parse_anim_element(ln, c, d, None)
-	if action is None:
-		# This was not an animation command.
-		return False
-	if action is False:
-		# There was an error, which has already been reported.
-		return True
-	if len(ostack[-1]) == 0 or ostack[-1][-1]['command'] != 'kinetic':
-		ostack[-1].append({'command': 'kinetic', 'line': ln, 'kinetic': []})
-	ostack[-1][-1]['kinetic'].append(action)
-	return True
-# }}}
-
-def parse_line(d, ln, istack, ostack, index, question): # {{{
-	# d is the data dict of the current line; ln is the current line number.
-	# return False if parsing should be aborted, True otherwise.
-	# Note that True does not imply parsing was successfull. False is only returned if the error will likely cause a chain of useless errors.
-	c = d['code']
-
-	#print('parsing line: %s' % repr(c))
-
-	# end is ignored so lua syntax is allowed (but not enforced). {{{
-	# Code: end
-	if c == 'end':
-		return True
-	# }}}
-
-	# Commands with child blocks {{{
-	# comment {{{
-	r = re.match(r'comment\b.*$', c)
-	if r is not None:
-		return True
-	# }}}
-
-	# if, elseif, while {{{
-	# Code: if expression then <code|indented> [end]
-	# Code: elif expression then <code|indented> [end]
-	# Code: while expression do <code|indented> [end]
-	r = re.match(r'(if|elseif|while)\b\s*(.*?)\s*\b(then|do)\b\s*(.*?)\s*$', c)
-	if r is not None:
-		cmd = r.group(1)
-		expr = r.group(2)
-		thendo = r.group(3)
-		code = r.group(4)
-		if (cmd == 'while') ^ (thendo == 'do'):
-			parse_error(ln, 'command %s does not match with tag %s' % (cmd, thendo))
-			return False
-		new_frame = []
-		if cmd == 'if':
-			ostack[-1].append({'command': 'if', 'line': ln, 'code': [(expr, new_frame)]})
-		elif cmd == 'elseif':
-			if ostack[-1][-1]['command'] != 'if':
-				parse_error(ln, 'elif without if')
-				return False
-			ostack[-1][-1]['code'].append((expr, new_frame))
-		elif cmd == 'while':
-			ostack[-1].append({'command': 'while', 'line': ln, 'test': expr, 'code': new_frame, 'else': []})
-		ostack.append(new_frame)
-		if len(code) == 0:
-			istack.append(d['children'])
-		else:
-			# Allow (but don't require) "end" at end of line.
-			if code.endswith('end'):
-				code = code[:-3].strip()
-			istack.append([{'code': code, 'line': ln, 'children': []}])
-			if len(d['children']) > 0:
-				parse_error(ln, 'indented block is only allowed without inline code')
-		return True
-	# }}}
-
-	# else {{{
-	# Code: else <code|indented> [end]
-	r = re.match(r'else\b\s*(.*?)\s*$', c)
-	if r is not None:
-		code = r.group(1)
-		has_code = len(code) > 0
-		if code.endswith('end'):
-			code = code[:-3].strip()
-		if ostack[-1][-1]['command'] == 'if':
-			new_frame = []
-			ostack[-1][-1]['code'].append((None, new_frame))
-			ostack.append(new_frame)
-			if not has_code:
-				istack.append(d['children'])
-			else:
-				istack.append([{'code': code, 'line': ln, 'children': []}])
-				if len(d['children']) > 0:
-					parse_error(ln, 'indented block is only allowed without inline code')
-		elif ostack[-1][-1]['command'] == 'while':
-			new_frame = ostack[-1][-1]['else']
-			if not has_code:
-				ostack.append(new_frame)
-			else:
-				istack.append([{'code': code, 'line': ln, 'children': []}])
-				if len(d['children']) > 0:
-					parse_error(ln, 'indented block is only allowed without inline code')
-			istack.append(d['children'])
-		else:
-			parse_error(ln, 'else without if or while')
-			return False
-		return True
-	# }}}
-
-	# question {{{
-	# Code: question hidden <qname> <text|indented>
-	# Code: question short <qname> <text|indented>
-	# Code: question long <qname> <text|indented>
-	# Code: question unit <qname> <text|indented>
-	# Code: question choice <qname> <text|indented>
-	# Code: question longshort <qname> <text|indented>
-	# Code: question longunit <qname> <text|indented>
-	# Code: question longchoice <qname> <text|indented>
-	r = re.match(r'question\s+(\S+)\s+(\S+)\b\s*(.*)$', c)
-	if r is not None:
-		t = r.group(1)
-		if t not in ('hidden', 'short', 'long', 'unit', 'choice', 'longshort', 'longunit', 'longchoice'):
-			parse_error(ln, 'invalid question type')
-			return True
-		name = r.group(2)
-		text = parse_raw(ln, d, r.group(3))
-		ostack[-1].append({'command': 'question', 'type': t, 'variable': name, 'markdown': text, 'line': ln})
-		if 'choice' in t:
-			ostack[-1][-1]['option'] = []
-		else:
-			ostack[-1][-1]['option'] = None
-		question.append({'id': name, 'type': t, 'description': text})
-		return True
-	# }}}
-
-	# option {{{
-	# Code: option <text|indented>
-	r = re.match(r'option\s+(.*?)\s*$', c)
-	if r is not None:
-		if ostack[-1][-1]['command'] != 'question' or 'choice' not in ostack[-1][-1]['type']:
-			parse_error(ln, 'option is only allowed after a multiple choice question')
-			return True
-		ostack[-1][-1]['option'].append(parse_raw(ln, d, r.group(1)))
-		return True
-	# }}}
-
-	# code {{{
-	# Code: code <lua|indented>
-	r = re.match(r'code\b\s*(.*?)\s*$', c)
-	if r is not None:
-		if len(r.group(1)) > 0:
-			if len(d['children']) > 0:
-				parse_error(ln, 'code command cannot have both inline and block code')
-				return True
-			ostack[-1].append({'command': 'code', 'line': ln, 'code': r.group(1)})
-			return True
-		ostack[-1].append({'command': 'code', 'line': ln, 'code': parse_raw(ln, d, r.group(1))})
-		return True
-	# }}}
-
-	if parse_anim(ln, c, d, ostack):
-		return True
-	# }}}
-
-	if len(d['children']) > 0:
-		parse_error(ln, 'unexpected indent')
-		return False
-
-	# Commands which should not have an indented block after them {{{
-	# $ {{{
-	# Code: $ <lua>
-	if c[0] == '$':
-		ostack[-1].append({'command': 'code', 'line': ln, 'code': c[1:].strip()})
-		return True
-	# }}}
-
-	# break, continue {{{
-	# Code: break
-	# Code: continue
-	if c in ('break', 'continue'):
-		ostack[-1].append({'command': c, 'line': ln})
-		return True
-	# }}}
-
-	# label, goto {{{
-	# Code: label <name>
-	# Code: goto <name>
-	r = re.match(r'(label|goto)\s*(\S*)\s*$', c)
-	if r is not None:
-		if r.group(1) == 'label' and len(ostack) > 1:
-			parse_error(ln, 'labels are only allowed at top level')
-			return True
-		name = r.group(2)
-		if name.startswith('.'):
-			name = last_label + name
-		else:
-			last_label = name
-		index[r.group(1)][name] = len(ostack[0])
-		ostack[0].append({'command': r.group(1), 'line': ln, 'label': name, 'target': None})
-		return True
-	# }}}
-
-	# video {{{
-	# Code: video <name>
-	r = re.match(r'video\s+(.*)\s*$', c)
-	if r is not None:
-		ostack[-1].append({'command': 'video', 'line': ln, 'video': r.group(1)})
-		return True
-	# }}}
-
-	# answer {{{
-	# Code: answer <style>
-	r = re.match(r'answer\s*(.*)\s*$', c)
-	if r is not None:
-		ostack[-1].append({'command': 'answer', 'line': ln, 'answer': r.group(1)})
-		return True
-	# }}}
-	# }}}
-
-	parse_error(ln, 'syntax error')
-	return True
-# }}}
-
-def parse_script(script): # {{{
-	'''Parse a script into structured code.
-	Returns tuple: parsed script, list of parse errors.'''
-	global errors
-	errors = []
-	data = read_structure(script.split('\n'))
-	istack = [data]
-	ret = []
-	ostack = [ret]
-	index = {'label': {}, 'goto': {}}
-	question = []
-	while len(istack) > 0:
-		if len(istack[-1]) > 0:
-			d = istack[-1].pop(0)
-			ln = d['line']
-			parse_line(d, ln, istack, ostack, index, question)
-		while len(istack) > 0 and len(istack[-1]) == 0:
-			istack.pop()
-			ostack.pop()
-	for label in index['goto']:
-		source = ret[index['goto'][label]]
-		if label not in index['label']:
-			parse_error(source['line'], 'undefined label')
-		else:
-			source['target'] = index['label'][label]
-	#print('parsed script:', repr(ret))
-	return ret, errors, question, index['label']
-# }}}
-
-def parse_script_list(wake, script_list): # {{{
+def parse_script_list(wake, script_list):
 	'''Parse script list (except last element). Return chapter id.'''
+	# {{{
 	current = None
 	for part in script_list[:-1]:
 		result = (yield from serverdata[0].select('chapter', ('id',), ('and', ('=', 'name', part), ('=', 'parent', current)), wake = wake))
@@ -505,17 +86,19 @@ def parse_script_list(wake, script_list): # {{{
 	return current
 # }}}
 
-def get_scriptid(wake, script_list): # {{{
+def get_scriptid(wake, script_list):
 	'''Get script id from path. This is called by the admin interface, it does not check for permissions.'''
+	# {{{
 	chapter = (yield from parse_script_list(wake, script_list))
 	result = (yield from serverdata[0].select('script', ('id',), ('and', ('=', 'chapter', chapter), ('=', 'name', script_list[-1])), wake = wake))
 	assert len(result) == 1
 	return result[0][0]
 # }}}
 
-def get(wake, groupid, script_list): # {{{
+def get(wake, groupid, script_list):
 	'''Get the script from a list of chapter names; accessible by groupid.
 	Returns chapterid, scriptid, code'''
+	# {{{
 	chapter = (yield from parse_script_list(wake, script_list))
 	# Check that the group has access to this chapter.
 	check = (yield from serverdata[0].select('access', ('groupid',), ('and', ('=', 'groupid', groupid), ('=', 'chapter', chapter)), wake = wake))
@@ -526,5 +109,283 @@ def get(wake, groupid, script_list): # {{{
 	scriptid, script = result[0]
 	return chapter, scriptid, parse_script(script)
 # }}}
+# }}}
 
+# Parse scripts. {{{
+errors = []
+def parse_error(line, message):
+	'Append a parse error to the pending errors and log it to the screen'
+	# {{{
+	errors.append('{}: {}'.format(line if line is not None else '(from code)', message))
+	debug(1, '{}: parse error: {}'.format(line, message))
+# }}}
+
+def parse_anim_args(lines, ln, line):
+	# {{{
+	ret = {'with': None, 'in': None, 'to': None, 'from': None, 'scale': None, 'rotation': None, 'around': None}
+	while True:
+		ln, line = parse_whitespace(lines, ln, line)
+		r = re.match(r'(with|in|to|from|scale|rotation|around)\b', line)
+		if r is None:
+			return ln, line, ret
+		src_ln = ln
+		ln, line, arg = parse_word(lines, ln, line[r.end():])
+		#print('anim args found %s value %s current args %s remaining line %s' % (r.group(1), arg, ret, line))
+		if ret[r.group(1)] is not None:
+			parse_error(src_ln, 'duplicate animation argument %s' % r.group(1))
+		else:
+			ret[r.group(1)] = arg
+# }}}
+
+def parse_whitespace(lines, ln, line):
+	'''Read away whitespace and comments, return ln, line.'''
+	# {{{
+	ret = ''
+	start_ln = ln
+	line = line.lstrip()	# Just to be sure.
+	# Drop empty lines and comments.
+	while True:
+		r = re.match(r'--\[(=*)\[', line.strip())
+		if r is not None:
+			terminator = '\]' + r.group(1) + '\]'
+			ln, line, comment = parse_long_string(terminator, lines, ln, line)
+			continue
+		if line != '' and not line.startswith('--'):
+			return ln, line
+		if ln >= len(lines):
+			# End of file.
+			return ln, ''
+		line = lines[ln].lstrip()
+		ln += 1
+# }}}
+
+def parse_long_string(terminator, lines, ln, line):
+	'''Read a long string or other multi-line text from lines, return ln, line, result.'''
+	# {{{
+	ret = ''
+	start_ln = ln
+	if line.startswith('\n'):
+		line = line[1:]
+	while True:
+		r = re.search(terminator, line)
+		if r is not None:
+			return ln, line[r.end():].lstrip(), ret + line[:r.start()]
+		ret += line
+		if ln >= len(lines):
+			parse_error(start_ln, 'unexpected end of file looking for %s' % terminator)
+			return ln, '', ret
+		line = lines[ln]
+		ln += 1
+# }}}
+
+def parse_text(lines, ln, line):
+	'''Read a text until end of line, or a long string from lines, return ln, line, result.'''
+	# {{{
+	ln, line = parse_whitespace(lines, ln, line)
+	r = re.match(r'\[(=*)\[', line)
+	if r is None:
+		# Use text until end of line.
+		text = line
+		line = ''
+	else:
+		terminator = '\]' + r.group(1) + '\]'
+		ln, line, text = parse_long_string(terminator, lines, ln, line[r.end():])
+	return ln, line, text
+# }}}
+
+
+def parse_word(lines, ln, line):
+	'''Read a single word, or quoted text on a line, or a long string.'''
+	# {{{
+	src_ln = ln
+	# Drop empty lines and comments.
+	ln, line = parse_whitespace(lines, ln, line)
+	if line == '':
+		parse_error(src_ln, 'unexpected end of file')
+		return ln, line, ''
+	r = re.match(r'\[(=*)\[', line)
+	if r is None:
+		# Use next word.
+		if line[0] in '"\'':
+			e = line.find(line[0], 1)
+			if e < 0:
+				parse_error(ln, 'unterminated quoted string')
+				return ln, '', line
+			return ln, line[e + 1:], line[1:e]
+		fragments = line.split(None, 1)
+		return ln, fragments[1] if len(fragments) > 1 else '', fragments[0]
+	else:
+		terminator = '\]' + r.group(1) + '\]'
+		ln, line, text = parse_long_string(terminator, lines, ln, line[r.end():])
+	return ln, line, text
+# }}}
+
+def parse_script(script):
+	'''Parse a script into structured code.
+	Returns tuple: parsed script, list of parse errors, list of questions.'''
+	# {{{
+	global errors
+	errors = []
+	question = []
+	ret = []	# Final return value. Also initial value on output stack. Contains dicts of 1 instruction each.
+	ostack = [ret]	# Output stack.	Contains instruction lists (entire script, then-blocks, while-blocks) and kinetic action lists.
+	ln = 0
+	lines = script.split('\n')
+	while ln < len(lines):
+		line = lines[ln].lstrip()
+		ln += 1
+		while len(line) > 0:
+			#print('current line:', line)
+			ln, line = parse_whitespace(lines, ln, line)
+			src_ln = ln
+			# Code. {{{
+			r = re.match(r'\$\[(=*)\[', line)
+			if r is not None:
+				level = len(r.group(1))
+				line = line[r.end():]
+				terminator = r'\]' + '=' * level + r'\]'
+				ln, line, result = parse_long_string(terminator, lines, ln, line)
+				ostack[-1].append({'command': 'code', 'line': src_ln, 'code': result})
+				continue
+			if line.startswith('$'):
+				# Single line code.
+				ostack[-1].append({'command': 'code', 'line': ln, 'code': line[1:].strip()})
+				break
+			# }}}
+			# Flow control. {{{
+			r = re.match(r'(if|elseif|else|while|end|break|continue)\b', line)
+			if r is not None:
+				cmd = r.group(1)
+				if cmd == 'if': # {{{
+					ln, line, expr = parse_long_string(r'\bthen\b', lines, ln, line[r.end():])
+					new_frame = []
+					ostack[-1].append({'command': 'if', 'line': src_ln, 'code': [(expr, new_frame)]})
+					ostack.append(new_frame)
+					continue
+				# }}}
+				elif cmd == 'elseif': # {{{
+					if len(ostack) < 2 or ostack[-2][-1]['command'] != 'if':
+						parse_error(ln, 'elseif without if')
+						break
+					ln, line, expr = parse_long_string(r'\bthen\b', lines, ln, line[r.end():])
+					new_frame = []
+					ostack.pop()
+					ostack[-1][-1]['code'].append((expr, new_frame))
+					ostack.append(new_frame)
+					continue
+				# }}}
+				elif cmd == 'else': # {{{
+					if len(ostack) < 2 or ostack[-2][-1]['command'] not in ('if', 'while'):
+						parse_error(ln, 'else without if or while')
+						break
+					if ostack[-2][-1]['command'] == 'if':
+						new_frame = []
+						ostack.pop()
+						ostack[-1][-1]['code'].append((None, new_frame))
+						ostack.append(new_frame)
+						line = line[r.end():]
+						continue
+					else:
+						ostack.pop()
+						ostack.append(ostack[-1][-1]['else'])
+						line = line[r.end():]
+						continue
+				# }}}
+				elif cmd == 'while': # {{{
+					ln, line, expr = parse_long_string(r'\bdo\b', lines, ln, line[r.end():])
+					new_frame = []
+					ostack[-1].append({'command': 'while', 'line': src_ln, 'test': expr, 'code': new_frame, 'else': []})
+					ostack.append(new_frame)
+					continue
+				# }}}
+				elif cmd == 'end': # {{{
+					if len(ostack) < 2:
+						parse_error(ln, 'end at top level')
+						break
+					ostack.pop()
+					line = line[len(cmd):].lstrip()
+					continue
+				# }}}
+				else:
+					assert cmd in ('break', 'continue') # {{{
+					ostack[-1].append({'command': cmd, 'line': ln})
+					line = line[len(r.group(0)):].lstrip()
+					continue
+				# }}}
+			# }}}
+			# Questions. {{{
+			r = re.match(r'(answer|question|option)\b', line)
+			if r is not None:
+				cmd = r.group(1)
+				if cmd == 'question':
+					ln, line, t = parse_word(lines, ln, line[r.end():])
+					if t not in ('hidden', 'short', 'long', 'unit', 'choice', 'longshort', 'longunit', 'longchoice'):
+						parse_error(src_ln, 'invalid question type %s' % t)
+						break
+					ln, line, tag = parse_word(lines, ln, line)
+					ln, line, text = parse_text(lines, ln, line)
+					ostack[-1].append({'command': 'question', 'type': t, 'variable': tag, 'markdown': text, 'line': src_ln})
+					question.append({'id': tag, 'type': t, 'description': text})
+					continue
+
+				else:
+					assert cmd in ('answer', 'option')
+					ln, line, text = parse_text(lines, ln, line)
+					ostack[-1].append({'command': cmd, 'line': ln, cmd: text})
+					continue
+			# }}}
+			# Animation. {{{
+			r = re.match(r'(parallel|serial|wait|scene|hide|move|sound|music|video|style|launch|loop|stop|random)\b', line)
+			if r is not None:
+				cmd = r.group(1)
+				if cmd in ('parallel', 'serial'): # {{{
+					ln, line, args = parse_anim_args(lines, ln, line[r.end():])
+					ostack[-1].append({'command': cmd, 'line': src_ln, 'args': args, 'actions': []})
+					ostack.append(ostack[-1][-1]['actions'])
+				# }}}
+				elif cmd == 'wait': # {{{
+					ln, line, t = parse_word(lines, ln, line[r.end():])
+					ostack[-1].append({'command': cmd, 'line': src_ln, 'time': t})
+				# }}}
+				elif cmd in ('scene', 'hide', 'move'): # {{{
+					ln, line, target = parse_word(lines, ln, line[r.end():])
+					if ',' in target:
+						target, mood = target.split(',', 1)
+					else:
+						mood = None
+					ln, line, args = parse_anim_args(lines, ln, line)
+					ostack[-1].append({'command': cmd, 'line': src_ln, ('image' if cmd == 'scene' else 'target'): target, 'mood': mood, 'args': args})
+				# }}}
+				elif cmd in ('sound', 'music', 'video'): # {{{
+					ln, line, target = parse_word(lines, ln, line[r.end():])
+					ostack[-1].append({'command': cmd, 'line': src_ln, 'target': target})
+				# }}}
+				else:
+					assert cmd in ('style', 'launch', 'loop', 'stop', 'random') # {{{
+					raise NotImplementedError('not implemented yet')
+					# TODO
+				# }}}
+				continue
+			r = re.match(r'(\S+)\s*(?:,\s*(\S*)\s*)?:(?:\[(=*)\[)?\s*', line)
+			if r is not None:
+				# Group 1: speaker name.
+				# Group 2: mood or None.
+				# Group 3: long string filler ('=' signs only; None if no long string tag).
+				if r.group(3) is None:
+					text = line
+					line = ''
+				else:
+					terminator = r'\]' + r.group(3) + r'\]'
+					ln, line, text = parse_long_string(terminator, lines, ln, line[r.end():])
+				ostack[-1].append({'command': 'speech', 'line': src_ln, 'speaker': r.group(1), 'mood': r.group(2), 'markdown': text})
+				continue
+			# }}}
+
+			if line != '':
+				parse_error(src_ln, 'syntax error: %s' % line)
+				line = ''
+	#print('parsed script:', repr(ret))
+	return ret, errors, question
+# }}}
+# }}}
 # vim: set foldmethod=marker :

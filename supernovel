@@ -16,7 +16,6 @@ import fhs
 import websocketd
 import json
 import userdata
-import content
 from markdown import markdown
 from websocketd import log
 
@@ -26,6 +25,7 @@ fhs.option('logfile', 'file for logging events', default = '')
 fhs.option('loglimit', 'maximum loglevel that is written to screen', default = 1)
 config = userdata.fhs_init('http://localhost:8879', 'supernovel', help = 'Visual novel style tool for students to learn with teacher monitoring options', contact = 'Bas Wijnen <wijnen@debian.org>', version = '0.2')
 from debug import debug
+import content
 # }}}
 
 ''' Log priorities: {{{
@@ -365,7 +365,7 @@ class Content_Connection: # {{{ Class for handling content management.
 	# }}}
 	# Questions {{{
 	def _update_questions(self, wake, scriptid, script):
-		parsed, errors, questions, labels = content.parse_script(script)
+		parsed, errors, questions = content.parse_script(script)
 		#print('questions', questions)
 		yield from serverdata.delete('question', ('=', 'script', scriptid), wake = wake)
 		for q in questions:
@@ -670,6 +670,9 @@ class Connection: # {{{
 				'run_stack': [],
 				'chapter': None,	# Current chapter.
 				'question': None,	# Question that is currently being asked.
+				'option': [],		# Current list of options, for use by next question.
+				'kinetic': [],		# Pending kinetic commands. This is a stack, similar to run_stack.
+				'args': [],		# Stack of default arguments.
 			}
 		users[self.id] = u
 		u['name'] = self.name
@@ -731,8 +734,14 @@ class Connection: # {{{
 	# }}}
 	def _safe_eval(self, wake, expr, as_str): # {{{
 		'Evaluate an expression through Lua.'
-		ret = (yield from self.user['environment'].compute(wake, expr, as_str))
-		return str(ret) if as_str else ret
+		try:
+			ret = (yield from self.user['environment'].compute(wake, expr, as_str))
+			return str(ret) if as_str else ret
+		except ValueError as e:
+			print('error:', str(e))
+			print('in eval:', expr)
+			traceback.print_exc()
+			return str(e) if as_str else False
 	# }}}
 	def _parse_text(self, wake, text): # {{{
 		'Do substitutions on a text that is going to be shown to the user. This should be called with "yield from".'
@@ -784,7 +793,7 @@ class Connection: # {{{
 		yield from refresh_admins(wake)
 		self.remote.main.event(self.display_name)
 	# }}}
-	def _parse_animation_args(self, wake, item_args): # {{{
+	def _parse_animation_args(self, wake, item_args, defaults): # {{{
 		def parse_location(wake, loc): # {{{
 			'Parse location; return location and hotspot'
 			if loc is None:
@@ -876,7 +885,7 @@ class Connection: # {{{
 		def parse_around(wake, loc): # {{{
 			if loc is None:
 				return None
-			l = [x.strip() for x in (yield from self._parse_text(wake, loc)).split()]
+			l = [x.strip() for x in (yield from self._parse_text(wake, loc)).split(',')]
 			if l[-1] in ('cw', 'ccw'):
 				cw = l[-1] == 'cw'
 				l.pop()
@@ -919,7 +928,7 @@ class Connection: # {{{
 			args['in'] = (yield from self._parse_time(wake, item_args['in']))
 		# }}}
 		args['to'], args['to_hotspot'] = (yield from parse_location(wake, item_args['to']))
-		if args['in'] is None:
+		if args['in'] is None and defaults.get('in') is None:
 			args['with'] = 'jump'
 			args['from'], args['from_hotspot'] = args['to'], args['to_hotspot']
 		else:
@@ -992,19 +1001,17 @@ class Connection: # {{{
 			args['rotation'] = r
 			args['rotation_hotspot'] = h
 		# }}}
-		return args
+		ret = defaults.copy()
+		ret.update({k: v for k, v in args.items() if k not in ret or v is not None})
+		return ret
 	# }}}
 	def _continue_break(self, cmd): # {{{
 		while self.user['run_stack'][-1]['current'] >= len(self.user['run_stack'][-1]['program']) or self.user['run_stack'][-1]['program'][self.user['run_stack'][-1]['current']]['command'] != 'while':
 			self.user['run_stack'].pop()
+			self.user['kinetic'].pop()
+			self.user['args'].pop()
 		if cmd == 'break':
 			self.user['run_stack'][-1]['current'] += 1
-	# }}}
-	def _goto(self, target): # {{{
-		# Break to top level and jump to requested label.
-		while len(self.user['run_stack']) > 1:
-			self.user['run_stack'].pop()
-		self.user['run_stack'][-1]['current'] = target
 	# }}}
 	def _clear_pending(self): # {{{
 		# update kinetic state.
@@ -1040,13 +1047,17 @@ class Connection: # {{{
 				for prop in ('from', 'from_hotspot', 'to', 'to_hotspot', 'scale', 'scale_hotspot', 'rotation', 'rotation_hotspot'):
 					if args.get(prop) is not None:
 						target[prop] = args[prop]
-		for action in self.user['_pending']:
-			handle_action(action, self.user['_kinetic_state'])
-		#debug(0, repr(self.user['_pending']))
-		self.user['_pending'] = []
+		if len(self.user['kinetic']) != 1:
+			log('Error: Pending cleared while kinetic stack is not a single level:', self.user['kinetic'])
+		else:
+			for action in self.user['kinetic'][0]:
+				handle_action(action, self.user['_kinetic_state'])
+		#debug(0, repr(self.user['kinetic'][0]))
+		self.user['kinetic'] = [[]]
+		self.user['args'] = [{}]
 	# }}}
 	def _start(self, wake, script_content, send_errors): # {{{
-		self.user['program'], errors, question, self.user['labels'] = script_content
+		self.user['program'], errors, question = script_content
 		if send_errors:
 			if len(errors) > 0:
 				errors = markdown('# Errors:\n' + '\n\n'.join(errors))
@@ -1054,6 +1065,8 @@ class Connection: # {{{
 				errors = ''
 			self.remote.error.event(errors)
 		self.user['run_stack'] = [{'program': self.user['program'], 'current': 0}]
+		self.user['kinetic'] = [[]]
+		self.user['args'] = [{}]
 		# Sprites are stored in two steps.
 		# All available sprites are loaded into user['moods'] by this function.
 		# All active sprites (declared with a "sprite" command, may or may not be onscreen) are in user['sprite']. Both are dicts.
@@ -1064,7 +1077,6 @@ class Connection: # {{{
 		#   'mood': The currently active mood, for when there is speech without an explicit mood.
 		self.user['moods'] = {}
 		self.user['sprite'] = {}
-		self.user['_pending'] = []
 		self.user['question'] = None
 		# Set up self.user['moods']. {{{
 		global_sprites = (yield from serverdata.select('sprite', ('id', 'tag', 'name'), ('=', 'chapter', None), wake = wake))
@@ -1106,10 +1118,10 @@ class Connection: # {{{
 			# These are handled immediately.
 			# Record answer style
 			'answer': lambda style: (yield from self._answer(None, style)),
-			# Activate a sprite. call as makesprite(tag, name, id, mood). Using lambda to make sure it's not a member.
-			'makesprite': lambda tag, id, name, mood = '': self._sprite(tag, id, name, mood),
+			# Activate a sprite. call as make_sprite(tag, name, id, mood). Using lambda to make sure it's not a member.
+			'make_sprite': lambda tag, id, name, mood = '': self._sprite(tag, id, name, mood),
 			# Add kinetic commands to the pending queue.
-			'kinetic': lambda actions: self.user['_pending'].extend(actions),
+			'kinetic': lambda actions: self.user['kinetic'][-1].extend(actions),
 
 			# These are used for building kinetic commands.
 			'speech': lambda speaker, target, mood, side, text: {'action': 'speech', 'speaker': speaker, 'target': target, 'mood': mood, 'side': side, 'text': markdown(text)},
@@ -1118,15 +1130,14 @@ class Connection: # {{{
 			'music': lambda tag: {'action': 'music', 'tag': tag},
 			'serial': lambda *parts: {'action': 'serial', 'parts': parts},
 			'parallel': lambda *parts: {'action': 'parallel', 'parts': parts},
-			'move': lambda target, image, mood, args: {'action': 'move', 'target': target, 'image': image, 'mood': mood, 'args': (yield from self._parse_animation_args(wake, args))},
-			'hide': lambda target, image, mood, args: {'action': 'hide', 'target': target, 'image': image, 'mood': mood, 'args': (yield from self._parse_animation_args(wake, args))},
+			'move': lambda target, image, mood, args: {'action': 'move', 'target': target, 'image': image, 'mood': mood, 'args': (yield from self._parse_animation_args(wake, args, self.user['args'][-1]))},
+			'hide': lambda target, image, mood, args: {'action': 'hide', 'target': target, 'image': image, 'mood': mood, 'args': (yield from self._parse_animation_args(wake, args, self.user['args'][-1]))},
 
 			# These can be returned.
 			'video': lambda tag: {'cmd': 'video', 'video': tag},
 			'question': lambda tag, type, text, options = None: {'cmd': 'question', 'tag': tag, 'type': type, 'text': text, 'options': options},
 			'continue': lambda: {'cmd': 'continue'},
 			'break': lambda: {'cmd': 'break'},
-			'goto': lambda label: {'cmd': 'goto', 'label': label}
 		}
 		yield from self.user['environment'].module(wake, 'vn', module)
 
@@ -1166,7 +1177,9 @@ class Connection: # {{{
 				parsed_options.append((yield from self._parse_text(wake, x)))
 
 		# Send question to player.
-		self.remote.question.event(self.user['_pending'], qtext, qtype, parsed_options, last_answer)
+		if len(self.user['kinetic']) != 1:
+			log('Error: question sent while kinetic stack is not a single level')
+		self.remote.question.event(self.user['kinetic'][0], qtext, qtype, parsed_options, last_answer)
 
 		return True
 	# }}}
@@ -1198,10 +1211,14 @@ class Connection: # {{{
 			# Pop off stack levels until there's an instruction.
 			while len(self.user['run_stack'][-1]['program']) <= self.user['run_stack'][-1]['current']:
 				self.user['run_stack'].pop()
+				kinetic = self.user['kinetic'].pop()
+				self.user['args'].pop()
 				#print('pop', self.user['run_stack'])
 				if len(self.user['run_stack']) == 0:
 					# Send final "question".
-					self.remote.question.event(self.user['_pending'], '', 'choice', ['Done'])
+					if len(self.user['kinetic']) != 0:
+						log('Error: script ends while kinetic stack is not empty')
+					self.remote.question.event(kinetic, '', 'choice', ['Done'])
 					yield from refresh_admins(wake)
 					return
 			# Run instructions.
@@ -1212,11 +1229,9 @@ class Connection: # {{{
 		yield from refresh_admins(wake)
 	# }}}
 	def _run_item(self, wake, code): # {{{
-		debug(3, '{}:{} running item {}'.format(self.user['name'], self.user['group'], repr(code)))
-		if code['command'] == 'label': # {{{
-			pass
-		# }}}
-		elif code['command'] == 'answer': # {{{
+		'''Run one command. Return True if execution should be stopped.'''
+		debug(3, '{}:{} running item {} args {}'.format(self.user['name'], self.user['group'], repr(code), repr(self.user['args'])))
+		if code['command'] == 'answer': # {{{
 			yield from self._answer(wake, code['answer'])
 		# }}}
 		elif code['command'] == 'if': # {{{
@@ -1224,6 +1239,8 @@ class Connection: # {{{
 			for expr, target in code['code']:
 				if expr is None or (yield from self._safe_eval(wake, expr, as_str = False)):
 					self.user['run_stack'].append({'program': target, 'current': 0})
+					self.user['kinetic'].append(self.user['kinetic'][-1])
+					self.user['args'].append(self.user['args'][-1])
 					break
 			return False
 		# }}}
@@ -1231,20 +1248,20 @@ class Connection: # {{{
 			# Don't increment instruction pointer, so the loop restarts.
 			if (yield from self._safe_eval(wake, code['test'], as_str = False)):
 				self.user['run_stack'].append({'program': code['code'], 'current': 0})
+				self.user['kinetic'].append(self.user['kinetic'][-1])
+				self.user['args'].append(self.user['args'][-1])
 			else:
 				# exit the while loop.
 				self.user['run_stack'][-1]['current'] += 1
 				# handle else clause, if present.
 				if code['else'] is not None:
 					self.user['run_stack'].append({'program': code['else'], 'current': 0})
+					self.user['kinetic'].append(self.user['kinetic'][-1])
+					self.user['args'].append(self.user['args'][-1])
 			return False
 		# }}}
 		elif code['command'] in ('continue', 'break'): # {{{
 			self._continue_break(code['command'])
-			return False
-		# }}}
-		elif code['command'] == 'goto': # {{{
-			self._goto(code['target'])
 			return False
 		# }}}
 		elif code['command'] == 'code': # {{{
@@ -1257,7 +1274,9 @@ class Connection: # {{{
 				cmd = None
 			if isinstance(cmd, dict):
 				if cmd['cmd'] == 'video':
-					self.remote.video.event(self.user['_pending'], cmd['video'])
+					if len(self.user['kinetic']) != 1:
+						log('Error: video requested (from Lua) while kinetic stack is not a single level')
+					self.remote.video.event(self.user['kinetic'][0], cmd['video'])
 					return True
 				elif cmd['cmd'] == 'question':
 					if (yield from self._question(wake, cmd['type'], cmd['variable'], code['markdown'], code['option'])):
@@ -1266,82 +1285,76 @@ class Connection: # {{{
 				elif cmd['cmd'] in ('continue', 'break'):
 					self._continue_break(cmd['cmd'])
 					return False
-				elif cmd['cmd'] == 'goto':
-					self._goto(self.user['labels'][cmd['label']])
-					return False
 			self.user['run_stack'][-1]['current'] += 1
 			return False
 		# }}}
 		elif code['command'] == 'video': # {{{
-			self.remote.video.event(self.user['_pending'], code['video'])
+			if len(self.user['kinetic']) != 1:
+				log('Error: video requested while kinetic stack is not a single level')
+			self.remote.video.event(self.user['kinetic'][0], code['video'])
 			return True
 		# }}}
-		elif code['command'] == 'kinetic': # {{{
-			def build_kinetic(wake, item): # {{{
-				if item['action'] == 'speech': # {{{
-					target = item['speaker']
-					#print('check', item, self.user['sprite'])
-					speaker = None if target is None else self.user['sprite'][target]['name'] if target in self.user['sprite'] else '(' + target + ')'
+		elif code['command'] == 'speech': # {{{
+			target = code['speaker']
+			#print('check', item, self.user['sprite'])
+			speaker = None if target is None else self.user['sprite'][target]['name'] if target in self.user['sprite'] else '(' + target + ')'
 
-					# Set images.
-					image, mood = self._find_mood(target, item['mood'])
-					if target in self.user['sprite'] and 'side' in self.user['sprite'][target]:
-						side = self.user['sprite'][target]['side']
-					else:
-						side = None
-					return {'action': 'speech', 'speaker': speaker, 'target': target, 'image': image, 'mood': mood, 'side': side, 'text': markdown((yield from self._parse_text(wake, item['markdown'])))}
-				# }}}
-				if item['action'] == 'wait': # {{{
-					return {'action': 'wait', 'time': (yield from self._parse_time(wake, item['time']))}
-				# }}}
-				if item['action'] == 'font': # {{{
-					return {'action': 'font', 'css': item['css']}
-				# }}}
-				if item['action'] in ('sound', 'music'): # {{{
-					target = None if item['target'] is None else (yield from self._parse_text(wake, item['target']))
-					return {'action': item['action'], 'target': target}
-				# }}}
-				if item['action'] in ('serial', 'parallel'): # {{{
-					actions = []
-					for x in item['actions']:
-						actions.append((yield from build_kinetic(wake, x)))
-					return {'action': item['action'], 'args': item['args'], 'actions': actions}
-				# }}}
-				if item['action'] == 'scene': # {{{
-					args = (yield from self._parse_animation_args(wake, item['args']))
-					image = (yield from self._parse_text(wake, item['image']))
-					mood = (yield from self._parse_text(wake, item['mood']))
-					if image in self.user['moods'] and (mood is None or mood in self.user['moods'][image]):
-						if mood is None and '' in self.user['moods'][image]:
-							mood = ''
-					else:
-						image = None
-						mood = None
-					return {'action': 'scene', 'image': image, 'mood': mood, 'args': args}
-				# }}}
-				# Something else: move, or hide.
-				args = (yield from self._parse_animation_args(wake, item['args']))
-				if item['target'] is None: # {{{
-					target = None
-					mood = None
-					image = None
-				else:
-					target = (yield from self._parse_text(wake, item['target']))
-					mood = (yield from self._parse_text(wake, item['mood']))
-					image, mood = self._find_mood(target, mood)
-				# }}}
-				#print('returning build', item['action'])
-				return {'action': item['action'], 'target': target, 'image': image, 'mood': mood, 'args': args}
-			# }}}
-			actions = []
-			for x in code['kinetic']:
-				#print('building', x)
-				actions.append((yield from build_kinetic(wake, x)))
-			self.user['_pending'].extend(actions)
-			#print('now pending:', self.user['_pending'])
+			# Set images.
+			image, mood = self._find_mood(target, code['mood'])
+			if target in self.user['sprite'] and 'side' in self.user['sprite'][target]:
+				side = self.user['sprite'][target]['side']
+			else:
+				side = None
+			self.user['kinetic'][-1].append({'action': 'speech', 'speaker': speaker, 'target': target, 'image': image, 'mood': mood, 'side': side, 'text': markdown((yield from self._parse_text(wake, code['markdown'])))})
+		# }}}
+		elif code['command'] == 'wait': # {{{
+			self.user['kinetic'][-1].append({'action': 'wait', 'time': (yield from self._parse_time(wake, code['time']))})
+		# }}}
+		elif code['command'] in ('sound', 'music'): # {{{
+			target = None if code['target'] is None else (yield from self._parse_text(wake, code['target']))
+			self.user['kinetic'][-1].append({'action': code['command'], 'target': target})
+		# }}}
+		elif code['command'] == 'scene': # {{{
+			args = (yield from self._parse_animation_args(wake, code['args'], self.user['args'][-1]))
+			image = (yield from self._parse_text(wake, code['image']))
+			mood = (yield from self._parse_text(wake, code['mood']))
+			if image in self.user['moods'] and (mood is None or mood in self.user['moods'][image]):
+				if mood is None and '' in self.user['moods'][image]:
+					mood = ''
+			else:
+				image = None
+				mood = None
+			self.user['kinetic'][-1].append({'action': 'scene', 'image': image, 'mood': mood, 'args': args})
+		# }}}
+		elif code['command'] in ('move', 'hide'): # {{{
+			args = (yield from self._parse_animation_args(wake, code['args'], self.user['args'][-1]))
+			if code['target'] is None:
+				target = None
+				mood = None
+				image = None
+			else:
+				target = (yield from self._parse_text(wake, code['target']))
+				mood = (yield from self._parse_text(wake, code['mood']))
+				image, mood = self._find_mood(target, mood)
+			self.user['kinetic'][-1].append({'action': code['command'], 'target': target, 'image': image, 'mood': mood, 'args': args})
+		# }}}
+		elif code['command'] in ('serial', 'parallel'): # {{{
+			new_list = []
+			self.user['kinetic'][-1].append({'action': code['command'], 'actions': new_list})
+			self.user['kinetic'].append(new_list)
+			new_args = (yield from self._parse_animation_args(wake, code['args'], self.user['args'][-1]))
+			self.user['args'].append(new_args)
+			self.user['run_stack'][-1]['current'] += 1
+			self.user['run_stack'].append({'program': code['actions'], 'current': 0})
+			return False
+		# }}}
+		elif code['command'] == 'option': # {{{
+			self.user['option'].append((yield from self._parse_text(wake, code['option'])))
 		# }}}
 		elif code['command'] == 'question': # {{{
-			if (yield from self._question(wake, code['type'], code['variable'], code['markdown'], code['option'])):
+			options = self.user['option']
+			self.user['option'] = []
+			if (yield from self._question(wake, code['type'], code['variable'], code['markdown'], options)):
 				# Don't increment current command; that happens in answer.
 				return True
 		# }}}
@@ -1435,13 +1448,13 @@ class Connection: # {{{
 		if self.busy:
 			log('attempt to answer while busy')
 			return
-		self._clear_pending()
 		debug(2, '{}:{} answers {}'.format(self.user['name'], self.user['group'], answer))
 		if len(self.user['run_stack']) == 0:
 			# Ignore answer for final "Done" button.
-			debug(1, 'ignoring final Done button')
+			debug(2, 'ignoring final Done button')
 			yield from self._home(wake)
 			return
+		self._clear_pending()
 		if self.user['run_stack'][-1]['current'] >= len(self.user['run_stack'][-1]['program']):
 			debug(1, 'end of stack frame?!')
 			self.busy = True

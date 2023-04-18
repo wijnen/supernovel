@@ -496,7 +496,7 @@ function activate(name, now, extra, fast_forward) { // {{{
 					elements.speaker_image.src = image.url;
 				});
 			}
-			if (action.mood !== null) {
+			if (state.sprite[action.target] !== undefined && action.mood !== null) {
 				get_img(action.image, action.mood, function(image) {
 					var current_sprite = state.sprite[action.target];
 					current_sprite.to.image = image;
