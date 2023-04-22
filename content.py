@@ -330,8 +330,8 @@ def parse_script(script):
 
 				else:
 					assert cmd in ('answer', 'option')
-					ln, line, text = parse_text(lines, ln, line)
-					ostack[-1].append({'command': cmd, 'line': ln, cmd: text})
+					ln, line, text = parse_text(lines, ln, line[r.end():])
+					ostack[-1].append({'command': cmd, 'line': ln, cmd: text.strip()})
 					continue
 			# }}}
 			# Animation. {{{
@@ -366,13 +366,13 @@ def parse_script(script):
 					# TODO
 				# }}}
 				continue
-			r = re.match(r'(\S+)\s*(?:,\s*(\S*)\s*)?:(?:\[(=*)\[)?\s*', line)
+			r = re.match(r'([^\s,]+)\s*(?:,\s*(\S*)\s*)?:(?:\[(=*)\[)?\s*', line)
 			if r is not None:
 				# Group 1: speaker name.
 				# Group 2: mood or None.
 				# Group 3: long string filler ('=' signs only; None if no long string tag).
 				if r.group(3) is None:
-					text = line
+					text = line[r.end():].strip()
 					line = ''
 				else:
 					terminator = r'\]' + r.group(3) + r'\]'

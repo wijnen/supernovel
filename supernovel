@@ -92,11 +92,12 @@ class Lua: # Run Lua code. {{{
 		return
 		yield
 	def run(self, wake, script, allow_ui = True):
+		#log('running %s' % script)
 		self.lua.run(script)
 		return
 		yield
 	def compute(self, wake, expr, as_str):
-		#print('computing: ', expr)
+		#log('computing: %s' % expr)
 		ret = self.lua.run('return ' + expr)
 		if as_str:
 			return str(ret)
@@ -254,6 +255,7 @@ class Content_Connection: # {{{ Class for handling content management.
 		self.may_edit_group = permissions[0][0] & PERM_GROUP
 		self.may_edit_content = permissions[0][0] & PERM_EDIT
 		assert self.may_edit_group or self.may_edit_content
+		self.chapter = -1	# None is in use for global objects.
 	# }}}
 	def get_permissions(self): # {{{
 		wake = (yield)
@@ -309,6 +311,11 @@ class Content_Connection: # {{{ Class for handling content management.
 		wake = (yield)
 		assert self.may_edit_group
 		yield from serverdata.delete('chapter', ('=', 'id', chapterid), wake = wake)
+	def set_chapter(self, chapterid):
+		wake = (yield)
+		assert self.may_edit_content
+		assert chapterid in (yield from self._list_chapters(wake))
+		self.chapter = chapterid
 	# }}}
 	# Access {{{
 	def list_access(self):
@@ -328,29 +335,36 @@ class Content_Connection: # {{{ Class for handling content management.
 	# }}}
 	# Scripts {{{
 	def _list_scripts(self, wake):
+		assert self.chapter >= 0
 		data = (yield from serverdata.select('script', ('id', 'name', 'chapter'), wake = wake))
-		return {d[0]: {'name': d[1], 'chapter': d[2]} for d in data}
+		return {d[0]: {'name': d[1], 'chapter': d[2]} for d in data if d[2] in (None, self.chapter)}
 	def list_scripts(self):
 		wake = (yield)
 		assert self.may_edit_content
 		return (yield from self._list_scripts(wake))
 	def _get_script(self, wake, scriptid):
-		data = (yield from serverdata.select('script', ('script',), ('=', 'id', scriptid), wake = wake))
-		return None if len(data) == 0 else data[0][0]
+		assert self.chapter >= 0
+		data = (yield from serverdata.select('script', ('script', 'chapter'), ('=', 'id', scriptid), wake = wake))
+		return None if len(data) == 0 or data[0][1] not in (None, self.chapter) else data[0][0]
 	def get_script(self, scriptid):
 		wake = (yield)
 		assert self.may_edit_content
 		return (yield from self._get_script(wake, scriptid))
 	def _add_script(self, wake, name, chapter, script):
+		assert self.chapter >= 0
 		return (yield from serverdata.insert('script', {'name': name, 'chapter': chapter, 'script': script}, wake = wake))
-	def add_script(self, name, chapter, script):
+	def add_script(self, name, script):
 		wake = (yield)
 		assert self.may_edit_content
-		new_scriptid = (yield from self._add_script(wake, name, chapter, script))
+		assert self.chapter > 0
+		new_scriptid = (yield from self._add_script(wake, name, self.chapter, script))
 		return (yield from self._update_questions(wake, new_scriptid, script))
-	def update_script(self, scriptid, name, chapter, script):
+	def update_script(self, scriptid, name, script):
 		wake = (yield)
 		assert self.may_edit_content
+		assert self.chapter >= 0
+		data = (yield from serverdata.select('script', ('chapter',), ('=', 'id', scriptid), wake = wake))
+		assert len(data) == 1 and data[0][0] == self.chapter
 		if script is None:
 			yield from serverdata.update('script', {'name': name, 'chapter': chapter}, ('=', 'id', scriptid), wake = wake)
 			return []
@@ -360,11 +374,15 @@ class Content_Connection: # {{{ Class for handling content management.
 	def remove_script(self, scriptid):
 		wake = (yield)
 		assert self.may_edit_content
+		assert self.chapter >= 0
+		data = (yield from serverdata.select('script', ('chapter',), ('=', 'id', scriptid), wake = wake))
+		assert len(data) == 1 and data[0][0] == self.chapter
 		yield from serverdata.delete('script', ('=', 'id', scriptid), wake = wake)
 		yield from serverdata.delete('question', ('=', 'script', scriptid), wake = wake)
 	# }}}
 	# Questions {{{
 	def _update_questions(self, wake, scriptid, script):
+		assert self.chapter >= 0
 		parsed, errors, questions = content.parse_script(script)
 		#print('questions', questions)
 		yield from serverdata.delete('question', ('=', 'script', scriptid), wake = wake)
@@ -374,42 +392,64 @@ class Content_Connection: # {{{ Class for handling content management.
 	def list_questions(self):
 		wake = (yield)
 		assert self.may_edit_content
-		data = (yield from serverdata.select('question', ('id', 'script', 'type', 'description'), wake = wake))
-		return {('%d:%s' % (d[1], d[0])): {'type': d[2], 'description': d[3]} for d in data}
+		assert self.chapter >= 0
+		scripts = (yield from self._list_scripts(wake))
+		ret = {}
+		print('scripts', scripts)
+		for s in scripts:
+			data = (yield from serverdata.select('question', ('id', 'type', 'description'), ('=', 'script', s), wake = wake))
+			print('questions', repr(data))
+			ret.update({('%d:%s' % (s, d[0])): {'type': d[1], 'description': d[2]} for d in data})
+		return ret
 	# }}}
 	# Sprites {{{
 	def _list_sprites(self, wake):
-		data = (yield from serverdata.select('sprite', ('tag', 'name', 'chapter', 'id'), wake = wake))
+		assert self.chapter >= 0
+		data = (yield from serverdata.select('sprite', ('tag', 'name', 'chapter', 'id'), ('=', 'chapter', self.chapter), wake = wake))
 		return {d[3]: {'tag': d[0], 'name': d[1], 'chapter': d[2]} for d in data}
 	def list_sprites(self):
 		wake = (yield)
 		assert self.may_edit_content
 		return (yield from self._list_sprites(wake))
-	def _add_sprite(self, wake, tag, name, chapter):
-		return (yield from serverdata.insert('sprite', {'tag': tag, 'name': name, 'chapter': chapter}, wake = wake))
-	def add_sprite(self, tag, name, chapter):
+	def _add_sprite(self, wake, tag, name):
+		assert self.chapter >= 0
+		return (yield from serverdata.insert('sprite', {'tag': tag, 'name': name, 'chapter': self.chapter}, wake = wake))
+	def add_sprite(self, tag, name):
 		wake = (yield)
 		assert self.may_edit_content
-		return (yield from self._add_sprite(wake, tag, name, chapter))
-	def update_sprite(self, spriteid, tag, name, chapter):
+		return (yield from self._add_sprite(wake, tag, name))
+	def update_sprite(self, spriteid, tag, name):
 		wake = (yield)
 		assert self.may_edit_content
-		yield from serverdata.update('sprite', {'tag': tag, 'name': name, 'chapter': chapter}, ('=', 'id', spriteid), wake = wake)
+		assert self.chapter >= 0
+		data = (yield from serverdata.select('sprite', ('chapter',), ('=', 'id', spriteid), wake = wake))
+		assert len(data) == 1 and data[0][0] == self.chapter
+		yield from serverdata.update('sprite', {'tag': tag, 'name': name}, ('=', 'id', spriteid), wake = wake)
 	def remove_sprite(self, spriteid):
 		wake = (yield)
 		assert self.may_edit_content
+		assert self.chapter >= 0
+		data = (yield from serverdata.select('sprite', ('chapter',), ('=', 'id', spriteid), wake = wake))
+		assert len(data) == 1 and data[0][0] == self.chapter
 		yield from serverdata.delete('sprite', ('=', 'id', spriteid), wake = wake)
 	# }}}
 	# Images {{{
 	def _list_images(self, wake):
+		assert self.chapter >= 0
+		sprites = (yield from self._list_sprites(wake))
 		data = (yield from serverdata.select('image', ('id', 'sprite', 'mood', 'width', 'height', 'hotx', 'hoty'), wake = wake))
-		return {d[0]: {'sprite': d[1], 'mood': d[2], 'size': (d[3], d[4]), 'hotspot': (d[5], d[6])} for d in data}
+		return {d[0]: {'sprite': d[1], 'mood': d[2], 'size': (d[3], d[4]), 'hotspot': (d[5], d[6])} for d in data if d[1] in sprites}
 	def list_images(self):
 		wake = (yield)
 		assert self.may_edit_content
 		return (yield from self._list_images(wake))
 	def _get_image(self, wake, imageid):
+		assert self.chapter >= 0
+		sprites = (yield from self._list_sprites(wake))
 		data = (yield from serverdata.select('image', ('url', 'sprite', 'mood', 'width', 'height', 'hotx', 'hoty'), ('=', 'id', imageid), wake = wake))
+		if len(data) == 0:
+			return None
+		assert data[0][1] in sprites
 		return None if len(data) == 0 else {'url': data[0][0], 'sprite': data[0][1], 'mood': data[0][2], 'size': [data[0][3], data[0][4]], 'hotspot': [data[0][5], data[0][6]]}
 	def get_image(self, imageid):
 		wake = (yield)
@@ -417,6 +457,9 @@ class Content_Connection: # {{{ Class for handling content management.
 		return (yield from self._get_image(wake, imageid))
 	def _add_image(self, wake, sprite, mood, url, size, hotspot):
 		# TODO: load image and detect size.
+		assert self.chapter >= 0
+		sprites = (yield from self._list_sprites(wake))
+		assert sprite in sprites
 		return (yield from serverdata.insert('image', {'sprite': sprite, 'mood': mood, 'url': url, 'width': size[0], 'height': size[1], 'hotx': hotspot[0], 'hoty': hotspot[1]}, wake = wake))
 	def add_image(self, sprite, mood, url, size, hotspot):
 		wake = (yield)
@@ -425,7 +468,12 @@ class Content_Connection: # {{{ Class for handling content management.
 	def update_image(self, imageid, sprite, mood, url, size, hotspot):
 		wake = (yield)
 		assert self.may_edit_content
+		assert self.chapter >= 0
 		# TODO: load image and detect size.
+		sprites = (yield from self._list_sprites(wake))
+		assert sprite in sprites
+		data = (yield from serverdata.select('image', ('sprite',), ('=', 'id', imageid), wake = wake))
+		assert len(data) == 1 and data[0][0] in sprites
 		if url is None:
 			yield from serverdata.update('image', {'sprite': sprite, 'mood': mood, 'width': size[0], 'height': size[1], 'hotx': hotspot[0], 'hoty': hotspot[1]}, ('=', 'id', imageid), wake = wake)
 		else:
@@ -433,45 +481,55 @@ class Content_Connection: # {{{ Class for handling content management.
 	def remove_image(self, imageid):
 		wake = (yield)
 		assert self.may_edit_content
+		assert self.chapter >= 0
+		sprites = (yield from self._list_sprites(wake))
+		data = (yield from serverdata.select('image', ('sprite',), ('=', 'id', imageid), wake = wake))
+		assert len(data) == 1 and data[0][0] in sprites
 		yield from serverdata.delete('image', ('=', 'id', imageid), wake = wake)
 	# }}}
 	# Audio {{{
-	def _list_audio(self, wake, chapter = None):
-		if chapter is None:
-			data = (yield from serverdata.select('audio', ('id', 'name', 'chapter', 'duration'), wake = wake))
-			return {d[0]: {'name': d[1], 'chapter': d[2], 'duration': d[3]} for d in data}
-		else:
-			data = (yield from serverdata.select('audio', ('id', 'name', 'duration'), ('=', 'chapter', chapter), wake = wake))
-			return {d[0]: {'name': d[1], 'duration': d[2]} for d in data}
+	def _list_audio(self, wake):
+		assert self.chapter >= 0
+		data = (yield from serverdata.select('audio', ('id', 'name', 'chapter', 'duration'), wake = wake))
+		return {d[0]: {'name': d[1], 'chapter': d[2], 'duration': d[3]} for d in data if d[2] in (None, self.chapter)}
 	def list_audio(self):
+		assert self.chapter >= 0
 		wake = (yield)
 		assert self.may_edit_content
 		return (yield from self._list_audio(wake))
 	def _get_audio(self, wake, audioid):
-		data = (yield from serverdata.select('audio', ('url',), ('=', 'id', audioid), wake = wake))
-		return None if len(data) == 0 else data[0][0]
+		assert self.chapter >= 0
+		data = (yield from serverdata.select('audio', ('url', 'chapter'), ('=', 'id', audioid), wake = wake))
+		return None if len(data) == 0 or data[0][1] not in (None, self.chapter) else data[0][0]
 	def get_audio(self, audioid):
 		wake = (yield)
 		assert self.may_edit_content
 		return (yield from self._get_audio(wake, audioid))
-	def _add_audio(self, wake, name, chapter, url, duration):
+	def _add_audio(self, wake, name, url, duration):
+		assert self.chapter >= 0
 		# TODO: load sound and detect duration.
-		return (yield from serverdata.insert('audio', {'name': name, 'chapter': chapter, 'url': url, 'duration': duration}, wake = wake))
-	def add_audio(self, name, chapter, url, duration):
+		return (yield from serverdata.insert('audio', {'name': name, 'chapter': self.chapter, 'url': url, 'duration': duration}, wake = wake))
+	def add_audio(self, name, url, duration):
 		wake = (yield)
 		assert self.may_edit_content
-		return (yield from self._add_audio(wake, name, chapter, url, duration))
-	def update_audio(self, audioid, name, chapter, url, duration):
+		return (yield from self._add_audio(wake, name, url, duration))
+	def update_audio(self, audioid, name, url, duration):
 		wake = (yield)
 		assert self.may_edit_content
+		assert self.chapter >= 0
 		# TODO: load sound and detect duration.
+		data = (yield from serverdata.select('audio', ('chapter',), ('and', ('=', 'id', audioid), ('=', 'chapter', self.chapter)), wake = wake))
+		assert len(data) == 1
 		if url is None:
-			yield from serverdata.update('audio', {'name': name, 'chapter': chapter, 'duration': duration}, ('=', 'id', audioid), wake = wake)
+			yield from serverdata.update('audio', {'name': name, 'duration': duration}, ('=', 'id', audioid), wake = wake)
 		else:
-			yield from serverdata.update('audio', {'name': name, 'chapter': chapter, 'url': url, 'duration': duration}, ('=', 'id', audioid), wake = wake)
+			yield from serverdata.update('audio', {'name': name, 'url': url, 'duration': duration}, ('=', 'id', audioid), wake = wake)
 	def remove_audio(self, audioid):
 		wake = (yield)
 		assert self.may_edit_content
+		assert self.chapter >= 0
+		data = (yield from serverdata.select('audio', ('chapter',), ('and', ('=', 'id', audioid), ('=', 'chapter', self.chapter)), wake = wake))
+		assert len(data) == 1
 		yield from serverdata.delete('audio', ('=', 'id', audioid), wake = wake)
 	# }}}
 	def import_chapter(self, zipdata): # {{{
@@ -625,7 +683,7 @@ class Content_Connection: # {{{ Class for handling content management.
 				with z.open('%s/sprite/%s/%s.txt' % (chaptername, sprite['name'], mood), 'w') as f:
 					f.write(url)
 				info += b'mood %s size %f %f hotspot %f %f\n' % (mood.encode('utf-8'), images[spriteid][mood]['size'][0], images[spriteid][mood]['size'][1], images[spriteid][mood]['hotspot'][0], images[spriteid][mood]['hotspot'][1])
-		for audioid, metadata in (yield from self._list_audio(wake, chapterid)).items():
+		for audioid, metadata in (yield from self._list_audio(wake)).items():
 			data = (yield from self._get_audio(wake, audioid)).encode('utf-8')
 			if data is None:
 				print('ignoring invalid audio id %s' % audioid, file = sys.stderr)
@@ -1078,6 +1136,7 @@ class Connection: # {{{
 		self.user['moods'] = {}
 		self.user['sprite'] = {}
 		self.user['question'] = None
+		self.user['option'] = []
 		# Set up self.user['moods']. {{{
 		global_sprites = (yield from serverdata.select('sprite', ('id', 'tag', 'name'), ('=', 'chapter', None), wake = wake))
 		local_sprites = (yield from serverdata.select('sprite', ('id', 'tag', 'name'), ('=', 'chapter', self.user['chapter']), wake = wake))
@@ -1352,9 +1411,7 @@ class Connection: # {{{
 			self.user['option'].append((yield from self._parse_text(wake, code['option'])))
 		# }}}
 		elif code['command'] == 'question': # {{{
-			options = self.user['option']
-			self.user['option'] = []
-			if (yield from self._question(wake, code['type'], code['variable'], code['markdown'], options)):
+			if (yield from self._question(wake, code['type'], code['variable'], code['markdown'], self.user['option'])):
 				# Don't increment current command; that happens in answer.
 				return True
 		# }}}
@@ -1496,15 +1553,15 @@ class Connection: # {{{
 		raw = answer
 		debug(1, 'raw: %s store %d' % (repr(raw), store))
 		if current['type'] == 'choice':
-			if isinstance(answer, int) and 1 <= answer <= len(current['option']):
-				answer = {'index': answer, 'text': current['option'][answer - 1]}
+			if isinstance(answer, int) and 1 <= answer <= len(self.user['option']):
+				answer = {'index': answer, 'text': self.user['option'][answer - 1]}
 			else:
 				answer = {}
-			if len(current['option']) <= 1:
+			if len(self.user['option']) <= 1:
 				store = False
 		elif current['type'] == 'longchoice':
-			if isinstance(answer[0], int) and 1 <= answer[0] <= len(current['option']):
-				answer = {'index': answer[0], 'text': current['option'][answer[0] - 1], 'long': str(answer[1]).strip()}
+			if isinstance(answer[0], int) and 1 <= answer[0] <= len(self.user['option']):
+				answer = {'index': answer[0], 'text': self.user['option'][answer[0] - 1], 'long': str(answer[1]).strip()}
 			else:
 				# Leave answer string as is (but force str); this only happens when users are messing with the js.
 				debug(2, 'unparsable longchoice answer: {}'.format(answer))
@@ -1534,6 +1591,7 @@ class Connection: # {{{
 		debug(1, 'answer: %s store %d' % (repr(answer), store))
 		yield from self._store_answer(wake, current['variable'], answer, store)
 		self.user['run_stack'][-1]['current'] += 1
+		self.user['option'] = []
 		self.busy = True
 		try:
 			yield from self._run(wake)
