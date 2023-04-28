@@ -366,10 +366,10 @@ class Content_Connection: # {{{ Class for handling content management.
 		data = (yield from serverdata.select('script', ('chapter',), ('=', 'id', scriptid), wake = wake))
 		assert len(data) == 1 and data[0][0] == self.chapter
 		if script is None:
-			yield from serverdata.update('script', {'name': name, 'chapter': chapter}, ('=', 'id', scriptid), wake = wake)
+			yield from serverdata.update('script', {'name': name, 'chapter': self.chapter}, ('=', 'id', scriptid), wake = wake)
 			return []
 		else:
-			yield from serverdata.update('script', {'name': name, 'chapter': chapter, 'script': script}, ('=', 'id', scriptid), wake = wake)
+			yield from serverdata.update('script', {'name': name, 'chapter': self.chapter, 'script': script}, ('=', 'id', scriptid), wake = wake)
 			return (yield from self._update_questions(wake, scriptid, script))
 	def remove_script(self, scriptid):
 		wake = (yield)

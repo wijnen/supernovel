@@ -487,7 +487,7 @@ function AudioRow(id, data) { // {{{
 			var reader = new FileReader();
 			reader.AddEvent('load', function() {
 				// Send the requested file.
-				server.call('update_audio', [], {audioid: id, duration: Number(ret.duration.value), url: reader.result}, function() {
+				server.call('update_audio', [], {audioid: id, name: ret.audioname.value, duration: Number(ret.duration.value), url: reader.result}, function() {
 					// Continue with next file.
 					send(files, idx + 1);
 				});
