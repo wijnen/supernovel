@@ -1194,7 +1194,7 @@ class Connection: # {{{
 
 			# These can be returned.
 			'video': lambda tag: {'cmd': 'video', 'video': tag},
-			'question': lambda tag, type, text, options = None: {'cmd': 'question', 'tag': tag, 'type': type, 'text': text, 'options': options},
+			'question': lambda type, tag, text, options = None: {'cmd': 'question', 'tag': tag, 'type': type, 'text': text, 'options': options},
 			'continue': lambda: {'cmd': 'continue'},
 			'break': lambda: {'cmd': 'break'},
 		}
