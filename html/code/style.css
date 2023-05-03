@@ -53,25 +53,28 @@ button.not(#navbutton) {
 #speechbox {
 	font: 130% serif;
 	display: none;
-	position: fixed;
-	left: 3vw;
-	right: 3vw;
-	bottom: 1vh;
-	height: 20vh;
+	position: absolute;
+	left: 3%;
+	right: 3%;
+	top: 80%;
+	bottom: 1%;
 	box-sizing: border-box;
 	border: 2px black solid;
 	border-radius: 1em;
 	background-color: rgba(255, 255, 255, 0.9);
 	z-index: 2;
+	padding: 2ex 1ex 1ex 1ex;
 }
 
 #speaker {
-	position: relative;
-	left: 2em;
-	top: -.75ex;
+	position: absolute;
+	left: 2ex;
+	top: -26.3%; /* 5/.19, or 5% of game div. */
+	/*bottom: calc(100% - 1ex);*/
+	box-sizing: border-box;
 	border: 2px black solid;
 	border-radius: 1ex;
-	padding: 1ex 1ex;
+	padding: .5ex 2ex;
 	background: white;
 }
 
@@ -81,9 +84,6 @@ button.not(#navbutton) {
 	padding: 1ex 1ex
 }
 
-#speech {
-	padding: 1ex 1ex;
-}
 #speech p {
 	margin: 0px 0px 0px 0px;
 }
@@ -132,7 +132,7 @@ ul {
 
 #game {
 	position: fixed;
-	overflow: hidden;
+	overflow: scroll;
 }
 
 #bg {

@@ -11,18 +11,24 @@
 		<link rel='stylesheet' href='code/style.css'/>
 	</head>
 	<body onkeypress='keypress(event)'>
-		<div id='userdata'></div>
+		<!-- Audio controls -->
 		<audio id='music' loop='loop'></audio>
 		<audio id='sound'></audio>
+
+		<!-- Error message, shown when connection to server is lost. -->
 		<div id='error'>
 			<h1 class='translate'>Please Wait</h1>
 			<p class='translate'>The connection with the server is attempted.</p>
 			<p class='translate'>If this message does not disappear, there is a problem. There may be messages in the debugging console that identify the problem.</p>
 		</div>
+
+		<!-- Script selection screen. -->
 		<div id='contents'>
 			<div id='logout'>Logged in as <span id='login'></span> <button type='button' onclick='log_out()' class='translate'>Log out</button></div>
 			<ul id='scripts'></ul>
 		</div>
+
+		<!-- Game screen. -->
 		<div id='game'>
 			<img id='bg'/>
 			<div id='videodiv'>
@@ -39,7 +45,7 @@
 			</div>
 			<div id='spritebox'></div>
 			<div id='speechbox'>
-				<span id='speaker'></span><br/>
+				<div id='speaker'></div>
 				<img id='speaker_image'/>
 				<div id='speech'></div>
 			</div>
