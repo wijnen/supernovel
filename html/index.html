@@ -30,7 +30,6 @@
 
 		<!-- Game screen. -->
 		<div id='game'>
-			<img id='bg'/>
 			<div id='videodiv'>
 				<video id='video' preload='auto' controls></video><br/>
 				<span class='translate'>Speed</span>: <input type='number' id='speed' onchange='speed()' value='100'/>%<br/>
@@ -43,7 +42,9 @@
 				<button type='button' class='navbutton' id='navnext' onclick='next_kinetic()'>&#x2192;</button>
 				<button type='button' class='navbutton' id='navlast' onclick='next_kinetic("finish")'>&#x21e5;</button>
 			</div>
-			<div id='spritebox'></div>
+			<div id='spritebox'>
+				<img id='bg'/>
+			</div>
 			<div id='speechbox'>
 				<div id='speaker'></div>
 				<img id='speaker_image'/>

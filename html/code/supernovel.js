@@ -788,7 +788,7 @@ var Connection = { // {{{
 		pending_music = music;
 		run_story(story, function() { console.info('unlock'); server.unlock(); });
 	}, // }}}
-	question: function(story, text, type, options, last_answer) { // {{{ Run a story, followed by a question.
+	question: function(story, text, type, options) { // {{{ Run a story, followed by a question.
 		console.info('question', text, type, story);
 		run_story(story, function() {
 			if (state.show_question)
@@ -841,14 +841,6 @@ var Connection = { // {{{
 						else
 							alert(_('Please select your answer'));
 					});
-					if (last_answer != null) {
-						div.AddElement('hr');
-						var button = div.AddElement('button', 'choicebutton').AddText(_('Repeat last answer') + ': ' + last_answer[1] + ': ' + options[last_answer[0] - 1]);
-						button.type = 'button';
-						button.AddEvent('click', function() {
-							server.call('answer', [last_answer]);
-						});
-					}
 					l.focus();
 					return;
 				case 'longshort':
@@ -876,14 +868,6 @@ var Connection = { // {{{
 						button.value = o;
 						button.AddEvent('click', function() {
 							server.call('answer', [Number(this.value) + 1]);
-						});
-					}
-					if (last_answer != null) {
-						div.AddElement('hr');
-						var button = div.AddElement('button', 'choicebutton').AddText(_('Repeat last answer') + ': ' + options[last_answer - 1]);
-						button.type = 'button';
-						button.AddEvent('click', function() {
-							server.call('answer', [last_answer]);
 						});
 					}
 					return;
@@ -918,11 +902,6 @@ var Connection = { // {{{
 			form.AddElement('button').AddText(button_text).AddEvent('click', function() {
 				send_answer();
 			}).type = 'button';
-			if (last_answer != null) {
-				form.AddElement('button').AddText(_('Repeat last answer') + ': ' + last_answer).AddEvent('click', function() {
-					server.call('answer', [last_answer]);
-				}).type = 'button';
-			}
 			if (rich !== null)
 				richinput(rich);
 		});
@@ -962,7 +941,7 @@ function init() { // {{{
 		elements[varnames[i]] = document.getElementById(varnames[i]);
 
 	// Handle clicks on screen for progression.
-	spritebox.AddEvent('click', function(event) {
+	window.AddEvent('click', function(event) {
 		if (pending_music !== null) {
 			music.src = pending_music;
 			pending_music = null;
@@ -1114,31 +1093,6 @@ function video_done() { // {{{
 	// Returns undefined.
 	video.pause();
 	server.call('video_done', []);
-} // }}}
-// }}}
-
-// Sprites. None of this is currenly called. {{{
-function new_sprite(tag) { // {{{
-	//console.info('new sprite', tag);
-	kinetic_sprites[tag] = spritebox.AddElement('img', 'sprite');
-	kinetic_sprites[tag].props = {};
-	for (var p in defaults) {
-		kinetic_sprites[tag].props[p] = defaults[p];
-	}
-	kinetic_sprites[tag].AddEvent('load', function() {
-		kinetic_sprites[tag].style.marginLeft = '-' + (kinetic_sprites[tag].width / 2) + 'px';
-	});
-} // }}}
-
-function kill_sprite(tag) { // {{{
-	//console.info('killing', tag, kinetic_sprites);
-	spritebox.removeChild(kinetic_sprites[tag]);
-	delete kinetic_sprites[tag];
-} // }}}
-
-function store_sprite(tag) { // {{{
-	var s = kinetic_sprites[tag].style;
-	return [kinetic_sprites[tag].src, s.left, s.bottom];
 } // }}}
 // }}}
 

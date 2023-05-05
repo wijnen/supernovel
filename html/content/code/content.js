@@ -600,7 +600,7 @@ function update_ui() { // {{{
 		var td = tr.AddElement('td');
 		td.colSpan = 6;
 		var button = td.AddElement('button').AddText('Create Script');
-		button.AddEvent('click', function() { server.call('add_script', ['New', 0, ''], {}, connected); });
+		button.AddEvent('click', function() { server.call('add_script', ['New', ''], {}, connected); });
 		// }}}
 		// Questions. {{{
 		table = document.getElementById('question').ClearAll();

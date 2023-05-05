@@ -93,8 +93,7 @@ class Lua: # Run Lua code. {{{
 		yield
 	def run(self, wake, script, allow_ui = True):
 		#log('running %s' % script)
-		self.lua.run(script)
-		return
+		return self.lua.run(script)
 		yield
 	def compute(self, wake, expr, as_str):
 		#log('computing: %s' % expr)
@@ -835,11 +834,11 @@ class Connection: # {{{
 		'''Set style for last answer. This should be called with "yield from".'''
 		if wake is None:
 			wake = (yield)
-		if self.user['question'] is None:
+		if self.user['answered'] is None:
 			debug(1, 'answer style given before a question was answered')
 			return
 		style = (yield from self._parse_text(wake, style))
-		yield from self.userdata.update('answer', {'style': style}, ('and', ('=', 'question', self.user['question']), ('=', 'script', self.user['scripttag'])), wake = wake)
+		yield from self.userdata.update('answer', {'style': style}, ('and', ('=', 'question', self.user['answered']), ('=', 'script', self.user['scripttag'])), wake = wake)
 		yield from refresh_admins(wake)
 	# }}}
 	def _sprite(self, tag, id, name, mood = ''): # {{{
@@ -1065,9 +1064,10 @@ class Connection: # {{{
 	# }}}
 	def _continue_break(self, cmd): # {{{
 		while self.user['run_stack'][-1]['current'] >= len(self.user['run_stack'][-1]['program']) or self.user['run_stack'][-1]['program'][self.user['run_stack'][-1]['current']]['command'] != 'while':
+			if self.user['run_stack'][-1]['kinetic']:
+				self.user['kinetic'].pop()
+				self.user['args'].pop()
 			self.user['run_stack'].pop()
-			self.user['kinetic'].pop()
-			self.user['args'].pop()
 		if cmd == 'break':
 			self.user['run_stack'][-1]['current'] += 1
 	# }}}
@@ -1122,7 +1122,7 @@ class Connection: # {{{
 			else:
 				errors = ''
 			self.remote.error.event(errors)
-		self.user['run_stack'] = [{'program': self.user['program'], 'current': 0}]
+		self.user['run_stack'] = [{'program': self.user['program'], 'current': 0, 'kinetic': False}]	# Set kinetic to False so it isn't popped at end of script.
 		self.user['kinetic'] = [[]]
 		self.user['args'] = [{}]
 		# Sprites are stored in two steps.
@@ -1136,6 +1136,7 @@ class Connection: # {{{
 		self.user['moods'] = {}
 		self.user['sprite'] = {}
 		self.user['question'] = None
+		self.user['answered'] = None
 		self.user['option'] = []
 		# Set up self.user['moods']. {{{
 		global_sprites = (yield from serverdata.select('sprite', ('id', 'tag', 'name'), ('=', 'chapter', None), wake = wake))
@@ -1194,7 +1195,7 @@ class Connection: # {{{
 
 			# These can be returned.
 			'video': lambda tag: {'cmd': 'video', 'video': tag},
-			'question': lambda type, tag, text, options = None: {'cmd': 'question', 'tag': tag, 'type': type, 'text': text, 'options': options},
+			'question': lambda type, tag, text, options = None: {'cmd': 'question', 'tag': tag, 'type': type, 'text': text, 'option': options},
 			'continue': lambda: {'cmd': 'continue'},
 			'break': lambda: {'cmd': 'break'},
 		}
@@ -1209,25 +1210,18 @@ class Connection: # {{{
 				traceback.print_exc()
 		yield from self._run(wake)
 	# }}}
-	def _question(self, wake, qtype, variable, markdown, options): # {{{
+	def _question(self, wake, qtype, tag, text, options): # {{{
 		# Handle hidden type differently (don't inform player).
 		if qtype == 'hidden':
-			yield from self._store_answer(wake, variable, (yield from self._safe_eval(wake, markdown, as_str = True)))
+			yield from self._store_answer(wake, tag, (yield from self._safe_eval(wake, text, as_str = True)))
 			return False
-
-		# Find last answer.
-		answers = (yield from self.userdata.select('answer', ('answer',), ('and', ('=', 'script', self.user['scripttag']), ('=', 'question', variable)), wake = wake))
-		if len(answers) == 0:
-			last_answer = None
-		else:
-			last_answer = json.loads(answers[-1][0])
 
 		# Modify type to make it easier for brower code.
 		if qtype == 'unit':
 			qtype = 'short'
 		if qtype == 'longunit':
 			qtype = 'longshort'
-		qtext = (yield from self._parse_text(wake, markdown))
+		qtext = (yield from self._parse_text(wake, text))
 
 		# Parse options.
 		parsed_options = []
@@ -1237,8 +1231,11 @@ class Connection: # {{{
 
 		# Send question to player.
 		if len(self.user['kinetic']) != 1:
-			log('Error: question sent while kinetic stack is not a single level')
-		self.remote.question.event(self.user['kinetic'][0], qtext, qtype, parsed_options, last_answer)
+			log('Error: question sent while kinetic stack is not a single level: {}'.format(self.user['kinetic']))
+		self.remote.question.event(self.user['kinetic'][0], qtext, qtype, parsed_options)
+
+		# Prepare for answer.
+		self.user['question'] = {'type': qtype, 'tag': tag}
 
 		return True
 	# }}}
@@ -1264,18 +1261,21 @@ class Connection: # {{{
 			if watchdog > 1000:
 				debug(1, 'hanging script detected: {}; killing it'.format(self.user['chapter']))
 				self.remote.error.event(['Script stopped working and was killed.'])
-				self.user['run_stack'] = [{'program': self.user['program'], 'current': len(self.user['program'])}]
+				self.user['run_stack'] = [{'program': self.user['program'], 'current': len(self.user['program']), 'kinetic': False}]
+				self.user['kinetic'] = [[]]
 				yield from refresh_admins(wake)
 				return
 			# Pop off stack levels until there's an instruction.
 			while len(self.user['run_stack'][-1]['program']) <= self.user['run_stack'][-1]['current']:
+				kinetic = self.user['kinetic'][-1]
+				if self.user['run_stack'][-1]['kinetic']:
+					self.user['kinetic'].pop()
+					self.user['args'].pop()
 				self.user['run_stack'].pop()
-				kinetic = self.user['kinetic'].pop()
-				self.user['args'].pop()
 				#print('pop', self.user['run_stack'])
 				if len(self.user['run_stack']) == 0:
 					# Send final "question".
-					if len(self.user['kinetic']) != 0:
+					if len(self.user['kinetic']) != 1:
 						log('Error: script ends while kinetic stack is not empty')
 					self.remote.question.event(kinetic, '', 'choice', ['Done'])
 					yield from refresh_admins(wake)
@@ -1297,26 +1297,20 @@ class Connection: # {{{
 			self.user['run_stack'][-1]['current'] += 1
 			for expr, target in code['code']:
 				if expr is None or (yield from self._safe_eval(wake, expr, as_str = False)):
-					self.user['run_stack'].append({'program': target, 'current': 0})
-					self.user['kinetic'].append(self.user['kinetic'][-1])
-					self.user['args'].append(self.user['args'][-1])
+					self.user['run_stack'].append({'program': target, 'current': 0, 'kinetic': False})
 					break
 			return False
 		# }}}
 		elif code['command'] == 'while': # {{{
 			# Don't increment instruction pointer, so the loop restarts.
 			if (yield from self._safe_eval(wake, code['test'], as_str = False)):
-				self.user['run_stack'].append({'program': code['code'], 'current': 0})
-				self.user['kinetic'].append(self.user['kinetic'][-1])
-				self.user['args'].append(self.user['args'][-1])
+				self.user['run_stack'].append({'program': code['code'], 'current': 0, 'kinetic': False})
 			else:
 				# exit the while loop.
 				self.user['run_stack'][-1]['current'] += 1
 				# handle else clause, if present.
 				if code['else'] is not None:
-					self.user['run_stack'].append({'program': code['else'], 'current': 0})
-					self.user['kinetic'].append(self.user['kinetic'][-1])
-					self.user['args'].append(self.user['args'][-1])
+					self.user['run_stack'].append({'program': code['else'], 'current': 0, 'kinetic': False})
 			return False
 		# }}}
 		elif code['command'] in ('continue', 'break'): # {{{
@@ -1331,14 +1325,18 @@ class Connection: # {{{
 				traceback.print_exc()
 				self.remote.error.event(code['code'])
 				cmd = None
-			if isinstance(cmd, dict):
+			log('code return %s' % repr(cmd))
+			if isinstance(cmd, dict) and 'cmd' in cmd:
 				if cmd['cmd'] == 'video':
 					if len(self.user['kinetic']) != 1:
 						log('Error: video requested (from Lua) while kinetic stack is not a single level')
 					self.remote.video.event(self.user['kinetic'][0], cmd['video'])
 					return True
 				elif cmd['cmd'] == 'question':
-					if (yield from self._question(wake, cmd['type'], cmd['variable'], code['markdown'], code['option'])):
+					if any(x not in cmd for x in ('type', 'tag', 'text', 'option')):
+						log('Error: invalid question returned from Lua code')
+						return False
+					if (yield from self._question(wake, cmd['type'], cmd['tag'], cmd['text'], cmd['option'])):
 						return True
 					# Fall through: increment command pointer.
 				elif cmd['cmd'] in ('continue', 'break'):
@@ -1404,14 +1402,15 @@ class Connection: # {{{
 			new_args = (yield from self._parse_animation_args(wake, code['args'], self.user['args'][-1]))
 			self.user['args'].append(new_args)
 			self.user['run_stack'][-1]['current'] += 1
-			self.user['run_stack'].append({'program': code['actions'], 'current': 0})
+			self.user['run_stack'].append({'program': code['actions'], 'current': 0, 'kinetic': True})
 			return False
 		# }}}
 		elif code['command'] == 'option': # {{{
 			self.user['option'].append((yield from self._parse_text(wake, code['option'])))
 		# }}}
 		elif code['command'] == 'question': # {{{
-			if (yield from self._question(wake, code['type'], code['variable'], code['markdown'], self.user['option'])):
+			self.user['question'] = code
+			if (yield from self._question(wake, code['type'], code['tag'], code['text'], self.user['option'])):
 				# Don't increment current command; that happens in answer.
 				return True
 		# }}}
@@ -1431,9 +1430,9 @@ class Connection: # {{{
 		yield from (self.user['environment'].set(wake, question, answer))
 		if store:
 			yield from self.userdata.insert('answer', {'script': self.user['scripttag'], 'question': question, 'answer': json.dumps(answer)}, wake = wake)
-			self.user['question'] = question
+			self.user['answered'] = question
 		else:
-			self.user['question'] = None
+			self.user['answered'] = None
 	# }}}
 	# }}}
 	def get_sprite_image(self, sprite_name, sprite_mood): # {{{
@@ -1520,11 +1519,11 @@ class Connection: # {{{
 			finally:
 				self.busy = False
 			return
-		current = self.user['run_stack'][-1]['program'][self.user['run_stack'][-1]['current']]
-		if current['type'] not in ('short', 'long', 'choice', 'unit', 'longshort', 'longunit', 'longchoice'):
+		current = self.user['question']
+		if current is None or current['type'] not in ('short', 'long', 'choice', 'unit', 'longshort', 'longunit', 'longchoice'):
 			debug(1, 'answer given by {}:{} for non-question: {}'.format(self.remote.socket.remote[0], self.remote.socket.remote[1], current))
 			return
-		store = not current['variable'].startswith('_')
+		store = not current['tag'].startswith('_')
 		def parse_unit(src): # {{{
 			r = re.match(r'\s*(?:(\S+)\s*=\s*)?([+-]?[0-9]*(?:[.,]\d*)?)(?:·10([⁻⁺]?[⁰¹²³⁴⁵⁶⁷⁸⁹]+))?\s*(\S*)\s*$', src)
 			# groups:
@@ -1589,7 +1588,7 @@ class Connection: # {{{
 		answer['raw'] = raw
 		answer['style'] = []
 		debug(1, 'answer: %s store %d' % (repr(answer), store))
-		yield from self._store_answer(wake, current['variable'], answer, store)
+		yield from self._store_answer(wake, current['tag'], answer, store)
 		self.user['run_stack'][-1]['current'] += 1
 		self.user['option'] = []
 		self.busy = True

@@ -164,13 +164,16 @@ def parse_long_string(terminator, lines, ln, line):
 	# {{{
 	ret = ''
 	start_ln = ln
-	if line.startswith('\n'):
-		line = line[1:]
+	if line == '':
+		# Initial newline should be dropped.
+		line = lines[ln]
+		ln += 1
 	while True:
 		r = re.search(terminator, line)
 		if r is not None:
-			return ln, line[r.end():].lstrip(), ret + line[:r.start()]
-		ret += line
+			# Separate lines with newline, but cut off the initial.
+			return ln, line[r.end():].lstrip(), (ret + '\n' + line[:r.start()])[1:]
+		ret += '\n' + line
 		if ln >= len(lines):
 			parse_error(start_ln, 'unexpected end of file looking for %s' % terminator)
 			return ln, '', ret
@@ -324,7 +327,7 @@ def parse_script(script):
 						break
 					ln, line, tag = parse_word(lines, ln, line)
 					ln, line, text = parse_text(lines, ln, line)
-					ostack[-1].append({'command': 'question', 'type': t, 'variable': tag, 'markdown': text, 'line': src_ln})
+					ostack[-1].append({'command': 'question', 'type': t, 'tag': tag, 'text': text, 'line': src_ln})
 					question.append({'id': tag, 'type': t, 'description': text})
 					continue
 
