@@ -1222,7 +1222,7 @@ class Connection: # {{{
 			qtype = 'short'
 		if qtype == 'longunit':
 			qtype = 'longshort'
-		qtext = (yield from self._parse_text(wake, text))
+		qtext = markdown((yield from self._parse_text(wake, text)))
 
 		# Parse options.
 		parsed_options = []
