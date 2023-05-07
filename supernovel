@@ -1213,7 +1213,8 @@ class Connection: # {{{
 	def _question(self, wake, qtype, tag, text, options): # {{{
 		# Handle hidden type differently (don't inform player).
 		if qtype == 'hidden':
-			yield from self._store_answer(wake, tag, (yield from self._safe_eval(wake, text, as_str = True)))
+			parsed = yield from self._safe_eval(wake, text, as_str = True)
+			yield from self._store_answer(wake, tag, {'raw': parsed, 'text': parsed, 'style': []})
 			return False
 
 		# Modify type to make it easier for brower code.

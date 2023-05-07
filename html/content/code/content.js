@@ -618,7 +618,8 @@ function update_ui() { // {{{
 		titles = ['Id', 'Tag', 'Name', 'Remove', 'Id', 'Mood', 'Width', 'Height', 'Hotspot X', 'Hotspot Y', 'Preview', 'Download', 'Upload', 'Remove'];
 		for (var t = 0; t < titles.length; ++t)
 			tr.AddElement('th').AddText(titles[t]);
-		for (var s in sprite) {
+		for (var str_s in sprite) {
+			var s = Number(str_s);
 			var num = 0;
 			for (var i in image) {
 				if (image[i].sprite != s)
@@ -648,7 +649,7 @@ function update_ui() { // {{{
 		var td = tr.AddElement('td');
 		td.colSpan = 14;
 		var button = td.AddElement('button').AddText('Create Sprite');
-		button.AddEvent('click', function() { server.call('add_sprite', ['', '', null], {}, connected); });
+		button.AddEvent('click', function() { server.call('add_sprite', ['', ''], {}, connected); });
 		// }}}
 
 		// Audio. {{{
