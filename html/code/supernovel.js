@@ -7,7 +7,6 @@ function _(message) {
 
 // Globals. {{{
 
-var server;	// Handle for server communication.
 var screen_size = [1920, 1080];	// Size of the screen, in pixels. Defaults to [1920, 1080].
 var all_sprites = {};	// All screen sprites.
 var img_cache = {};	// Cache of loaded images; keys are tags, values are objects with mood keys and values of {url, size, hotspot, tag, mood}.
@@ -22,6 +21,7 @@ var state, prev_states;
 // Flags.
 var is_replaced;	// Flag to avoid stealing back the connection after replacing it.
 var animating = false;	// Flag to disable animation handling when there is nothing to animate.
+var reconnecting = false;	// Set to true when connection is closed (and reconnect is attempted), false when opened. Checked to avoid repeated failed reconnects.
 
 // }}}
 
@@ -716,6 +716,7 @@ function run_story(story, cb) { // {{{
 	prev_states = [{story: story, cb: cb, background: state.background, music: state.music}];
 	state.show_question = false;
 	new_thread(story, cb, '');
+	enable_menu_options(true);
 } // }}}
 // }}}
 
@@ -743,8 +744,34 @@ function update_screen() { // {{{
 // }}}
 
 // Server communication. {{{
+// Menu {{{
+function back() { // {{{
+	prev_kinetic();
+} // }}}
+
+function rewind() { // {{{
+	prev_kinetic(true);
+} // }}}
+
+function skip() { // {{{
+	next_kinetic(true);
+} // }}}
+
+// Store options in variables, so they can be reliably enabled and disabled.
+var option_back = {text: 'back', action: back, enabled: false};
+var option_rewind = {text: 'rewind', action: rewind, enabled: false};
+var option_skip = {text: 'skip', action: skip, enabled: false};
+
+function enable_menu_options(enable) { // {{{
+	option_back.enabled = enable;
+	option_rewind.enabled = enable;
+	option_skip.enabled = enable;
+} // }}}
+
+var menu = [ option_back, option_rewind, option_skip ];
+// }}}
+
 var Connection = { // {{{
-	userdata_setup: userdata_setup,
 	replaced: function() {	// {{{ Connection has been replaced by new connection.
 		is_replaced = true;
 		alert(_('The connection was replaced by a new login'));
@@ -769,12 +796,13 @@ var Connection = { // {{{
 		console.info('main', myname);
 		elements.bg.AddClass('hidden');
 		select_ui('contents');
-		document.getElementById('login').ClearAll().AddText(myname);
 		video.pause();
 		music.pause();
 		sound.pause();
+		pending_music = null;
 		state = new State();
 		state.background = null;
+		enable_menu_options(false);
 		resize();
 		for (var s in all_sprites)
 			all_sprites[s].remove();
@@ -936,7 +964,7 @@ function init() { // {{{
 
 	// Fill global variables.
 	elements = {};
-	var varnames = ['error', 'videodiv', 'video', 'contents', 'scripts', 'question', 'speechbox', 'navigation', 'spritebox', 'speaker', 'speaker_image', 'speech', 'bg', 'game', 'music', 'sound'];
+	var varnames = ['error', 'videodiv', 'video', 'contents', 'scripts', 'question', 'speechbox', 'spritebox', 'speaker', 'speaker_image', 'speech', 'bg', 'game', 'music', 'sound'];
 	for (var i = 0; i < varnames.length; ++i)
 		elements[varnames[i]] = document.getElementById(varnames[i]);
 
@@ -954,29 +982,29 @@ function init() { // {{{
 		event.preventDefault();
 		next_kinetic();
 	});
-
-	var connection_lost = function() { // {{{
-		elements.bg.AddClass('hidden');
-		if (is_replaced)
-			return;
-		try {
-			select_ui('error');
-			video.pause();
-			music.pause();
-			sound.pause();
-			server = Rpc(Connection, null, connection_lost);
-		}
-		catch (err) {
-			try {
-				alert(_('The connection with the server was lost and could not be reestablished.'));
-			}
-			catch (err) {
-			}
-		}
-	} // }}}
-	server = Rpc(Connection, null, connection_lost);
 } // }}}
-window.AddEvent('load', init);
+
+function opened() { // {{{
+	reconnecting = false;
+	if (elements === undefined)
+		init();
+	elements.bg.AddClass('hidden');
+	if (is_replaced)
+		return;
+	select_ui('error');
+	video.pause();
+	music.pause();
+	sound.pause();
+} // }}}
+
+function closed() { // {{{
+	if (!reconnecting) {
+		reconnecting = true;
+		server.reconnect();
+	}
+	else
+		alert('The connection with the server was lost; attempt to reconnect failed.');
+} // }}}
 
 function resize() { // {{{
 	if (state === undefined)
@@ -989,13 +1017,6 @@ function resize() { // {{{
 	state.draw(performance.now(), true);
 } // }}}
 window.AddEvent('resize', resize);
-
-function log_out() { // {{{
-	// The log out button is clicked.
-	// Returns undefined.
-	restart();
-	server.call('userdata_logout');
-} // }}}
 // }}}
 
 // UI callbacks. {{{

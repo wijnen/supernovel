@@ -212,9 +212,9 @@ function ScriptRow(id, data) { // {{{
 	ret.name.AddEvent('change', ret.update);
 
 	// Edit.
-	ret.download = ret.AddElement('td').AddElement('button').AddText('Edit');
-	ret.download.type = 'button';
-	ret.download.AddEvent('click', function() {
+	ret.edit = ret.AddElement('td').AddElement('button').AddText('Edit');
+	ret.edit.type = 'button';
+	ret.edit.AddEvent('click', function() {
 		server.call('get_script', [id], {}, function(scriptdata) {
 			edit.id = id;
 			edit.name = data.name;

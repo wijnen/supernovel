@@ -24,7 +24,6 @@
 
 		<!-- Script selection screen. -->
 		<div id='contents'>
-			<div id='logout'>Logged in as <span id='login'></span> <button type='button' onclick='log_out()' class='translate'>Log out</button></div>
 			<ul id='scripts'></ul>
 		</div>
 
@@ -34,13 +33,6 @@
 				<video id='video' preload='auto' controls></video><br/>
 				<span class='translate'>Speed</span>: <input type='number' id='speed' onchange='speed()' value='100'/>%<br/>
 				<button onclick='video_done()' class='translate'>Continue</button>
-			</div>
-			<div id='navigation'>
-				<button type='button' class='navbutton' id='navfirst' onclick='prev_kinetic(true)'>&#x21e4;</button>
-				<button type='button' class='navbutton' id='navprev' onclick='prev_kinetic()'>&#x2190;</button>
-				<button type='button' class='navbutton' id='navhome' onclick='home()'>&#x2191;</button>
-				<button type='button' class='navbutton' id='navnext' onclick='next_kinetic()'>&#x2192;</button>
-				<button type='button' class='navbutton' id='navlast' onclick='next_kinetic("finish")'>&#x21e5;</button>
 			</div>
 			<div id='spritebox'>
 				<img id='bg'/>

@@ -26,21 +26,6 @@ button.not(#navbutton) {
 	margin: 2em;
 }
 
-#navigation {
-	z-index: 3;
-	text-align: justify;
-	position: fixed;
-	left: 0px;
-	right: 0px;
-	top: 0px;
-	height: 2em;
-}
-#navigation:after {
-	content: "";
-	display: inline-block;
-	width: 100%;
-}
-
 #spritebox {
 	z-index: 1;
 	position: absolute;
@@ -119,10 +104,6 @@ button.not(#navbutton) {
 
 ul {
 	list-style-type: none;
-}
-
-#logout {
-	text-align: right;
 }
 
 .active, .choicebutton:hover {
