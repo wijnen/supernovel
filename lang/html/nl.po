@@ -1,0 +1,63 @@
+# Supernovel translations (html part)
+# Copyright (C) 2023 Bas Wijnen
+# This file is distributed under the same license as the supernovel package.
+# Bas Wijnen <wijnen@debian.org>, 2023
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: 0.1\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2023-07-08 10:07+0200\n"
+"PO-Revision-Date: 2023-07-08 09:58+0200\n"
+"Last-Translator: Bas Wijnen <wijnen@debian.org>\n"
+"Language-Team: Dutch <NL@li.org>\n"
+"Language: Nederlands\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: html/index.html:20
+msgid "Please Wait"
+msgstr "Even geduld"
+
+#: html/index.html:21
+msgid "The connection with the server is attempted."
+msgstr "De verbinding met de server wordt gemaakt"
+
+#: html/index.html:22
+msgid ""
+"If this message does not disappear, there is a problem. There may be "
+"messages in the debugging console that identify the problem."
+msgstr ""
+"Als dit bericht niet verdwijnt, is er iets mis. Mogelijk staan er berichten "
+"in de debugging console die het probleem kunnen duiden."
+
+#: html/index.html:34
+msgid "Speed"
+msgstr "Snelheid"
+
+#: html/index.html:35
+msgid "Continue"
+msgstr "Doorgaan"
+
+#. Retranslate all strings, because language may have changed.
+#. {{{
+#: html/code/supernovel.js:760
+msgid "Back"
+msgstr "Terug"
+
+#: html/code/supernovel.js:761
+msgid "Rewind"
+msgstr "Terug naar het begin"
+
+#: html/code/supernovel.js:762
+msgid "Skip"
+msgstr "Overslaan"
+
+#: html/code/supernovel.js:826 html/code/supernovel.js:855
+msgid "Answer"
+msgstr "Antwoord"
+
+#: html/code/supernovel.js:864
+msgid "Please select your answer"
+msgstr "Selecteer je antwoord"

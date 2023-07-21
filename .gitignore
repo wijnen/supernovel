@@ -10,3 +10,5 @@ __pycache__/
 /doc/*.pdf
 /doc/*.toc
 /doc/*.out
+/userdata.ini
+*.po~

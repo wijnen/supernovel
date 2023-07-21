@@ -16,6 +16,7 @@ import fhs
 import websocketd
 import json
 import userdata
+from userdata import _, N_
 from markdown import markdown
 from websocketd import log
 
@@ -1326,7 +1327,6 @@ class Connection: # {{{
 				traceback.print_exc()
 				self.remote.error.event(code['code'])
 				cmd = None
-			log('code return %s' % repr(cmd))
 			if isinstance(cmd, dict) and 'cmd' in cmd:
 				if cmd['cmd'] == 'video':
 					if len(self.user['kinetic']) != 1:

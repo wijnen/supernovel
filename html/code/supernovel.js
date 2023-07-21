@@ -1,10 +1,4 @@
 "use strict";
-// Translations are not implemented yet, but preparations are made. Make sure things don't break. {{{
-function _(message) {
-	return message;
-}
-// }}}
-
 // Globals. {{{
 
 var screen_size = [1920, 1080];	// Size of the screen, in pixels. Defaults to [1920, 1080].
@@ -19,7 +13,6 @@ var elements; // DOM elements.
 var state, prev_states;
 
 // Flags.
-var is_replaced;	// Flag to avoid stealing back the connection after replacing it.
 var animating = false;	// Flag to disable animation handling when there is nothing to animate.
 var reconnecting = false;	// Set to true when connection is closed (and reconnect is attempted), false when opened. Checked to avoid repeated failed reconnects.
 
@@ -757,10 +750,18 @@ function skip() { // {{{
 	next_kinetic(true);
 } // }}}
 
-// Store options in variables, so they can be reliably enabled and disabled.
-var option_back = {text: 'back', action: back, enabled: false};
-var option_rewind = {text: 'rewind', action: rewind, enabled: false};
-var option_skip = {text: 'skip', action: skip, enabled: false};
+// Store options in variables, so they can be reliably translated, enabled and disabled.
+var option_back = {text: '', action: back, enabled: false};
+var option_rewind = {text: '', action: rewind, enabled: false};
+var option_skip = {text: '', action: skip, enabled: false};
+
+// Retranslate all strings, because language may have changed.
+function update_strings() { // {{{
+	option_back.text = _('Back');
+	option_rewind.text = _('Rewind');
+	option_skip.text = _('Skip');
+	// XXX Translate other strings?
+} // }}}
 
 function enable_menu_options(enable) { // {{{
 	option_back.enabled = enable;
@@ -772,15 +773,8 @@ var menu = [ option_back, option_rewind, option_skip ];
 // }}}
 
 var Connection = { // {{{
-	replaced: function() {	// {{{ Connection has been replaced by new connection.
-		is_replaced = true;
-		alert(_('The connection was replaced by a new login'));
-		is_replaced = false;
-		server.close();
-		init();
-	}, // }}}
 	contents: function(data) {	// {{{ Update chapter and script contents.
-		console.info('contents', data);
+		//console.info('contents', data);
 		scripts.ClearAll();
 		var buttons = [];
 		for (var c = 0; c < data.length; ++c) {
@@ -793,7 +787,7 @@ var Connection = { // {{{
 		}
 	}, // }}}
 	main: function(myname) {	// {{{ Show book and chapter selection.
-		console.info('main', myname);
+		//console.info('main', myname);
 		elements.bg.AddClass('hidden');
 		select_ui('contents');
 		video.pause();
@@ -970,6 +964,8 @@ function init() { // {{{
 
 	// Handle clicks on screen for progression.
 	window.AddEvent('click', function(event) {
+		if (state === undefined)
+			return;
 		if (pending_music !== null) {
 			music.src = pending_music;
 			pending_music = null;
@@ -989,8 +985,6 @@ function opened() { // {{{
 	if (elements === undefined)
 		init();
 	elements.bg.AddClass('hidden');
-	if (is_replaced)
-		return;
 	select_ui('error');
 	video.pause();
 	music.pause();
