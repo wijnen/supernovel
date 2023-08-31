@@ -10,10 +10,6 @@ var permissions = {};
 // }}}
 
 // Server communication. {{{
-var Connection = { // {{{
-	userdata_setup: userdata_setup,
-}; // }}}
-
 function init() { // {{{
 	// Initialize everything.
 	// Returns undefined.
@@ -22,8 +18,6 @@ function init() { // {{{
 		server.call('set_chapter', [select.options[select.selectedIndex].chapter]);
 		connected();
 	});
-
-	server = Rpc(Connection, null, null);
 } // }}}
 window.AddEvent('load', init);
 
@@ -664,7 +658,7 @@ function update_ui() { // {{{
 		var td = tr.AddElement('td');
 		td.colSpan = 6;
 		var button = td.AddElement('button').AddText('Create Audio');
-		button.AddEvent('click', function() { server.call('add_audio', ['', 0, '', 0], {}, connected); });
+		button.AddEvent('click', function() { server.call('add_audio', ['', '', 0], {}, connected); });
 		// }}}
 	}
 
