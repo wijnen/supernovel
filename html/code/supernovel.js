@@ -281,7 +281,8 @@ function DisplaySprite() { // {{{
 	// Construct with new.
 	var me = this;
 	this.div = spritebox.AddElement('div', 'sprite');
-	this.img = this.div.AddElement('img');
+	this.img = null;
+	this.text = null;
 	this.update = function(current_sprite, now) { // {{{
 		// Update this sprite according to a state Sprite.
 		this.cb = current_sprite.cb;
@@ -293,13 +294,7 @@ function DisplaySprite() { // {{{
 		}
 		me.div.style.zIndex = sprite_state.position[2];
 		//console.info(sprite_state, sprite_state.image, sprite_state.position[0], sprite_state.position[1]);
-		get_img(sprite_state.image.tag, sprite_state.image.mood, function(img) { // {{{
-			if (img === null) {
-				delete me.img.src;
-				console.warn('image does not exist', sprite_state.image.tag, sprite_state.image.mood);
-				return;
-			}
-			me.img.src = img.url;
+		var set_position = function(img) {
 			// Compute reference point, in image pixels ([0, 0] is hotspot, positive directions are towards top right).
 			var reference = [];
 			if (sprite_state.position_hotspot === null) {
@@ -324,7 +319,34 @@ function DisplaySprite() { // {{{
 			me.div.style.height = img.size[1] * screen_scale + 'px';
 			me.div.style.transformOrigin = img.hotspot[0] * screen_scale + 'px ' + (img.size[1] - img.hotspot[1] - 1) * screen_scale + 'px';
 			me.div.style.transform = 'rotate(' + sprite_state.rotation * 360 + 'deg) scale(' + sprite_state.scale[0] + ',' + sprite_state.scale[1] + ')';
-		}); // }}}
+		};
+		if (sprite_state.image.tag === null) {
+			if (me.img !== null) {
+				me.div.removeChild(me.img);
+				me.img = null;
+			}
+			if (me.text === null)
+				me.text = me.div.AddElement('span');
+			me.text.ClearAll().AddText(sprite_state.image.mood);
+			set_position({'size': [0, 0], 'hotspot': [0, 0]});	// FIXME: use actual size of text sprite.
+		}
+		else {
+			get_img(sprite_state.image.tag, sprite_state.image.mood, function(img) { // {{{
+				if (me.text !== null) {
+					me.div.removeChild(me.text);
+					me.text = null;
+				}
+				if (me.img === null)
+					me.img = me.div.AddElement('img');
+				if (img === null) {
+					delete me.img.src;
+					console.warn('image does not exist', sprite_state.image.tag, sprite_state.image.mood);
+					return;
+				}
+				me.img.src = img.url;
+				set_position(img);
+			}); // }}}
+		}
 		return sprite_state.extra !== null;
 	}; // }}}
 	this.remove = function() {

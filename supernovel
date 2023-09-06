@@ -1243,10 +1243,17 @@ class Connection: # {{{
 	# }}}
 	def _find_mood(self, target, mood): # {{{
 		if target not in self.user['sprite']:
-			return None, None
+			# invalid target; return text sprite with info as text.
+			return None, 'invalid target %s,%s' % (target, mood)
 		image = self.user['sprite'][target]
+		if image['id'] is None:
+			# Text sprite.
+			if mood is not None:
+				return None, mood
+			return None, image['mood']
 		if image['id'] not in self.user['moods'] or (mood is not None and mood not in self.user['moods'][image['id']]):
-			return None, None
+			# Invalid mood; return info as text sprite.
+			return None, 'invalid mood %s,%s' % (target, mood)
 		if mood is None:
 			if image['mood'] in self.user['moods'][image['id']]:
 				mood = image['mood']
@@ -1354,7 +1361,7 @@ class Connection: # {{{
 		# }}}
 		elif code['command'] == 'speech': # {{{
 			target = code['speaker']
-			#print('check', item, self.user['sprite'])
+			#print('check', code, self.user['sprite'])
 			speaker = None if target is None else self.user['sprite'][target]['name'] if target in self.user['sprite'] else '(' + target + ')'
 
 			# Set images.
@@ -1459,7 +1466,7 @@ class Connection: # {{{
 				imageid = None
 		data = (yield from serverdata.select('image', ('url', 'width', 'height', 'hotx', 'hoty'), ('=', 'id', imageid), wake = wake))
 		if len(data) != 1:
-			print('Warning: sprite %s mood %s not found and no fallback found either' % (sprite_tag, sprite_mood), file = sys.stderr)
+			print('Warning: sprite %s mood %s not found and no fallback found either' % (sprite_name, sprite_mood), file = sys.stderr)
 			return {'url': None, 'size': (0, 0), 'hotspot': (0, 0)}
 		#print('image id', imageid, 'from', repr(self.user['moods']), 'data', data[0][0][:30])
 		return {'url': data[0][0], 'size': (data[0][1], data[0][2]), 'hotspot': (data[0][3], data[0][4])}
