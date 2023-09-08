@@ -781,8 +781,8 @@ class Connection: # {{{
 				for spr in state['sprite']:
 					s = state['sprite'][spr]
 					arg = {'action': 'move', 'image': self.user['sprite'][spr]['id'], 'mood': s['mood']}
-					arg.args = {x: s[x] for x in ('from', 'from_hotspot', 'to', 'to_hotspot', 'scale', 'scale_hotspot', 'rotation', 'rotation_hotspot')}
-					arg.args.update({'with': None, 'around': None, 'in': None})
+					arg['args'] = {x: s[x] for x in ('from', 'from_hotspot', 'to', 'to_hotspot', 'scale', 'scale_hotspot', 'rotation', 'rotation_hotspot')}
+					arg['args'].update({'with': None, 'around': None, 'in': None})
 					setup.append(arg)
 				self.remote.kinetic.event(setup, state['music'])
 				if not (yield from self._run_item(wake, u['run_stack'][-1]['program'][u['run_stack'][-1]['current']])):
@@ -1496,7 +1496,7 @@ class Connection: # {{{
 			log('attempt to start while busy')
 			traceback.print_stack()
 			return
-		self.user['_kinetic_state'] = {'background': None, 'sprite': {}, 'music': None}
+		self.user['_kinetic_state'] = {'background': None, 'sprite': {}, 'music': None, 'font': None}
 		self.busy = True
 		chapterid, scriptid, code = (yield from content.get(wake, self.user['group'], self.user['chapterprefix'] + script))
 		self.user['scripttag'] = '\t'.join(self.user['chapterprefix'] + script)
