@@ -756,7 +756,7 @@ class Connection: # {{{
 		print('use group', my_group)
 		u['group'] = my_group
 		# }}}
-		debug(1, 'User {}:{} logged in from {}:{}'.format(self.name, my_group, *self.remote.socket.remote))
+		debug(1, 'User {}({}):{} logged in from {}:{}'.format(self.managed_name, self.name, my_group, *self.remote.socket.remote))
 		scripts = (yield from content.list(wake, my_group))
 		# Strip common chapters from script names. {{{
 		u['chapterprefix'] = []

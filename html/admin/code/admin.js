@@ -1,22 +1,20 @@
 "use strict";
-var server, contents;
+var contents;
 
 function init() { // {{{
 	contents = document.getElementById('contents');
-	server = Rpc(Connection, onopen, onclose);
 } // }}}
 window.AddEvent('load', init);
 
-function onopen() { // {{{
+function opened() { // {{{
 	document.body.AddClass('open');
 } // }}}
 
-function onclose() { // {{{
+function closed() { // {{{
 	document.body.RemoveClass('open');
 } // }}}
 
 var Connection = { // {{{
-	userdata_setup: userdata_setup,
 	select_group: select_group,
 	select_script: select_script,
 	show_script: show_script,

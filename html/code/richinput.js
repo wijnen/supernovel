@@ -20,8 +20,8 @@ function richinput(element) {
 		[function(e) { e.AddText('n').AddElement('sub').AddText('x'); }, '', false, true],
 	];
 	input.AddEvent('keydown', function(event) {
-		// Cursor keys finish power mode.
-		if (event.keyCode < 37 || event.keyCode > 40)
+		// Cursor keys and space finish power mode.
+		if (event.key != ' ' && (event.keyCode < 37 || event.keyCode > 40))
 			return;
 		this.power = null;
 		actions[1][4].checked = false;
@@ -57,6 +57,7 @@ function richinput(element) {
 			button.type = 'checkbox';
 			button.input = input;
 			button.action = actions[a];
+			button.actions = actions;
 			button.other = 3 - a;
 			actions[a][0](label);
 			actions[a].push(button);

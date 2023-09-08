@@ -1,5 +1,5 @@
 supernovel:
-	./supernovel --allow-local --default-userdata http://localhost:8879 --loglimit 2
+	./supernovel --allow-local --loglimit 2 --no-allow-other
 
 userdata:
 	cd ../userdata && ./userdata
