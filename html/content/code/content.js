@@ -446,6 +446,22 @@ function AudioRow(id, data) { // {{{
 	ret.duration.value = data.duration;
 	ret.duration.AddEvent('change', ret.update);
 
+	// Play.
+	ret.play = ret.AddElement('td').AddElement('button').AddText('Play');
+	ret.play.type = 'button';
+	ret.play.AddEvent('click', function() {
+		var element = document.getElementById('sound');
+		delete element.src;
+		element.style.display = 'block';
+		server.call('get_audio', [id], {}, function(data) {
+			element.src = data;
+			element.play();
+			element.AddEvent('ended', function() {
+				element.style.display = '';
+			});
+		});
+	});
+
 	// Download.
 	ret.download = ret.AddElement('td').AddElement('button').AddText('Download');
 	ret.download.type = 'button';
@@ -649,7 +665,7 @@ function update_ui() { // {{{
 		// Audio. {{{
 		table = document.getElementById('audio').ClearAll();
 		tr = table.AddElement('tr');
-		titles = ['Id', 'Name', 'Duration', 'Download', 'Upload', 'Remove'];
+		titles = ['Id', 'Name', 'Duration', 'Play', 'Download', 'Upload', 'Remove'];
 		for (var t = 0; t < titles.length; ++t)
 			tr.AddElement('th').AddText(titles[t]);
 		for (var a in audio)

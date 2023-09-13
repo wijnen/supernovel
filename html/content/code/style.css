@@ -127,3 +127,10 @@ textarea {
 	left: 10vw;
 	right: 10vw;
 }
+
+#sound {
+	position: fixed;
+	top: 1ex;
+	right: 1ex;
+	display: none;
+}
