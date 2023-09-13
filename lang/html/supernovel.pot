@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2023-07-21 21:41+0200\n"
+"POT-Creation-Date: 2023-09-13 09:23+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -41,22 +41,26 @@ msgstr ""
 
 #. Retranslate all strings, because language may have changed.
 #. {{{
-#: html/code/supernovel.js:760
+#: html/code/supernovel.js:788
 msgid "Back"
 msgstr ""
 
-#: html/code/supernovel.js:761
+#: html/code/supernovel.js:789
 msgid "Rewind"
 msgstr ""
 
-#: html/code/supernovel.js:762
+#: html/code/supernovel.js:790
 msgid "Skip"
 msgstr ""
 
-#: html/code/supernovel.js:826 html/code/supernovel.js:855
+#: html/code/supernovel.js:791
+msgid "Home"
+msgstr ""
+
+#: html/code/supernovel.js:856 html/code/supernovel.js:885
 msgid "Answer"
 msgstr ""
 
-#: html/code/supernovel.js:864
+#: html/code/supernovel.js:894
 msgid "Please select your answer"
 msgstr ""

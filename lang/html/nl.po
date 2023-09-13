@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: 0.1\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2023-07-08 10:07+0200\n"
+"POT-Creation-Date: 2023-09-13 09:23+0200\n"
 "PO-Revision-Date: 2023-07-08 09:58+0200\n"
 "Last-Translator: Bas Wijnen <wijnen@debian.org>\n"
 "Language-Team: Dutch <NL@li.org>\n"
@@ -42,22 +42,26 @@ msgstr "Doorgaan"
 
 #. Retranslate all strings, because language may have changed.
 #. {{{
-#: html/code/supernovel.js:760
+#: html/code/supernovel.js:788
 msgid "Back"
 msgstr "Terug"
 
-#: html/code/supernovel.js:761
+#: html/code/supernovel.js:789
 msgid "Rewind"
 msgstr "Terug naar het begin"
 
-#: html/code/supernovel.js:762
+#: html/code/supernovel.js:790
 msgid "Skip"
 msgstr "Overslaan"
 
-#: html/code/supernovel.js:826 html/code/supernovel.js:855
+#: html/code/supernovel.js:791
+msgid "Home"
+msgstr "Startpagina"
+
+#: html/code/supernovel.js:856 html/code/supernovel.js:885
 msgid "Answer"
 msgstr "Antwoord"
 
-#: html/code/supernovel.js:864
+#: html/code/supernovel.js:894
 msgid "Please select your answer"
 msgstr "Selecteer je antwoord"

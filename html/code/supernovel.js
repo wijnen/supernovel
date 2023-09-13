@@ -772,16 +772,22 @@ function skip() { // {{{
 	next_kinetic(true);
 } // }}}
 
+function home() { // {{{
+	server.call('home');
+} // }}}
+
 // Store options in variables, so they can be reliably translated, enabled and disabled.
 var option_back = {text: '', action: back, enabled: false};
 var option_rewind = {text: '', action: rewind, enabled: false};
 var option_skip = {text: '', action: skip, enabled: false};
+var option_home = {text: '', action: home, enabled: false};
 
 // Retranslate all strings, because language may have changed.
 function update_strings() { // {{{
 	option_back.text = _('Back');
 	option_rewind.text = _('Rewind');
 	option_skip.text = _('Skip');
+	option_home.text = _('Home');
 	// XXX Translate other strings?
 } // }}}
 
@@ -789,14 +795,15 @@ function enable_menu_options(enable) { // {{{
 	option_back.enabled = enable;
 	option_rewind.enabled = enable;
 	option_skip.enabled = enable;
+	option_home.enabled = enable;
 } // }}}
 
-var menu = [ option_back, option_rewind, option_skip ];
+var menu = [ option_back, option_rewind, option_skip, option_home ];
 // }}}
 
 var Connection = { // {{{
 	contents: function(data) {	// {{{ Update chapter and script contents.
-		//console.info('contents', data);
+		console.info('contents', data);
 		scripts.ClearAll();
 		var buttons = [];
 		for (var c = 0; c < data.length; ++c) {
@@ -809,7 +816,7 @@ var Connection = { // {{{
 		}
 	}, // }}}
 	main: function(myname) {	// {{{ Show book and chapter selection.
-		//console.info('main', myname);
+		console.info('main', myname);
 		elements.bg.AddClass('hidden');
 		select_ui('contents');
 		video.pause();
@@ -828,7 +835,6 @@ var Connection = { // {{{
 	kinetic: function(story, music) { // {{{ Run a story without a question; used for setting up current state on login.
 		console.info('setup kinetic', music, story);
 		server.lock();
-		console.info('locked');
 		pending_music = music;
 		run_story(story, function() { console.info('unlock'); server.unlock(); });
 	}, // }}}
@@ -951,6 +957,7 @@ var Connection = { // {{{
 		});
 	}, // }}}
 	video: function(story, file) {	// {{{ Run a story, followed by a video.
+		console.info('video', file, story);
 		run_story(story, function() {
 			music.pause();
 			sound.pause();
@@ -1036,12 +1043,6 @@ window.AddEvent('resize', resize);
 // }}}
 
 // UI callbacks. {{{
-function home() { // {{{
-	// The home button was clicked.
-	// Returns undefined.
-	server.call('home');
-} // }}}
-
 function next_kinetic(finish) { // {{{
 	// The next button was clicked, or the screen was clicked, or the spacebar was pressed.
 	// The finish parameter is true if the "forward to end" button was clicked.
