@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+	<head><!-- {{{ -->
+		<meta charset='utf-8'/>
+		<title>Supernovel Content Management</title>
+		<script src='code/builders.js'></script>
+		<script src='code/rpc.js'></script>
+		<script src='code/userdata.js'></script>
+		<script src='code/content.js'></script>
+		<link rel='stylesheet' href='code/style.css'/>
+	</head><!-- }}} -->
+	<body>
+
+		<!-- Overlay windows. {{{ -->
+		<!-- Not a window; element used for triggering download events. -->
+		<a id='download'></a>
+
+		<!-- Image preview. -->
+		<img id='preview' onclick='this.style.display="none"'/>
+
+		<!-- Audio preview. -->
+		<audio id='sound' controls='controls'></audio>
+
+		<!-- Busy notification. -->
+		<div id='busy'>
+			<h1>Working...</h1>
+		</div>
+
+		<!-- Error message. -->
+		<div id='error'>
+			<h1>Please Wait</h1>
+			<p>The connection with the server is attempted.</p>
+			<p>If this message does not disappear, there is a problem. There may be messages in the debugging console that identify the problem.</p>
+		</div>
+
+		<!-- Script editor. -->
+		<div id='edit'>
+			<!-- Area is saved on change; save button is just to provide a way to lose focus, which triggers the change event.
+			The save button is shown disabled while saving is in progress. -->
+			<textarea id='editbox' onkeyup='cursorMove()' onchange='save()'></textarea>
+			<div id='editbuttons'>
+				<button type='button' id='save'>Save</button>
+				<span id='line'></span>
+				<button type='button' onclick='hide()'>Done</button>
+			</div>
+		</div>
+		<!-- }}} -->
+
+		<!-- Tabs {{{ -->
+		<input type='radio' name='tabselect' id='permissions' class='hider'/><label for='permissions'>Permissions</label>
+		<input type='radio' name='tabselect' id='scripts' class='hider' checked='checked'/><label for='scripts'>Scripts</label>
+		<input type='radio' name='tabselect' id='sprites' class='hider'/><label for='sprites'>Sprites</label>
+		<input type='radio' name='tabselect' id='audios' class='hider'/><label for='audios'>Audio</label>
+		<!-- }}} -->
+
+		<div id='permissiontab' class='tab'><!-- {{{ -->
+			<div>
+				<h1>Chapters</h1>
+				<table id='chapter'></table>
+			</div>
+			<div>
+				<h1>Group Access</h1>
+				<table id='access'></table>
+			</div>
+			<div>
+				<h1>Active Chapter</h1>
+				<select id='activechapter'></select>
+			</div>
+		</div><!-- }}} -->
+
+		<div id='scripttab' class='tab'><!-- {{{ -->
+			<div>
+				<table id='script'></table>
+			</div>
+			<div>
+				<h1>Questions</h1>
+				<table id='question'></table>
+			</div>
+		</div><!-- }}} -->
+
+		<div id='spritetab' class='tab'><!-- {{{ -->
+			<table id='image'></table>
+		</div><!-- }}} -->
+
+		<div id='audiotab' class='tab'><!-- {{{ -->
+			<table id='audio'></table>
+		</div><!-- }}} -->
+
+	</body>
+</html>
+<!-- vim: set foldmethod=marker : -->

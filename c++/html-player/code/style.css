@@ -1,0 +1,132 @@
+body {
+	background-origin: content-box;
+	background-attachment: fixed;
+	background-position: center center;
+	background-repeat: no-repeat;
+	background-size: cover;
+	overflow: hidden;
+}
+
+#videodiv, #question {
+	display: none;
+	position: absolute;
+	left: 0px;
+	top: 0px;
+	right: 0px;
+	bottom: 0px;
+	overflow: auto;
+	padding: 3em 3em 3em 3em;
+	margin: 3em 3em 3em 3em;
+	border-radius: 2ex;
+	border: solid black .5ex;
+	text-align: center;
+}
+
+button.not(#navbutton) {
+	margin: 2em;
+}
+
+#spritebox {
+	z-index: 1;
+	position: absolute;
+	left: 0px;
+	right: 0px;
+	bottom: 0px;
+	top: 0px;
+}
+
+#speechbox {
+	font: 130% serif;
+	display: none;
+	position: absolute;
+	left: 3%;
+	right: 3%;
+	top: 80%;
+	bottom: 1%;
+	box-sizing: border-box;
+	border: 2px black solid;
+	border-radius: 1em;
+	background-color: rgba(255, 255, 255, 0.9);
+	z-index: 2;
+	padding: 2ex 1ex 1ex 1ex;
+}
+
+#speaker {
+	position: absolute;
+	left: 2ex;
+	top: -26.3%; /* 5/.19, or 5% of game div. */
+	/*bottom: calc(100% - 1ex);*/
+	box-sizing: border-box;
+	border: 2px black solid;
+	border-radius: 1ex;
+	padding: .5ex 2ex;
+	background: white;
+}
+
+#speaker_image {
+	float: left;
+	height: 6em;
+	padding: 1ex 1ex
+}
+
+#speech p {
+	margin: 0px 0px 0px 0px;
+}
+
+.sprite {
+	position: absolute;
+	bottom: 0%;
+}
+.sprite img, #game img:not(#bg) {
+	width: inherit;
+	height: inherit;
+}
+
+#question {
+	background-color: rgba(255, 255, 255, .5);
+	box-sizing: border-box;
+	z-index: 4;
+}
+
+.choicebuttons {
+	text-align: center;
+}
+.choicebutton, .script {
+	display: inline;
+	padding: 1em 5em 1em 5em;
+	margin: 1ex 1ex 1ex 1ex;
+	border-radius: 2em;
+}
+
+#contents {
+	text-align: center;
+}
+
+ul {
+	list-style-type: none;
+}
+
+.active, .choicebutton:hover {
+	background-color: blue;
+	color: white;
+}
+
+#game {
+	position: fixed;
+	overflow: scroll;
+}
+
+#bg {
+	position: absolute;
+	overflow: hidden;
+	top: 0px;
+	left: 0px;
+	bottom: 0px;
+	right: 0px;
+	width: 100%;
+	height: 100%;
+}
+
+.hidden {
+	display: none;
+}

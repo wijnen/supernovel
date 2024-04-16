@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset='utf-8'/>
+		<title>Supernovel</title>
+		<script src='code/builders.js'></script>
+		<script src='code/rpc.js'></script>
+		<script src='code/richinput.js'></script>
+		<script src='code/userdata.js'></script>
+		<script src='code/supernovel.js'></script>
+		<link rel='stylesheet' href='code/style.css'/>
+	</head>
+	<body onkeypress='keypress(event)'>
+		<!-- Audio controls -->
+		<audio id='music' loop='loop'></audio>
+		<audio id='sound'></audio>
+
+		<!-- Error message, shown when connection to server is lost. -->
+		<div id='error'>
+			<h1 class='translate'>Please Wait</h1>
+			<p class='translate'>The connection with the server is attempted.</p>
+			<p class='translate'>If this message does not disappear, there is a problem. There may be messages in the debugging console that identify the problem.</p>
+		</div>
+
+		<!-- Script selection screen. -->
+		<div id='contents'>
+			<ul id='scripts'></ul>
+		</div>
+
+		<!-- Game screen. -->
+		<div id='game'>
+			<div id='videodiv'>
+				<video id='video' preload='auto' controls></video><br/>
+				<span class='translate'>Speed</span>: <input type='number' id='speed' onchange='speed()' value='100'/>%<br/>
+				<button onclick='video_done()' class='translate'>Continue</button>
+			</div>
+			<div id='spritebox'>
+				<img id='bg'/>
+			</div>
+			<div id='speechbox'>
+				<div id='speaker'></div>
+				<img id='speaker_image'/>
+				<div id='speech'></div>
+			</div>
+			<div id='question'></div>
+		</div>
+	</body>
+</html>

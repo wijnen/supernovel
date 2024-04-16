@@ -1,0 +1,52 @@
+#overview:not(:checked) ~ #over,
+#studentview:not(:checked) ~ #student,
+#questionview:not(:checked) ~ #question
+{
+	display: none;
+}
+
+#overview:not(:checked) ~ #overlabel,
+#studentview:not(:checked) ~ #studentlabel,
+#questionview:not(:checked) ~ #questionlabel
+{
+	background: lightgreen;
+}
+
+#overview:checked ~ #overlabel,
+#studentview:checked ~ #studentlabel,
+#questionview:checked ~ #questionlabel
+{
+	background: green;
+}
+
+.tab {
+	padding: 1ex 1em;
+	border-radius: 1ex 1ex 0ex 0ex;
+	float: left;
+	margin: 1em 3ex 0ex;
+}
+
+.page {
+	clear: both;
+	background: green;
+	padding: 1ex 1em;
+}
+
+.tabselect {
+	display: none;
+}
+
+body.open #disconnected,
+body.open #error
+{
+	display: none;
+}
+
+th {
+	background: #ff4;
+}
+
+td {
+	background: #ff8;
+	margin: 1px;
+}
