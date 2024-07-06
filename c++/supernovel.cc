@@ -1,6 +1,6 @@
 #include <webloop.hh>
-#include <luau.hh>
-#include <userdata.hh>
+#include "luau.hh"
+#include "userdata.hh"
 
 using namespace Webloop;
 class Player;
@@ -122,9 +122,11 @@ int main(int argc, char **argv) {
 		))
 	); // }}}
 
-	Userdata <PlayerMaker> userdata(game_db, player_config, {"html-player"}); //, "html-supervisor", "html-author"});
+	auto *userdata = new Userdata <PlayerMaker> (game_db, player_config, {"html-player"}); //, "html-supervisor", "html-author"});
 
 	Loop::get()->run();
+
+	delete userdata;
 
 	return 0;
 }

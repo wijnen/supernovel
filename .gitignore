@@ -4,6 +4,7 @@ network.py
 websocketd
 builders.js
 rpc.js
+userdata.js
 __pycache__/
 /doc/*.aux
 /doc/*.log
@@ -12,3 +13,4 @@ __pycache__/
 /doc/*.out
 /userdata.ini
 *.po~
+/c++/supernovel.elf

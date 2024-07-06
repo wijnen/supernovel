@@ -57,6 +57,12 @@ Interface:
 	- the object that is passed to it can use database commands; it must not include a user parameter.
 }}} */
 
+static std::string pstr(void *ptr) {
+	std::ostringstream out;
+	out << std::hex << (unsigned long)ptr << std::dec;
+	return out.str();
+}
+
 /* Translations. {{{
 def parse_translation(definition): // {{{
 	'''Convert a single po file into a dict.
@@ -151,7 +157,7 @@ public:
 	}
 	operator bool() const { return socket != nullptr; }
 	Access() : socket(nullptr), channel() {}
-	Access(Webloop::RPC <Connection> *obj, int channel) : socket(obj), channel(Webloop::WebInt::create(channel)) { WL_log("making access with obj " + std::to_string((long)obj)); }
+	Access(Webloop::RPC <Connection> *obj, int channel) : socket(obj), channel(Webloop::WebInt::create(channel)) {}
 	Access(Access <Connection> &&other) : socket(std::move(other.socket)), channel(std::move(other.channel)) {}
 	Access <Connection> &operator=(Access <Connection> &&other) { swap(other); return *this; }
 	void bgcall(std::string const &command, Webloop::Args args = {}, Webloop::KwArgs kwargs = {}, Webloop::RPC <Connection>::BgReply reply = nullptr) {
@@ -160,7 +166,6 @@ public:
 		socket->bgcall(command, realargs, kwargs ? kwargs : Webloop::WebMap::create(), reply);
 	}
 	Webloop::coroutine fgcall(std::string const &command, Webloop::Args args = {}, Webloop::KwArgs kwargs = {}) {
-		WL_log("socket " + std::to_string((long)socket));
 		auto realargs = args ? std::dynamic_pointer_cast <Webloop::WebVector> (args->copy()) : Webloop::WebVector::create();
 		realargs->insert(0, channel);
 		co_return YieldFrom(socket->fgcall(command, realargs, kwargs));
@@ -233,7 +238,7 @@ public:
 		} // }}}
 		void game_login_done(std::shared_ptr <Webloop::WebObject> ret) { // {{{
 			if (!*ret->as_bool()) {
-				WL_log("Failed to log in");
+				std::cerr << "Failed to log in to game userdata server" << std::endl;
 				throw "Failed to log in";
 			}
 			// login done, enable game access.
@@ -258,12 +263,9 @@ public:
 		static std::map <std::string, typename ConnectionBase::Published> published_funcs;
 		// This constructor is used for the local userdata. Almost everything is in a coroutine, so YieldFrom can be used.
 		Webloop::coroutine login_local() { // {{{
-			std::cout << "waiting for init " << std::hex << (long)userdata << std::dec << std::endl;
 			YieldFrom(rpc.websocket.wait_for_init());
-			std::cout << "waiting for init " << std::hex << (long)userdata << std::dec << std::endl;
 			rpc.set_disconnect_cb(&UserdataConnection::gamedata_closed);
 			rpc.set_error_cb(&UserdataConnection::game_login_failed);
-			WL_log("logging in local userdata");
 			rpc.bgcall("login_game", Webloop::WebVector::create(
 						Webloop::WebInt::create(1),
 						Webloop::WebString::create(userdata->usetup.login),
@@ -280,8 +282,7 @@ public:
 			rpc.websocket.set_name("game userdata");
 			this->published = &published_gamedata_funcs;
 			this->published_fallback = nullptr;
-			// Call the coroutine that handles the login.
-			login_local()();
+			// The rest is handled by login_local, which must be called from the actual object (this object is copied and destroyed immediately after creation).
 		} // }}}
 		UserdataConnection() : is_gamedata(true), userdata(nullptr), rpc() {}	// This is only used when generating userdata configuration; the object is not used in that case.
 		UserdataConnection &operator=(UserdataConnection &&other) { // {{{
@@ -301,7 +302,6 @@ public:
 				rpc(connection, this)
 		{
 			rpc.websocket.set_name("player userdata for " + name + " / " + gcid);
-			std::cout << "Owner = " + std::to_string(uint64_t(userdata)) << std::endl;
 			this->published = &published_funcs;
 			this->published_fallback = nullptr;
 			// setup_connect_impl handles connecting the userdata to the game.
@@ -424,6 +424,7 @@ public:
 				data()
 		{
 			STARTFUNC;
+			WL_log("make player " + pstr(this));
 			rpc.websocket.set_name("player " + gcid);
 			for (index = 0; index < userdata->usetup.game_port.size(); ++index) {
 				if (userdata->usetup.game_port[index] == connection.httpd->service)
@@ -434,10 +435,13 @@ public:
 			this->published_fallback = reinterpret_cast <ConnectionBase::PublishedFallback>(&Userdata <Player>::PlayerConnection::call_player);
 			rpc.set_disconnect_cb(reinterpret_cast <Webloop::RPC <ConnectionBase>::DisconnectCb> (&PlayerConnection::closed));
 			userdata->game_data.debug_socket("new player");
+			WL_log(pstr(this));
 			finish_init()();
+			WL_log("done making player " + pstr(this));
 		} // }}}
 		Webloop::coroutine finish_init(bool logged_out = false) { // {{{
 			STARTFUNC;
+			WL_log(pstr(this));
 			// Second stage of constructor. This is a separate function so it can yield.
 			// This is called for connections where a player should log in.
 			std::string reported_gcid;
@@ -506,6 +510,7 @@ public:
 		} // }}}
 		~PlayerConnection() { // {{{
 			STARTFUNC;
+			WL_log("kill player " + pstr(this));
 			rpc.disconnect();
 			closed();
 		} // }}}
@@ -605,7 +610,6 @@ public:
 			// Read info from file. This is supposed to happen only once.
 			assert(!initialized);
 			initialized = true;
-			WL_log("Initializing usetup");
 
 			std::ifstream cfg(userdata_config.userdata.value);
 			file_exists = cfg.is_open();
@@ -661,7 +665,7 @@ public:
 				Webloop::URL url(game_url);
 				game_port.push_back(url.service);
 			}
-			std::cout << "usetup " << std::hex << (long)this << std::dec << " state: " << file_exists << " " << data_url << " " << data_websocket << " " << game << " " << login << " " << password << " " << game_url << " " << default_userdata << " " << allow_local << " " << no_allow_other << " " << allow_new_players << std::endl;
+			//std::cout << "usetup " << std::hex << (long)this << std::dec << " state: " << file_exists << " " << data_url << " " << data_websocket << " " << game << " " << login << " " << password << " " << game_url << " " << default_userdata << " " << allow_local << " " << no_allow_other << " " << allow_new_players << std::endl;
 		} // }}}
 		// Do not allow copying.
 		USetup(USetup &other) = delete;
@@ -709,6 +713,7 @@ private:
 			std::tuple <std::string> key { gcid };
 			std::tuple <std::string, typename ServerType::Connection &> args { gcid, connection };
 			pending_gcid[gcid] = &players.emplace(std::piecewise_construct, key, args).first->second;
+			WL_log(pstr(&players.find(gcid)->second));
 			return;
 		}
 
@@ -1016,7 +1021,6 @@ public:
 			connected_cb(),
 			disconnected_cb()
 	{
-		std::cout << "usetup " << std::hex << (long)&usetup << std::dec << " init done." << std::endl;
 		if (userdata_config.userdata_setup.value) {
 			// Request for generating userdata config file. Do that and exit.
 			generate_userdata_configuration()();
@@ -1051,6 +1055,8 @@ public:
 		// }}} */
 
 		local = UserdataConnection(usetup.data_websocket, this);
+		// Call the coroutine that handles the login.
+		local.login_local()();
 	} // }}}
 }; // }}}
 
